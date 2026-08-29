@@ -8,6 +8,24 @@
 
 它不生产浮标，不替代 Argo 数据中心，也不是另一个通用地图或聊天框架。Argo 负责“测到海里发生了什么”，各类数据服务负责“把数据提供出来”，本项目负责“把不同来源放到同一个海域、时间和事件上下文中，说明哪些只是观测，哪些值得继续核查，以及结论依据是什么”。
 
+## 开始前先看：公网入口、体验群与必备账号
+
+**当前公网地址：** [https://ocean.hegelsalon.com/](https://ocean.hegelsalon.com/)
+
+这个地址是当前部署的访问入口。公网服务依赖服务器、Cloudflare Tunnel/Caddy 和上游数据服务，任何一项临时维护都可能导致短时不可访问；遇到问题时请先看本文“常见问题”和部署日志。
+
+### 知海使用体验群
+
+![知海使用体验群二维码](docs/assets/wechat-experience-group-qr.jpg)
+
+扫码后加入“知海使用体验群”。二维码来自群聊截图，图片上标注的有效期为 **2026 年 9 月 5 日前**；二维码失效后请以群主重新发布的二维码为准，不要把失效二维码当作永久邀请链接。
+
+### 必须准备 Copernicus Marine 账号
+
+本项目的实时海流、风场、波浪、历史点位、全球数据量和部分每日简报都直接读取 Copernicus Marine。**要把项目当作实时海洋数据系统使用，必须先注册 Copernicus Marine 账号，并在启动项目之前配置用户名和密码。**
+
+没有账号或凭据错误时，页面可能仍能打开，但这不代表实时数据可用；相关接口会返回凭据错误、上游错误或最近缓存。注册和配置步骤见[“Copernicus Marine：从零开始配置”](#copernicus-config)。
+
 ## 一、项目定位、比较与核心问题
 
 ### 1. 与 Argo 的关系
@@ -457,9 +475,11 @@ GET /api/daily-briefing/dashboard
 - Python 3.10 或更高版本；
 - Node.js 20 或更高版本；
 - npm；
+- 已注册并验证的 Copernicus Marine 账号；
+- 已设置 `COPERNICUSMARINE_USERNAME` 和 `COPERNICUSMARINE_PASSWORD`；
 - 如需 Codex 工作台，需安装并可运行 Codex CLI。
 
-双击：
+第一次启动前，先完成[“Copernicus Marine：从零开始配置”](#copernicus-config)。然后双击：
 
 ```text
 run_ocean_intelligence.bat
@@ -528,7 +548,8 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 - 开发环境默认 `AUTH_REQUIRED=false`，便于本地调试；
 - 生产 Compose 固定设置 `AUTH_REQUIRED=true`；
-- 未配置实时外部服务时，部分功能会使用缓存、内置证据或情景数据，并在数据模式中明确标记；
+- Copernicus Marine 账号和项目变量是实时海流、风、浪、数据量统计及完整简报的必需配置；
+- 凭据缺失或上游故障时，部分页面可能仍显示缓存、内置证据或情景数据；必须根据数据模式和观测时次判断，不能把页面可见等同于实时数据可用；
 - Vite 会把普通 `/api` 请求代理到 `8000`，Codex 相关请求代理到 `8011`。
 
 ## 八、环境变量配置
@@ -550,7 +571,195 @@ VITE_API_ROOT=
 
 生产构建必须配置 `VITE_TIANDITU_TOKEN`。建议在天地图控制台中把密钥限制到实际生产域名。
 
-### 2. Copernicus Marine
+<a id="copernicus-config"></a>
+
+### 2. Copernicus Marine：从零开始配置
+
+#### 2.1 这组账号为什么是必需的
+
+Copernicus Marine 是本项目的上游海洋数据服务。这里要求的是 Copernicus Marine 官方账号，不是本项目的网页登录账号。后端在服务器端使用该账号读取海流、风场、波浪、历史点位和全球数据量，并把数据来源、观测时次和延迟显示在页面上。
+
+| 功能 | 主要用途 | 没有 Copernicus 凭据时的结果 |
+| --- | --- | --- |
+| 海流 | 读取 utotal / vtotal 矢量场并绘制海流动画 | 海流场请求失败，不能把动画当作实时结果 |
+| 风场 | 读取小时级海面风数据 | 风速、风向和相关异常无法实时刷新 |
+| 波浪 | 读取有效波高、周期等波浪变量 | 波浪点位请求失败 |
+| 历史点位 | 查询事件坐标附近的历史海洋场 | 只能显示缓存或明确标记的替代数据 |
+| 全球数据量 | 统计当前产品的全球有效网格记录 | 全球数据量接口返回凭据错误 |
+| 每日简报 | 补充 Copernicus 产品状态和数据量 | 简报会标记来源缺失或降级 |
+
+所以，开发环境“能打开网页”不等于功能完整。只有账号验证成功、项目变量设置正确，并且运行机器能够访问 Copernicus 官方端点，才算配置完成。
+
+#### 2.2 注册账号
+
+1. 打开官方入口：[Copernicus Marine Data Store](https://data.marine.copernicus.eu/)。
+2. 点击页面上的 Register 或 Create account。注册本身免费；如果官网改版，以当前页面按钮为准。
+3. 填写姓名、邮箱、国家/地区和组织信息。没有单位的个人用户按页面提示选择个人、其他或相近选项，不要编造机构。
+4. 提交后打开注册邮箱，点击 Copernicus 发来的验证链接。也要检查垃圾邮件、广告邮件和企业邮箱隔离区。
+5. 验证完成后，按邮件中的链接设置密码。官方当前要求是：至少 12 个字符，并同时包含大写字母、小写字母、数字和特殊字符。
+6. 保存账号信息。Copernicus 通常会提供用户名；邮箱地址也可以作为登录名，所以不确定用户名时先尝试注册邮箱。
+7. 回到 Data Store 网页手动登录一次。能登录网页只说明账号有效，仍需完成下一步的 Toolbox 检查和项目变量配置。
+
+官方注册说明见：[How to sign up for Copernicus Marine Service](https://help.marine.copernicus.eu/en/articles/4220332-how-to-sign-up-for-copernicus-marine-service)。
+
+#### 2.3 用官方 Toolbox 先做一次凭据检查
+
+项目依赖 copernicusmarine Python 包，版本范围见 backend/requirements.txt。先安装依赖：
+
+~~~bash
+cd backend
+python -m pip install -r requirements.txt
+~~~
+
+Linux/macOS 在当前终端执行：
+
+~~~bash
+export COPERNICUSMARINE_SERVICE_USERNAME='你的 Copernicus 用户名或邮箱'
+export COPERNICUSMARINE_SERVICE_PASSWORD='你的 Copernicus 密码'
+copernicusmarine login --check-credentials-valid
+~~~
+
+Windows PowerShell 在当前终端执行：
+
+~~~powershell
+$env:COPERNICUSMARINE_SERVICE_USERNAME = "你的 Copernicus 用户名或邮箱"
+$env:COPERNICUSMARINE_SERVICE_PASSWORD = "你的 Copernicus 密码"
+copernicusmarine login --check-credentials-valid
+~~~
+
+如果系统提示找不到命令，请在项目虚拟环境中执行：
+
+~~~powershell
+.\.venv\Scripts\copernicusmarine.exe login --check-credentials-valid
+~~~
+
+这一步使用的 SERVICE_USERNAME / SERVICE_PASSWORD 是官方 Toolbox 的变量名。**本项目后端读取的是下一小节中的项目变量，不能只配置官方变量。**官方凭据说明见：[Copernicus Marine Toolbox credentials configuration](https://help.marine.copernicus.eu/en/articles/8185007-copernicus-marine-toolbox-credentials-configuration)。
+
+#### 2.4 配置本项目真正读取的变量
+
+项目后端读取的最小配置是：
+
+~~~dotenv
+COPERNICUSMARINE_USERNAME=你的 Copernicus 用户名或邮箱
+COPERNICUSMARINE_PASSWORD=你的 Copernicus 密码
+~~~
+
+不要把真实密码提交到 Git，也不要写进 README、截图、Issue 或聊天记录。建议只保存在运行机器的环境变量、权限为 600 的生产环境文件或密码管理器中。
+
+**Windows 临时配置（第一次测试推荐）**
+
+在启动项目的同一个 PowerShell 窗口中执行：
+
+~~~powershell
+$env:COPERNICUSMARINE_USERNAME = "你的 Copernicus 用户名或邮箱"
+$env:COPERNICUSMARINE_PASSWORD = "你的 Copernicus 密码"
+powershell -ExecutionPolicy Bypass -File .\start_ocean_intelligence.ps1
+~~~
+
+关闭窗口后，$env: 设置会消失。要让新开的终端也能读取，可以写入当前 Windows 用户的环境变量，然后关闭并重新打开终端：
+
+~~~powershell
+[Environment]::SetEnvironmentVariable("COPERNICUSMARINE_USERNAME", "你的 Copernicus 用户名或邮箱", "User")
+[Environment]::SetEnvironmentVariable("COPERNICUSMARINE_PASSWORD", "你的 Copernicus 密码", "User")
+~~~
+
+项目的 Windows 启动脚本会读取这两个用户级变量并传给后端。共享电脑不建议保存用户级明文变量，应改用专用服务账号和操作系统的密钥管理方案。
+
+**Linux/macOS 临时配置**
+
+~~~bash
+export COPERNICUSMARINE_USERNAME='你的 Copernicus 用户名或邮箱'
+export COPERNICUSMARINE_PASSWORD='你的 Copernicus 密码'
+~~~
+
+若要持久化，请写入仅当前用户可读的密钥文件或服务管理器 Secret，而不是公开的 .env 文件：
+
+~~~bash
+chmod 600 ~/.config/ocean-intelligence/copernicus.env
+~~~
+
+文件内容仍使用上面的两行变量名；加载前确认文件路径不会被 Web 服务器暴露。
+
+**Docker/Ubuntu 生产配置**
+
+~~~bash
+cp deploy/production.env.example deploy/production.env
+chmod 600 deploy/production.env
+~~~
+
+编辑 deploy/production.env，填入真实值：
+
+~~~dotenv
+COPERNICUSMARINE_USERNAME=你的 Copernicus 用户名或邮箱
+COPERNICUSMARINE_PASSWORD=你的 Copernicus 密码
+~~~
+
+生产 Compose 会把这两个值注入 app 和 copernicus-indexer 容器；不要把它们写进 compose.prod.yaml。密码如果含有 #、空格或引号，按 Docker Compose dotenv 语法引用，并在部署前用 config --quiet 检查配置，不要用 echo 把密码打印到日志。
+
+#### 2.5 数据集和变量默认值
+
+通常不需要修改数据集 ID。只有 Copernicus 产品迁移、账号无权访问某产品或需要切换产品版本时才改：
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| COPERNICUSMARINE_WAVE_DATASET_ID | cmems_mod_glo_wav_anfc_0.083deg_PT3H-i | 全球波浪分析预报 |
+| COPERNICUSMARINE_WIND_DATASET_ID | cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H | 全球小时级海面风场 |
+| COPERNICUSMARINE_CURRENT_DATASET_ID | cmems_mod_glo_phy_anfc_merged-uv_PT1H-i | 全球小时级海流分析预报 |
+| COPERNICUSMARINE_CURRENT_U_VARIABLE | utotal | 东向海流分量 |
+| COPERNICUSMARINE_CURRENT_V_VARIABLE | vtotal | 北向海流分量 |
+
+实时海流使用官方 time-chunked ARCO 数据块，避免每次请求加载完整时间轴。需要覆盖地址时再设置 COPERNICUSMARINE_CURRENT_ARCO_URL，不要把普通网页下载链接当作 ARCO 地址。
+
+#### 2.6 网络和防火墙要求
+
+运行机器必须能访问 Copernicus Marine 的认证和对象存储服务。官方说明列出的常见端点包括：
+
+- auth.marine.copernicus.eu：账号认证；
+- stac.marine.copernicus.eu：产品元数据；
+- s3.waw3-1.cloudferro.com、s3.waw4-1.cloudferro.com：ARCO/对象存储数据。
+
+一般只需要允许出站 HTTPS（TCP 443），不需要把这些地址暴露到公网，也不需要把 Copernicus 密码交给浏览器。企业代理或防火墙拦截时，请让运维人员配置 HTTPS 代理或白名单，然后重新执行账号验证。完整安装说明见：[Copernicus Marine Toolbox installation](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-installation)。
+
+#### 2.7 配置完成后的验收
+
+按下面顺序检查，任何一步失败都先修复再继续：
+
+1. copernicusmarine login --check-credentials-valid 返回凭据有效；
+2. 后端启动日志中不再出现“Copernicus Marine 凭证未配置”；
+3. 浏览器打开项目后，来源状态中的 Copernicus 不应显示 degraded 或 missing_credentials；
+4. 在 API 文档 http://127.0.0.1:8000/docs 试跑以下接口：
+
+~~~text
+GET /api/copernicus/index/status
+GET /api/copernicus/global/daily-volume
+GET /api/copernicus/currents/field
+GET /api/copernicus/waves/point
+GET /api/copernicus/wind/point
+~~~
+
+5. 地图点选海域，确认海流、风和波浪卡片显示真实观测时次、数据源和延迟，而不是“缓存”“情景”或“未配置”；
+6. 生产环境检查：
+
+~~~bash
+docker compose --env-file deploy/production.env -f compose.prod.yaml config --quiet
+docker compose --env-file deploy/production.env -f compose.prod.yaml ps
+docker compose --env-file deploy/production.env -f compose.prod.yaml logs --tail=100 app
+~~~
+
+#### 2.8 常见错误怎么判断
+
+| 现象 | 常见原因 | 处理方式 |
+| --- | --- | --- |
+| 凭证未配置 | 没设置项目变量，或只设置了官方 SERVICE_* 变量 | 同时设置 COPERNICUSMARINE_USERNAME/PASSWORD，重启后端 |
+| 401 / 403 | 用户名、密码错误，账号未验证或无产品权限 | 先登录 Data Store，再重新运行 Toolbox 检查 |
+| 连接超时、DNS 失败 | 防火墙、代理或 DNS 无法访问官方端点 | 放行出站 443，检查代理和服务器 DNS |
+| 数据集或变量不存在 | ID/变量拼写错误，或上游产品已迁移 | 恢复本节默认值，并查看 Copernicus 产品目录 |
+| 接口返回缓存 | 上游暂时不可用或请求仍在更新 | 看响应里的数据模式、观测时次和来源错误，不要把缓存称为实时 |
+| 页面能开但地图没有数据 | 前端启动了，后端没有拿到凭据 | 在启动前设置变量，完全停止并重新启动后端 |
+
+密码重置、账号停用或产品授权问题只能在 Copernicus 官方账户侧解决；项目本身无法替代官方账号管理。
+
+#### 2.9 最小变量速查
 
 ```dotenv
 COPERNICUSMARINE_USERNAME=
@@ -718,6 +927,8 @@ DELETE /api/codex/mcp
 
 当前生产方案面向 Ubuntu 22.04 单机。
 
+当前公网入口是 [https://ocean.hegelsalon.com/](https://ocean.hegelsalon.com/)，默认生产环境示例已经使用 `ocean.hegelsalon.com`。部署到自己的域名时，必须同时修改 `SITE_HOST`、`SITE_ADDRESS`、`SITE_ORIGIN` 和天地图密钥的域名白名单。
+
 ### 1. 准备配置
 
 ```bash
@@ -733,7 +944,16 @@ chmod 600 deploy/production.env
 - `ENCRYPTION_KEY`；
 - `DEPLOY_TRANSPORT`；
 - tunnel 模式下的 `TUNNEL_TOKEN`；
-- 如启用实时 Copernicus Marine，则填写其账户信息。
+- **必须填写** `COPERNICUSMARINE_USERNAME` 和 `COPERNICUSMARINE_PASSWORD`；
+- `OCEAN_CODEX_MCP_TOKEN`，可使用安全随机值。
+
+不要直接使用示例文件中的 `replace_with_...` 占位值。先做 Compose 配置检查：
+
+~~~bash
+docker compose --env-file deploy/production.env -f compose.prod.yaml config --quiet
+~~~
+
+命令没有报错后再部署。Copernicus 凭据缺失时，生产配置检查和部署脚本会直接失败，避免服务看似上线但实时海洋数据不可用。
 
 ### 2. 执行部署
 
@@ -894,11 +1114,17 @@ GET /api/sources?region=global_ocean
 GET /api/workspace/snapshot?region=global_ocean
 ```
 
-若来源状态为降级，系统可能正在返回最近可信缓存。确认服务器能够访问外部数据服务，并检查后端日志和相应账户配置。
+若来源状态为降级，系统可能正在返回最近可信缓存。先按[“Copernicus Marine：从零开始配置”](#copernicus-config)验证官方账号，再确认后端进程或容器中存在 `COPERNICUSMARINE_USERNAME/PASSWORD`，最后检查服务器能否访问官方认证和对象存储端点。
+
+### Copernicus 网页能登录，但项目仍提示“凭证未配置”
+
+最常见原因是只设置了官方 Toolbox 的 `COPERNICUSMARINE_SERVICE_USERNAME/PASSWORD`。本项目读取的是 `COPERNICUSMARINE_USERNAME/PASSWORD`。补齐项目变量后，必须完全停止并重新启动后端；只刷新浏览器不会重新加载服务端环境变量。
+
+不要在日志或 Issue 中粘贴真实密码。需要排查时只确认变量是否存在和字符长度，不要输出变量值。
 
 ### 地图没有真实海流动画
 
-检查 Copernicus Marine 用户名、密码、数据集 ID 和 ARCO 地址。接口 `/api/copernicus/currents/field` 必须能返回有效矢量场。
+依次检查 Copernicus Marine 账号验证、项目变量、数据集 ID、服务器网络和 ARCO 地址。接口 `/api/copernicus/currents/field` 必须返回包含实际观测时次的有效矢量场。粒子动画是对网格海流的可视化，不是现场流速仪直播，也不能在接口失败时用随机动画代替。
 
 ### Agent 工作台不可用
 

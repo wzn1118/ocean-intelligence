@@ -76,6 +76,15 @@ $lines = @(
     "REALTIME_CACHE_TTL_SECONDS=300"
     "EVENT_TYPE_RECORD_TARGET=100"
     "OCEAN_CODEX_MCP_TOKEN=$(New-RandomHex 32)"
+    ""
+    "# Required: replace both values with a verified Copernicus Marine account."
+    "COPERNICUSMARINE_USERNAME=replace_with_your_copernicus_username_or_email"
+    "COPERNICUSMARINE_PASSWORD=replace_with_your_copernicus_password"
+    "COPERNICUSMARINE_WAVE_DATASET_ID=cmems_mod_glo_wav_anfc_0.083deg_PT3H-i"
+    "COPERNICUSMARINE_WIND_DATASET_ID=cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H"
+    "COPERNICUSMARINE_CURRENT_DATASET_ID=cmems_mod_glo_phy_anfc_merged-uv_PT1H-i"
+    "COPERNICUSMARINE_CURRENT_U_VARIABLE=utotal"
+    "COPERNICUSMARINE_CURRENT_V_VARIABLE=vtotal"
 )
 
 $resolvedOutput = [IO.Path]::GetFullPath($OutputPath)

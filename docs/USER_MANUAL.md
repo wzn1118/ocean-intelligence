@@ -1110,7 +1110,7 @@ chmod 600 deploy/production.env
 - `ENCRYPTION_KEY`；
 - `OCEAN_CODEX_MCP_TOKEN`；
 - tunnel 模式下的 `TUNNEL_TOKEN`；
-- 需要实时 Copernicus 时的账户信息。
+- **必须填写** Copernicus Marine 账户信息；实时海流、风、浪和全球数据量功能依赖该账号。
 
 ### 3. 选择网络模式
 

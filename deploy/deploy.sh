@@ -15,6 +15,19 @@ set -a
 . "$environment_file"
 set +a
 
+if [ -z "${COPERNICUSMARINE_USERNAME:-}" ] || \
+   [ "$COPERNICUSMARINE_USERNAME" = "replace_with_your_copernicus_username_or_email" ]; then
+  echo "Set a real COPERNICUSMARINE_USERNAME in $environment_file." >&2
+  echo "Registration and verification steps are in README.md section 8.2." >&2
+  exit 1
+fi
+if [ -z "${COPERNICUSMARINE_PASSWORD:-}" ] || \
+   [ "$COPERNICUSMARINE_PASSWORD" = "replace_with_your_copernicus_password" ]; then
+  echo "Set a real COPERNICUSMARINE_PASSWORD in $environment_file." >&2
+  echo "Never commit this password to source control." >&2
+  exit 1
+fi
+
 transport="${DEPLOY_TRANSPORT:-direct}"
 case "$transport" in
   direct)

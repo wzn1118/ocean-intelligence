@@ -26,7 +26,15 @@ foreach ($key in @(
     'OCEAN_AGENT_REASONING_EFFORT',
     'OCEAN_AGENT_CIRCUIT_FAILURES',
     'OCEAN_AGENT_CIRCUIT_COOLDOWN_SECONDS',
-    'OCEAN_CODEX_BIN'
+    'OCEAN_CODEX_BIN',
+    'COPERNICUSMARINE_USERNAME',
+    'COPERNICUSMARINE_PASSWORD',
+    'COPERNICUSMARINE_WAVE_DATASET_ID',
+    'COPERNICUSMARINE_WIND_DATASET_ID',
+    'COPERNICUSMARINE_CURRENT_DATASET_ID',
+    'COPERNICUSMARINE_CURRENT_U_VARIABLE',
+    'COPERNICUSMARINE_CURRENT_V_VARIABLE',
+    'COPERNICUSMARINE_CURRENT_ARCO_URL'
 )) {
     if (-not [Environment]::GetEnvironmentVariable($key, 'Process')) {
         $userValue = [Environment]::GetEnvironmentVariable($key, 'User')
@@ -35,6 +43,13 @@ foreach ($key in @(
         }
     }
 }
+
+$copernicusUsername = [Environment]::GetEnvironmentVariable('COPERNICUSMARINE_USERNAME', 'Process')
+$copernicusPassword = [Environment]::GetEnvironmentVariable('COPERNICUSMARINE_PASSWORD', 'Process')
+if ([string]::IsNullOrWhiteSpace($copernicusUsername) -or [string]::IsNullOrWhiteSpace($copernicusPassword)) {
+    throw 'Copernicus Marine credentials are required. Set COPERNICUSMARINE_USERNAME and COPERNICUSMARINE_PASSWORD, then reopen PowerShell or set them in this process. See README.md section 8.2.'
+}
+
 if (-not [Environment]::GetEnvironmentVariable('ENCRYPTION_KEY', 'Process')) {
     if (Test-Path -LiteralPath $credentialKeyPath) {
         $credentialKey = (Get-Content -LiteralPath $credentialKeyPath -Raw).Trim()
