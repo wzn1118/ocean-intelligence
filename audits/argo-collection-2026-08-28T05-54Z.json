@@ -1,0 +1,59 @@
+{
+  "started_at": "2026-08-28T05:54:12.264854+00:00",
+  "completed_at": "2026-08-28T05:55:50.269313+00:00",
+  "duration_seconds": 98.004459,
+  "interval_seconds": 7200,
+  "sample_limit": 16,
+  "status": "completed",
+  "last_error": null,
+  "regions": [
+    {
+      "region_id": "south_china_sea",
+      "duration_seconds_approx": 16.2,
+      "profile_count": 19,
+      "float_count": 5,
+      "bgc_float_count": 1,
+      "sample_count": 5,
+      "failures": 0,
+      "latest_observation_at": "2026-08-26T12:07:25.000Z",
+      "source_status": "live",
+      "cache_bytes": 16500250,
+      "event_count": 4083
+    },
+    {
+      "region_id": "northwest_pacific",
+      "duration_seconds_approx": 28.2,
+      "profile_count": 1415,
+      "float_count": 376,
+      "bgc_float_count": 67,
+      "sample_count": 16,
+      "failures": 0,
+      "latest_observation_at": "2026-08-27T01:41:55.000Z",
+      "source_status": "live",
+      "cache_bytes": 18926329,
+      "event_count": 4540
+    },
+    {
+      "region_id": "global_ocean",
+      "duration_seconds_approx": 53.5,
+      "profile_count": 16631,
+      "float_count": 4250,
+      "bgc_float_count": 907,
+      "sample_count": 16,
+      "failures": 0,
+      "latest_observation_at": "2026-08-27T04:54:30.000Z",
+      "source_status": "live",
+      "cache_bytes": 26198117,
+      "event_count": 4976
+    }
+  ],
+  "resource_snapshot": {
+    "container_health": "healthy",
+    "oom_killed": false,
+    "restart_count": 0,
+    "cpu_percent": 0.2,
+    "memory_used_mib": 749.1,
+    "memory_limit_gib": 7.764,
+    "memory_percent": 9.42
+  }
+}

@@ -1,0 +1,3 @@
+# Copernicus daily named-area index: 05:00 Asia/Shanghai (21:00 UTC previous day).
+CRON_TZ=Asia/Shanghai
+0 5 * * * /opt/ocean-intelligence/scripts/run-copernicus-daily-index.sh

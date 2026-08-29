@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ocean-intelligence
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: REALTIME_CACHE_TTL_SECONDS
+        value: "300"
+      - key: EVENT_TYPE_RECORD_TARGET
+        value: "100"

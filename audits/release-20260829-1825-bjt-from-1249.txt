@@ -1,0 +1,7 @@
+Release label: release-20260829-1825-bjt-from-1249
+Pinned application source image: ocean-intelligence:anomaly-linkage-l5-20260829
+Source image created: 2026-08-29T04:49:54.507440049Z
+Source time in Beijing: 2026-08-29 12:49:54 CST
+Expected image ID: sha256:959dfc8f166ad847a8659e6b89dc172625c5eaf482173eb8e6dcecd91a934925
+Compose pull policy: never
+Note: runtime data is stored in a separate Docker volume and is not part of this image.

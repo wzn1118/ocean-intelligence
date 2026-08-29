@@ -1,0 +1,85 @@
+{
+  "source": "C:\\Users\\10847\\Documents\\Codex\\2026-08-22\\ocean-art-prototype-a-tide-print-sol\\outputs\\ocean-intelligence-art-direction\\background-study\\tide-trace-background-1600x900.png",
+  "assets": [
+    {
+      "file": "ocean-poster-lightblue-2048x1152.png",
+      "width": 2048,
+      "height": 1152,
+      "mode": "RGB",
+      "theme": "light-blue",
+      "generator": "gpt-image-2"
+    },
+    {
+      "file": "ocean-workspace-print-1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "mode": "RGB"
+    },
+    {
+      "file": "mission-tide-print-2048x360.png",
+      "width": 2048,
+      "height": 360,
+      "mode": "RGB"
+    },
+    {
+      "file": "event-rail-tide-print-820x2200.png",
+      "width": 820,
+      "height": 2200,
+      "mode": "RGB"
+    },
+    {
+      "file": "detail-rail-tide-print-820x2200.png",
+      "width": 820,
+      "height": 2200,
+      "mode": "RGB"
+    },
+    {
+      "file": "reading-surface-print-1024x1024.png",
+      "width": 1024,
+      "height": 1024,
+      "mode": "RGB"
+    },
+    {
+      "file": "brand-offset-mark.png",
+      "width": 423,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "event-stamps/event-stamp-01.png",
+      "width": 374,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "event-stamps/event-stamp-02.png",
+      "width": 478,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "event-stamps/event-stamp-03.png",
+      "width": 443,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "event-stamps/event-stamp-04.png",
+      "width": 361,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "event-stamps/event-stamp-05.png",
+      "width": 503,
+      "height": 512,
+      "mode": "RGBA"
+    },
+    {
+      "file": "event-stamps/event-stamp-06.png",
+      "width": 512,
+      "height": 473,
+      "mode": "RGBA"
+    }
+  ]
+}

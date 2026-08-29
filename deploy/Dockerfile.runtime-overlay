@@ -1,0 +1,9 @@
+ARG BASE_IMAGE=ocean-intelligence:production
+FROM ${BASE_IMAGE}
+
+USER root
+COPY backend/app /app/backend/app
+COPY frontend/dist /app/frontend-dist
+RUN python -m compileall -q /app/backend/app \
+    && chown -R ocean:ocean /app/backend/app
+USER ocean

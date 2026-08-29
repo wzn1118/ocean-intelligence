@@ -1,0 +1,807 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from math import sin
+
+from app.models import DataPoint, Evidence, OceanEvent, ReasoningStep, ScientificReference, TimelineItem
+
+
+NOW = datetime(2026, 8, 22, 0, 0, tzinfo=UTC)
+
+
+REFERENCES: dict[str, list[ScientificReference]] = {
+    "marine_heatwave": [
+        ScientificReference(
+            id="REF-MHW-01",
+            citation="Hobday 等（2016）：《海洋热浪定义的分层方法》",
+            year=2016,
+            doi="10.1016/j.pocean.2015.12.014",
+            relevance="支持以相对气候态阈值、持续时间和强度刻画海表温度异常。",
+            variables=["SST", "duration", "severity"],
+        ),
+        ScientificReference(
+            id="REF-MHW-02",
+            citation="Hobday 等（2018）：《海洋热浪的分级与命名》",
+            year=2018,
+            doi="10.5670/oceanog.2018.205",
+            relevance="提供用于沟通事件强度与等级的统一术语。",
+            variables=["SST", "severity"],
+        ),
+        ScientificReference(
+            id="REF-MHW-03",
+            citation="Chelton、Schlax 与 Samelson（2011）：《非线性中尺度涡的全球观测》",
+            year=2011,
+            doi="10.1016/j.pocean.2010.12.002",
+            relevance="支持将同位海面高度异常和环流解释为中尺度热量滞留背景。",
+            variables=["SLA", "CURRENT", "heat retention"],
+        ),
+    ],
+    "phytoplankton_bloom": [
+        ScientificReference(
+            id="REF-BLOOM-01",
+            citation="Behrenfeld 与 Falkowski（1997）：《由卫星叶绿素浓度推算光合速率》",
+            year=1997,
+            doi="10.4319/lo.1997.42.1.0001",
+            relevance="支持使用海色叶绿素表征浮游植物生物量和初级生产变化。",
+            variables=["CHLA", "primary production"],
+        ),
+        ScientificReference(
+            id="REF-BLOOM-02",
+            citation="McGillicuddy 等（2007）：《涡旋与风相互作用激发大洋中部异常浮游生物暴发》",
+            year=2007,
+            doi="10.1126/science.1136256",
+            relevance="将中尺度强迫和营养盐补给与藻华发展联系起来，支持混合机制解释。",
+            variables=["CHLA", "CURRENT", "NITRATE"],
+        ),
+        ScientificReference(
+            id="REF-BLOOM-03",
+            citation="Johnson 与 Claustre 主编（2016）：《生物地球化学 Argo 浮标阵列的科学依据、设计与实施方案》",
+            year=2016,
+            doi="10.13155/46601",
+            relevance="为使用 BGC-Argo 剖面约束硝酸盐和生物光学藻华证据提供观测系统依据。",
+            variables=["BGC-Argo", "CHLA", "NITRATE"],
+        ),
+    ],
+    "eddy": [
+        ScientificReference(
+            id="REF-EDDY-01",
+            citation="Chelton、Schlax 与 Samelson（2011）：《非线性中尺度涡的全球观测》",
+            year=2011,
+            doi="10.1016/j.pocean.2010.12.002",
+            relevance="支持根据海面高度异常和地转流速识别相干中尺度结构。",
+            variables=["SLA", "CURRENT", "radius"],
+        ),
+        ScientificReference(
+            id="REF-EDDY-02",
+            citation="McGillicuddy 等（2007）：《涡旋与风相互作用激发大洋中部异常浮游生物暴发》",
+            year=2007,
+            doi="10.1126/science.1136256",
+            relevance="为解释涡旋内部叶绿素响应提供物理—生物机制依据。",
+            variables=["SLA", "CHLA", "mixing"],
+        ),
+    ],
+    "carbon_anomaly": [
+        ScientificReference(
+            id="REF-CARBON-01",
+            citation="Takahashi 等（2009）：《表层海洋 pCO2 气候平均态及年代际变化》",
+            year=2009,
+            doi="10.1016/j.dsr2.2008.12.009",
+            relevance="为解释表层 pCO2 残差异常提供气候态与年代际背景。",
+            variables=["PCO2", "SST", "air-sea CO2 flux"],
+        ),
+        ScientificReference(
+            id="REF-CARBON-02",
+            citation="Dickson 等（2007）：《海洋二氧化碳测量最佳实践指南》",
+            year=2007,
+            doi=None,
+            relevance="规定与 pCO2 和 DIC 证据相关的测量及碳酸盐体系报告规范。",
+            variables=["PCO2", "DIC", "TA"],
+        ),
+    ],
+    "cold_anomaly": [
+        ScientificReference(
+            id="REF-COLD-01",
+            citation="de Boyer Montégut 等（2004）：《全球海洋混合层深度》",
+            year=2004,
+            doi="10.1029/2004JC002378",
+            relevance="支持利用混合层深度和剖面气候态解释表层降温与混合事件。",
+            variables=["SST", "MIXED_LAYER", "WIND"],
+        ),
+        ScientificReference(
+            id="REF-COLD-02",
+            citation="Roemmich 等（2009）：《Argo 计划：利用剖面浮标观测全球海洋》",
+            year=2009,
+            doi="10.5670/oceanog.2009.36",
+            relevance="说明用于验证次表层与混合层解释的现场剖面观测系统。",
+            variables=["profiles", "SST", "MIXED_LAYER"],
+        ),
+    ],
+    "current_anomaly": [
+        ScientificReference(
+            id="REF-CURRENT-01",
+            citation="Chelton、Schlax 与 Samelson（2011）：《非线性中尺度涡的全球观测》",
+            year=2011,
+            doi="10.1016/j.pocean.2010.12.002",
+            relevance="支持在表层流分析中联系海面高度梯度与地转流异常。",
+            variables=["CURRENT", "SSH", "SLA"],
+        ),
+        ScientificReference(
+            id="REF-CURRENT-02",
+            citation="Wunsch 与 Ferrari（2004）：《垂向混合、能量与海洋大尺度环流》",
+            year=2004,
+            doi="10.1146/annurev.fluid.36.050802.121944",
+            relevance="为区分表层输运异常和深度积分环流提供理论框架。",
+            variables=["CURRENT", "mixing", "transport"],
+        ),
+    ],
+}
+
+
+def _series(
+    observed: float,
+    baseline: float,
+    days: int = 14,
+    growth: float = 1.0,
+) -> list[DataPoint]:
+    points: list[DataPoint] = []
+    for index in range(days):
+        progress = index / (days - 1)
+        seasonal = sin(index * 0.65) * abs(observed - baseline) * 0.08
+        value = baseline + (observed - baseline) * (progress**growth) + seasonal
+        points.append(
+            DataPoint(
+                timestamp=NOW - timedelta(days=days - 1 - index),
+                value=round(value, 3),
+                baseline=baseline,
+            )
+        )
+    return points
+
+
+def _evidence(
+    event_id: str,
+    suffix: str,
+    source: str,
+    variable: str,
+    observed: float,
+    baseline: float,
+    unit: str,
+    method: str,
+    confidence: float,
+) -> Evidence:
+    return Evidence(
+        id=f"{event_id}-E{suffix}",
+        source=source,
+        variable=variable,
+        observed=observed,
+        baseline=baseline,
+        anomaly=round(observed - baseline, 3),
+        unit=unit,
+        timestamp=NOW - timedelta(hours=int(suffix) * 2),
+        method=method,
+        confidence=confidence,
+        series=_series(observed, baseline),
+        sample_count=14,
+        temporal_span_hours=13 * 24,
+        validation_state="scenario",
+    )
+
+
+def _timeline(start_days: int) -> list[TimelineItem]:
+    return [
+        TimelineItem(
+            timestamp=NOW - timedelta(days=start_days),
+            label="超过事件阈值",
+            state="detected",
+        ),
+        TimelineItem(
+            timestamp=NOW - timedelta(days=max(start_days - 3, 1)),
+            label="多源观测确认",
+            state="observed",
+        ),
+        TimelineItem(
+            timestamp=NOW - timedelta(hours=12),
+            label="最新严重度更新",
+            state="intensified",
+        ),
+        TimelineItem(
+            timestamp=NOW + timedelta(days=3),
+            label="下一次预报检查",
+            state="forecast",
+        ),
+    ]
+
+
+def _catalog_event(
+    *,
+    event_id: str,
+    event_type: str,
+    title: str,
+    summary: str,
+    region: str,
+    centroid: tuple[float, float],
+    radius_km: float,
+    start_days: int,
+    status: str,
+    severity: float,
+    severity_label: str,
+    confidence: float,
+    affected_area_km2: float,
+    variables: list[str],
+    sources: list[str],
+    observations: list[tuple[str, str, float, float, str, str, float]],
+    reasoning: list[tuple[str, str, list[int], list[str], float]],
+    potential_impacts: list[str],
+    uncertainty: str,
+) -> OceanEvent:
+    evidence = [
+        _evidence(event_id, str(index), *observation)
+        for index, observation in enumerate(observations, start=1)
+    ]
+    reasoning_chain = [
+        ReasoningStep(
+            order=index,
+            claim=claim,
+            mechanism=mechanism,
+            evidence_ids=[f"{event_id}-E{evidence_index}" for evidence_index in evidence_indexes],
+            reference_ids=reference_ids,
+            confidence=step_confidence,
+        )
+        for index, (claim, mechanism, evidence_indexes, reference_ids, step_confidence) in enumerate(
+            reasoning,
+            start=1,
+        )
+    ]
+
+    return OceanEvent(
+        id=event_id,
+        type=event_type,
+        title=title,
+        summary=summary,
+        region=region,
+        centroid=centroid,
+        radius_km=radius_km,
+        started_at=NOW - timedelta(days=start_days),
+        status=status,
+        severity=severity,
+        severity_label=severity_label,
+        confidence=confidence,
+        affected_area_km2=affected_area_km2,
+        variables=variables,
+        sources=sources,
+        references=REFERENCES[event_type],
+        evidence=evidence,
+        reasoning_chain=reasoning_chain,
+        timeline=_timeline(start_days),
+        potential_impacts=potential_impacts,
+        uncertainty=uncertainty,
+        validation_state="scenario",
+    )
+
+
+def _additional_events() -> list[OceanEvent]:
+    return [
+        _catalog_event(
+            event_id="NWP-2026-0819-MHW-07",
+            event_type="marine_heatwave",
+            title="东海陆架暖池增强",
+            summary="东海陆架外缘的表层暖异常持续扩展，并与正海面高度异常共同出现。",
+            region="东海陆架外缘",
+            centroid=(126.3, 29.4),
+            radius_km=210,
+            start_days=3,
+            status="active",
+            severity=0.76,
+            severity_label="high",
+            confidence=0.89,
+            affected_area_km2=136000,
+            variables=["SST", "SLA"],
+            sources=["Satellite SST", "Altimetry SLA"],
+            observations=[
+                ("GHRSST 卫星合成", "SST", 29.1, 27.4, "degC", "陆架分区气候态异常", 0.94),
+                ("多任务卫星测高", "SLA", 0.17, 0.05, "m", "暖水核心区海面高度偏差", 0.88),
+            ],
+            reasoning=[
+                ("陆架外缘已形成持续暖异常。", "连续日合成场均超过区域暖事件阈值。", [1], ["REF-MHW-01", "REF-MHW-02"], 0.92),
+                ("中尺度环流可能延缓热量释放。", "正海面高度异常与暖水核心同位，支持热量滞留解释。", [1, 2], ["REF-MHW-03"], 0.84),
+            ],
+            potential_impacts=["近海生态系统热暴露增加", "陆架锋面位置调整", "底层缺氧风险需要联动监测"],
+            uncertainty="近岸云覆盖增加了暖异常西侧边界的位置不确定性。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0811-MHW-08",
+            event_type="marine_heatwave",
+            title="菲律宾海北部热蓄积",
+            summary="菲律宾海北部大范围表层温度偏高，暖水核心沿副热带环流西侧维持。",
+            region="菲律宾海北部",
+            centroid=(132.8, 20.6),
+            radius_km=320,
+            start_days=11,
+            status="watch",
+            severity=0.69,
+            severity_label="high",
+            confidence=0.85,
+            affected_area_km2=298000,
+            variables=["SST", "SLA"],
+            sources=["Satellite SST", "Altimetry SLA"],
+            observations=[
+                ("GHRSST 卫星合成", "SST", 30.2, 28.3, "degC", "11 日气候态异常", 0.93),
+                ("多任务卫星测高", "SLA", 0.22, 0.06, "m", "副热带暖涡背景识别", 0.86),
+            ],
+            reasoning=[
+                ("暖异常已达到海洋热浪识别条件。", "温度异常持续时间和幅度均超过区域阈值。", [1], ["REF-MHW-01", "REF-MHW-02"], 0.91),
+                ("反气旋环流背景有利于热量维持。", "正海面高度异常表明温跃层加深和上层暖水俘获。", [2], ["REF-MHW-03"], 0.82),
+            ],
+            potential_impacts=["珊瑚礁热胁迫风险上升", "上层海洋层化增强", "热带气旋前海洋热含量偏高"],
+            uncertainty="缺少事件核心区同步剖面，次表层热含量仍由卫星场间接判断。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0818-BLOOM-09",
+            event_type="phytoplankton_bloom",
+            title="黄海中部叶绿素增强",
+            summary="黄海中部出现连续叶绿素高值带，营养盐信号支持近期混合补给。",
+            region="黄海中部",
+            centroid=(123.8, 35.2),
+            radius_km=180,
+            start_days=4,
+            status="active",
+            severity=0.74,
+            severity_label="high",
+            confidence=0.87,
+            affected_area_km2=92000,
+            variables=["CHLA", "NITRATE"],
+            sources=["Ocean Color", "BGC-Argo"],
+            observations=[
+                ("海色卫星合成", "CHLA", 3.4, 0.95, "mg m-3", "区域对数异常藻华指数", 0.91),
+                ("BGC-Argo 剖面", "NITRATE", 5.8, 3.1, "umol kg-1", "上层营养盐储量偏差", 0.82),
+            ],
+            reasoning=[
+                ("叶绿素高值已超过区域藻华阈值。", "高值带在多个日合成场中保持连续。", [1], ["REF-BLOOM-01", "REF-BLOOM-03"], 0.90),
+                ("营养盐补给可能支撑藻华维持。", "硝酸盐同步升高符合混合或侧向输送机制。", [1, 2], ["REF-BLOOM-02", "REF-BLOOM-03"], 0.80),
+            ],
+            potential_impacts=["近海初级生产力上升", "水色和透明度变化", "衰亡阶段低氧风险增加"],
+            uncertainty="高浑浊水体可能抬高近岸海色反演值，需用现场荧光剖面复核。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0815-BLOOM-10",
+            event_type="phytoplankton_bloom",
+            title="鄂霍次克海南缘藻华",
+            summary="鄂霍次克海南缘冷水锋附近出现叶绿素增强，事件已进入恢复阶段。",
+            region="鄂霍次克海南缘",
+            centroid=(149.8, 48.1),
+            radius_km=240,
+            start_days=7,
+            status="recovering",
+            severity=0.61,
+            severity_label="moderate",
+            confidence=0.83,
+            affected_area_km2=171000,
+            variables=["CHLA", "SST"],
+            sources=["Ocean Color", "Satellite SST"],
+            observations=[
+                ("海色卫星合成", "CHLA", 2.2, 0.72, "mg m-3", "锋区叶绿素异常", 0.88),
+                ("GHRSST 卫星合成", "SST", 10.8, 12.1, "degC", "冷水锋位置诊断", 0.90),
+            ],
+            reasoning=[
+                ("锋区仍保留显著生物量信号。", "叶绿素虽从峰值下降，但仍明显高于气候态。", [1], ["REF-BLOOM-01", "REF-BLOOM-03"], 0.86),
+                ("冷水锋可能维持营养盐供应。", "较低海表温度与叶绿素带的空间重合支持锋生混合解释。", [1, 2], ["REF-BLOOM-02"], 0.78),
+            ],
+            potential_impacts=["亚寒带初级生产增强", "颗粒有机碳输出增加", "锋区渔场位置变化"],
+            uncertainty="高纬云量造成约两天的海色时间空缺，峰值持续时间可能被低估。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0816-EDDY-11",
+            event_type="eddy",
+            title="中国台湾以东反气旋涡",
+            summary="中国台湾以东存在闭合正海面高度异常和增强的方位向流速。",
+            region="中国台湾以东海域",
+            centroid=(124.8, 23.8),
+            radius_km=135,
+            start_days=6,
+            status="watch",
+            severity=0.72,
+            severity_label="high",
+            confidence=0.90,
+            affected_area_km2=57000,
+            variables=["SLA", "CURRENT"],
+            sources=["Altimetry SLA", "Surface Currents"],
+            observations=[
+                ("多任务卫星测高", "SLA", 0.26, 0.03, "m", "闭合等值线涡旋识别", 0.95),
+                ("地转流分析", "CURRENT", 0.83, 0.38, "m s-1", "方位向流速极大值", 0.91),
+            ],
+            reasoning=[
+                ("海面高度场中存在相干反气旋结构。", "正海面高度核心与闭合地转环流共同界定涡旋。", [1, 2], ["REF-EDDY-01"], 0.93),
+                ("涡旋可能重分配上层热盐结构。", "增强的方位向流速支持水团俘获和侧向输送。", [2], ["REF-EDDY-01", "REF-EDDY-02"], 0.81),
+            ],
+            potential_impacts=["黑潮路径短期偏移", "漂流物轨迹不确定性增大", "上层营养盐输送改变"],
+            uncertainty="受中国台湾东侧强背景流影响，涡旋平移速度仍存在较大估计误差。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0813-EDDY-12",
+            event_type="eddy",
+            title="副热带环流区气旋涡",
+            summary="西北太平洋副热带区出现负海面高度闭合结构，并伴随弱叶绿素响应。",
+            region="北太平洋副热带区",
+            centroid=(157.5, 29.6),
+            radius_km=175,
+            start_days=9,
+            status="active",
+            severity=0.63,
+            severity_label="high",
+            confidence=0.84,
+            affected_area_km2=96000,
+            variables=["SLA", "CHLA"],
+            sources=["Altimetry SLA", "Ocean Color"],
+            observations=[
+                ("多任务卫星测高", "SLA", -0.19, -0.01, "m", "闭合负异常追踪", 0.92),
+                ("海色卫星合成", "CHLA", 0.27, 0.18, "mg m-3", "涡核—背景对比", 0.75),
+            ],
+            reasoning=[
+                ("负海面高度异常形成稳定气旋涡核。", "闭合等值线在九天内保持相干并持续平移。", [1], ["REF-EDDY-01"], 0.90),
+                ("涡致抬升可能引发生物响应。", "涡核叶绿素高于背景，但信号幅度仍有限。", [1, 2], ["REF-EDDY-02"], 0.72),
+            ],
+            potential_impacts=["局地温跃层抬升", "营养盐向真光层输送", "远洋漂流路径改变"],
+            uncertainty="叶绿素响应接近海色产品区域误差上限，生物机制置信度低于动力识别。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0820-CARBON-13",
+            event_type="carbon_anomaly",
+            title="东海陆坡高 pCO2 信号",
+            summary="东海陆坡表层 pCO2 和溶解无机碳同时偏高，显示富碳水体影响。",
+            region="东海陆坡",
+            centroid=(128.2, 27.1),
+            radius_km=150,
+            start_days=2,
+            status="active",
+            severity=0.71,
+            severity_label="high",
+            confidence=0.81,
+            affected_area_km2=71000,
+            variables=["PCO2", "DIC"],
+            sources=["BGC-Argo", "Carbonate model"],
+            observations=[
+                ("BGC-Argo 剖面", "PCO2", 418.0, 386.0, "uatm", "温度归一化 pCO2 异常", 0.85),
+                ("碳酸盐体系估算", "DIC", 2040.0, 2004.0, "umol kg-1", "总碱度约束的碳酸盐计算", 0.77),
+            ],
+            reasoning=[
+                ("表层存在显著正 pCO2 残差。", "温度校正后高值仍然存在，不能仅由热力效应解释。", [1], ["REF-CARBON-01", "REF-CARBON-02"], 0.83),
+                ("富碳水体输入可能参与异常形成。", "溶解无机碳同步升高符合陆坡水混合或侧向输送。", [1, 2], ["REF-CARBON-02"], 0.76),
+            ],
+            potential_impacts=["海气二氧化碳梯度减小", "局地酸化风险升高", "陆坡碳输运估算需重新评估"],
+            uncertainty="DIC 为碳酸盐体系约束估算值，尚缺现场瓶采样交叉验证。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0816-CARBON-14",
+            event_type="carbon_anomaly",
+            title="黑潮上游低 pCO2 吸收信号",
+            summary="黑潮上游表层 pCO2 低于季节气候态，可能对应短期海洋碳吸收增强。",
+            region="黑潮上游",
+            centroid=(130.7, 19.1),
+            radius_km=200,
+            start_days=6,
+            status="watch",
+            severity=0.57,
+            severity_label="moderate",
+            confidence=0.79,
+            affected_area_km2=126000,
+            variables=["PCO2", "SST"],
+            sources=["BGC-Argo", "Satellite SST"],
+            observations=[
+                ("BGC-Argo 剖面", "PCO2", 344.0, 377.0, "uatm", "温度归一化 pCO2 异常", 0.83),
+                ("GHRSST 卫星合成", "SST", 27.1, 28.0, "degC", "热力贡献估算", 0.91),
+            ],
+            reasoning=[
+                ("低 pCO2 信号超过单纯降温贡献。", "温度归一化后仍保留负残差，表明存在非热力控制。", [1, 2], ["REF-CARBON-01", "REF-CARBON-02"], 0.81),
+                ("事件可能增强局地海气碳吸收。", "较低表层 pCO2 增大了由大气指向海洋的浓度梯度。", [1], ["REF-CARBON-01"], 0.74),
+            ],
+            potential_impacts=["短期海洋碳汇增强", "碳通量空间梯度加大", "需同步约束风速与总碱度"],
+            uncertainty="缺少同步大气 pCO2 和风速观测，当前不能直接量化海气通量。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0818-COLD-15",
+            event_type="cold_anomaly",
+            title="黄海冷水团表层响应",
+            summary="黄海冷水团上方表层降温增强，近期风混合可能将冷水影响带至近表层。",
+            region="黄海北部",
+            centroid=(122.7, 37.2),
+            radius_km=170,
+            start_days=4,
+            status="active",
+            severity=0.65,
+            severity_label="high",
+            confidence=0.86,
+            affected_area_km2=87000,
+            variables=["SST", "WIND"],
+            sources=["Satellite SST", "ERA5 winds"],
+            observations=[
+                ("GHRSST 卫星合成", "SST", 21.4, 23.6, "degC", "陆架季节性冷异常指数", 0.94),
+                ("ERA5 再分析", "WIND", 10.8, 7.3, "m s-1", "事件期风应力合成", 0.87),
+            ],
+            reasoning=[
+                ("表层冷异常在风事件后持续。", "降温中心与强风影响区重合并保持四天。", [1, 2], ["REF-COLD-01"], 0.88),
+                ("垂向混合可能连接表层与冷水团。", "增强风应力有利于混合层加深和冷水上混。", [2], ["REF-COLD-01", "REF-COLD-02"], 0.80),
+            ],
+            potential_impacts=["陆架层化减弱", "近底层营养盐向上输送", "养殖海域温度波动增加"],
+            uncertainty="冷水团垂向范围需要温盐剖面确认，卫星只能约束表层响应。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0814-COLD-16",
+            event_type="cold_anomaly",
+            title="鄂霍次克海南部冷舌",
+            summary="鄂霍次克海南部冷舌向东南延伸，强风混合后异常正逐步减弱。",
+            region="鄂霍次克海南部",
+            centroid=(146.7, 50.0),
+            radius_km=250,
+            start_days=8,
+            status="recovering",
+            severity=0.58,
+            severity_label="moderate",
+            confidence=0.84,
+            affected_area_km2=196000,
+            variables=["SST", "WIND"],
+            sources=["Satellite SST", "ERA5 winds"],
+            observations=[
+                ("GHRSST 卫星合成", "SST", 8.7, 11.2, "degC", "亚寒带冷异常追踪", 0.92),
+                ("ERA5 再分析", "WIND", 12.6, 8.4, "m s-1", "大风过程合成", 0.88),
+            ],
+            reasoning=[
+                ("冷舌在大风过程后形成并维持。", "海表降温与风应力峰值在时间上连续。", [1, 2], ["REF-COLD-01"], 0.86),
+                ("事件正在从峰值阶段恢复。", "最新三日温度异常幅度持续收窄。", [1], ["REF-COLD-02"], 0.79),
+            ],
+            potential_impacts=["季节性层化恢复推迟", "冷水性物种栖息范围外扩", "局地海雾条件改变"],
+            uncertainty="高纬观测空缺使冷舌北侧边界和恢复速度存在不确定性。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0819-CURRENT-17",
+            event_type="current_anomaly",
+            title="中国台湾东北部黑潮摆动",
+            summary="中国台湾东北部黑潮表层流速和跨流海面高度梯度同步增强。",
+            region="中国台湾东北部",
+            centroid=(124.9, 25.7),
+            radius_km=140,
+            start_days=3,
+            status="active",
+            severity=0.78,
+            severity_label="high",
+            confidence=0.88,
+            affected_area_km2=62000,
+            variables=["CURRENT", "SSH_GRADIENT"],
+            sources=["Surface Currents", "Altimetry SSH"],
+            observations=[
+                ("表层海流分析", "CURRENT", 1.48, 0.96, "m s-1", "黑潮轴向流速偏差", 0.91),
+                ("多任务卫星测高", "SSH_GRADIENT", 0.25, 0.15, "m per 100 km", "跨流压力梯度", 0.88),
+            ],
+            reasoning=[
+                ("黑潮表层输运出现显著加速。", "轴向流速高值持续且超过区域分位阈值。", [1], ["REF-CURRENT-01", "REF-CURRENT-02"], 0.90),
+                ("流速增强具有动力学一致性。", "同步增强的海面高度梯度支持地转流调整解释。", [1, 2], ["REF-CURRENT-01"], 0.86),
+            ],
+            potential_impacts=["黑潮入侵东海陆架的概率改变", "航线流速预报偏差增大", "热盐输运短期增强"],
+            uncertainty="卫星表层流不能完整代表黑潮深度积分输运，需结合断面剖面。",
+        ),
+        _catalog_event(
+            event_id="NWP-2026-0817-CURRENT-18",
+            event_type="current_anomaly",
+            title="对马海峡入流增强",
+            summary="对马海峡东水道表层流速升高，海面高度梯度支持入流增强。",
+            region="对马海峡",
+            centroid=(130.3, 34.1),
+            radius_km=125,
+            start_days=5,
+            status="watch",
+            severity=0.59,
+            severity_label="moderate",
+            confidence=0.80,
+            affected_area_km2=49000,
+            variables=["CURRENT", "SSH_GRADIENT"],
+            sources=["Surface Currents", "Altimetry SSH"],
+            observations=[
+                ("表层海流分析", "CURRENT", 1.09, 0.69, "m s-1", "海峡断面流速异常", 0.84),
+                ("多任务卫星测高", "SSH_GRADIENT", 0.16, 0.09, "m per 100 km", "跨海峡压力梯度", 0.79),
+            ],
+            reasoning=[
+                ("对马海峡表层入流高于近期常态。", "断面流速异常在多个分析周期持续。", [1], ["REF-CURRENT-01", "REF-CURRENT-02"], 0.82),
+                ("压力梯度变化支持入流增强。", "跨海峡海面高度差与观测流速异常方向一致。", [1, 2], ["REF-CURRENT-01"], 0.78),
+            ],
+            potential_impacts=["日本海热盐输入增加", "漂移和污染物扩散路径变化", "沿岸渔场环境快速调整"],
+            uncertainty="窄海峡潮流残差会影响日平均表层流估算，需用潮汐站资料校正。",
+        ),
+    ]
+
+
+def build_events() -> list[OceanEvent]:
+    mhw = "NWP-2026-0814-MHW-01"
+    bloom = "NWP-2026-0817-BLOOM-02"
+    eddy = "NWP-2026-0812-EDDY-03"
+    carbon = "NWP-2026-0818-CARBON-04"
+    cold = "NWP-2026-0816-COLD-05"
+    current = "NWP-2026-0820-CURRENT-06"
+
+    events = [
+        OceanEvent(
+            id=mhw,
+            type="marine_heatwave",
+            title="黑潮延伸体海洋热浪",
+            summary="日本以东的持续暖水团正在增强，并与正海面高度异常同位分布。",
+            region="黑潮延伸体",
+            centroid=(151.8, 36.4),
+            radius_km=410,
+            started_at=NOW - timedelta(days=8),
+            status="active",
+            severity=0.94,
+            severity_label="critical",
+            confidence=0.92,
+            affected_area_km2=518000,
+            variables=["SST", "SLA", "CHLA"],
+            sources=["Satellite SST", "Altimetry SLA", "Ocean Color"],
+            references=REFERENCES["marine_heatwave"],
+            evidence=[
+                _evidence(mhw, "1", "GHRSST 卫星合成", "SST", 29.4, 26.6, "degC", "11 日气候态异常", 0.97),
+                _evidence(mhw, "2", "多任务卫星测高", "SLA", 0.31, 0.04, "m", "中尺度海面高度偏差", 0.92),
+                _evidence(mhw, "3", "海色卫星合成", "CHLA", 0.18, 0.31, "mg m-3", "表层叶绿素响应", 0.78),
+            ],
+            reasoning_chain=[
+                ReasoningStep(order=1, claim="表层温度已超出当地季节变化范围。", mechanism="连续 8 天超过暖事件阈值，表明异常具有持续性。", evidence_ids=[f"{mhw}-E1"], reference_ids=["REF-MHW-01", "REF-MHW-02"], confidence=0.97),
+                ReasoningStep(order=2, claim="中尺度环流正在事件核心区滞留热量。", mechanism="正海面高度异常与温跃层加深和反气旋式俘获一致。", evidence_ids=[f"{mhw}-E2"], reference_ids=["REF-MHW-03"], confidence=0.88),
+                ReasoningStep(order=3, claim="生物响应已经出现，但空间分布尚不均一。", mechanism="表层叶绿素降低与层化增强及营养盐补给减弱一致。", evidence_ids=[f"{mhw}-E1", f"{mhw}-E3"], reference_ids=["REF-MHW-01", "REF-MHW-03"], confidence=0.76),
+            ],
+            timeline=_timeline(8),
+            potential_impacts=["远洋生态系统热胁迫加剧", "事件核心区营养盐再补给受抑", "渔业栖息地迁移风险上升"],
+            uncertainty="云覆盖空缺影响 9% 的海表温度合成数据；下一轮剖面观测前，次表层热含量仍由海面高度异常间接推断。",
+        ),
+        OceanEvent(
+            id=bloom,
+            type="phytoplankton_bloom",
+            title="亲潮过渡区浮游植物暴发",
+            summary="表层降温和混合后，亚寒带锋沿线叶绿素浓度已升至常态的约三倍。",
+            region="亲潮过渡区",
+            centroid=(146.4, 42.1),
+            radius_km=260,
+            started_at=NOW - timedelta(days=5),
+            status="active",
+            severity=0.79,
+            severity_label="high",
+            confidence=0.88,
+            affected_area_km2=187000,
+            variables=["CHLA", "SST", "NITRATE"],
+            sources=["Ocean Color", "Satellite SST", "BGC-Argo"],
+            references=REFERENCES["phytoplankton_bloom"],
+            evidence=[
+                _evidence(bloom, "1", "海色卫星合成", "CHLA", 2.8, 0.86, "mg m-3", "对数异常藻华指数", 0.93),
+                _evidence(bloom, "2", "BGC-Argo 剖面", "NITRATE", 7.1, 4.2, "umol kg-1", "上层海洋营养盐储量", 0.86),
+                _evidence(bloom, "3", "GHRSST 卫星合成", "SST", 13.7, 15.1, "degC", "锋面降温异常", 0.89),
+            ],
+            reasoning_chain=[
+                ReasoningStep(order=1, claim="叶绿素已超过区域藻华阈值。", mechanism="该异常在连续 5 个日合成场中保持空间一致。", evidence_ids=[f"{bloom}-E1"], reference_ids=["REF-BLOOM-01", "REF-BLOOM-03"], confidence=0.93),
+                ReasoningStep(order=2, claim="营养盐再补给正在支撑生物量积累。", mechanism="硝酸盐升高与较低海表温度共同表明近期发生了垂向混合。", evidence_ids=[f"{bloom}-E2", f"{bloom}-E3"], reference_ids=["REF-BLOOM-02", "REF-BLOOM-03"], confidence=0.85),
+            ],
+            timeline=_timeline(5),
+            potential_impacts=["初级生产力短期上升", "颗粒有机碳输出潜力增强", "生物量快速衰减时可能出现低氧风险"],
+            uncertainty="受气溶胶影响，事件西侧边缘的海色反演不确定性较高。",
+        ),
+        OceanEvent(
+            id=eddy,
+            type="eddy",
+            title="四国岛以南气旋式涡旋",
+            summary="一个相干负海面高度异常结构正在引起上层海洋抬升，并伴随弱叶绿素响应。",
+            region="四国海盆",
+            centroid=(135.6, 27.8),
+            radius_km=145,
+            started_at=NOW - timedelta(days=10),
+            status="watch",
+            severity=0.68,
+            severity_label="high",
+            confidence=0.86,
+            affected_area_km2=66000,
+            variables=["SLA", "CURRENT", "CHLA"],
+            sources=["Altimetry SLA", "Surface Currents", "Ocean Color"],
+            references=REFERENCES["eddy"],
+            evidence=[
+                _evidence(eddy, "1", "多任务卫星测高", "SLA", -0.24, -0.02, "m", "闭合等值线涡旋识别", 0.94),
+                _evidence(eddy, "2", "地转流分析", "CURRENT", 0.72, 0.31, "m s-1", "方位向流速极大值", 0.88),
+                _evidence(eddy, "3", "海色卫星合成", "CHLA", 0.44, 0.29, "mg m-3", "涡核—背景对比", 0.72),
+            ],
+            reasoning_chain=[
+                ReasoningStep(order=1, claim="海面高度场中存在持续性气旋式结构。", mechanism="负海面高度异常和闭合地转环流共同界定了涡旋边界。", evidence_ids=[f"{eddy}-E1", f"{eddy}-E2"], reference_ids=["REF-EDDY-01"], confidence=0.91),
+                ReasoningStep(order=2, claim="上层海洋抬升已开始影响生物过程。", mechanism="动力识别涡核内部出现了中等幅度的叶绿素增强。", evidence_ids=[f"{eddy}-E1", f"{eddy}-E3"], reference_ids=["REF-EDDY-02"], confidence=0.70),
+            ],
+            timeline=_timeline(10),
+            potential_impacts=["局地营养盐上涌", "浮游生物群落平流输送", "可能影响航行的流速切变"],
+            uncertainty="涡旋边缘对所选海面高度异常等值线较敏感，半径不确定度约为 18 千米。",
+        ),
+        OceanEvent(
+            id=carbon,
+            type="carbon_anomaly",
+            title="副热带表层碳脉冲",
+            summary="相对于温度校正后的预期值，表层 pCO2 偏高，同时溶解无机碳维持高值。",
+            region="西部副热带环流区",
+            centroid=(139.2, 23.7),
+            radius_km=190,
+            started_at=NOW - timedelta(days=4),
+            status="active",
+            severity=0.73,
+            severity_label="high",
+            confidence=0.82,
+            affected_area_km2=112000,
+            variables=["PCO2", "DIC", "SST"],
+            sources=["BGC-Argo 5906518", "Carbonate model", "Satellite SST"],
+            references=REFERENCES["carbon_anomaly"],
+            evidence=[
+                _evidence(carbon, "1", "BGC-Argo 浮标 5906518", "PCO2", 423.0, 377.0, "uatm", "温度归一化 pCO2 异常", 0.87),
+                _evidence(carbon, "2", "碳酸盐体系估算", "DIC", 2018.0, 1991.0, "umol kg-1", "总碱度约束的碳酸盐计算", 0.78),
+                _evidence(carbon, "3", "GHRSST 卫星合成", "SST", 28.8, 27.6, "degC", "热力贡献估算", 0.92),
+            ],
+            reasoning_chain=[
+                ReasoningStep(order=1, claim="pCO2 升幅大于单独由温度引起的贡献。", mechanism="温度归一化后仍存在正残差异常。", evidence_ids=[f"{carbon}-E1", f"{carbon}-E3"], reference_ids=["REF-CARBON-01", "REF-CARBON-02"], confidence=0.84),
+                ReasoningStep(order=2, claim="富碳水体可能参与形成表层信号。", mechanism="溶解无机碳升高与富碳水体混合或侧向平流输送一致。", evidence_ids=[f"{carbon}-E2"], reference_ids=["REF-CARBON-02"], confidence=0.75),
+            ],
+            timeline=_timeline(4),
+            potential_impacts=["局地海洋二氧化碳吸收减弱", "异常持续时可能造成酸化胁迫", "需要重复开展碳酸盐体系剖面观测"],
+            uncertainty="溶解无机碳来自模型约束而非直接测量，因此成因归属仍属初步判断。",
+        ),
+        OceanEvent(
+            id=cold,
+            type="cold_anomaly",
+            title="日本海盆冷异常",
+            summary="连续强混合事件后，表层海水仍显著偏冷。",
+            region="日本海盆",
+            centroid=(137.6, 40.8),
+            radius_km=230,
+            started_at=NOW - timedelta(days=6),
+            status="recovering",
+            severity=0.55,
+            severity_label="moderate",
+            confidence=0.84,
+            affected_area_km2=153000,
+            variables=["SST", "WIND", "MIXED_LAYER"],
+            sources=["Satellite SST", "ERA5 winds", "Ocean reanalysis"],
+            references=REFERENCES["cold_anomaly"],
+            evidence=[
+                _evidence(cold, "1", "GHRSST 卫星合成", "SST", 18.1, 20.3, "degC", "季节性冷异常指数", 0.93),
+                _evidence(cold, "2", "ERA5 再分析", "WIND", 14.2, 8.1, "m s-1", "大风事件合成", 0.89),
+            ],
+            reasoning_chain=[
+                ReasoningStep(order=1, claim="冷异常发生在持续表面强迫之后。", mechanism="强风增加了湍流热损失，并将较冷水体混合至表层。", evidence_ids=[f"{cold}-E1", f"{cold}-E2"], reference_ids=["REF-COLD-01", "REF-COLD-02"], confidence=0.84),
+            ],
+            timeline=_timeline(6),
+            potential_impacts=["季节性层化推迟", "远洋生物栖息地边界变化"],
+            uncertainty="混合层深度来自再分析资料，尚未通过现场剖面验证。",
+        ),
+        OceanEvent(
+            id=current,
+            type="current_anomaly",
+            title="吕宋海峡输运加速",
+            summary="过去 48 小时，海峡北部向西的表层输运明显增强。",
+            region="吕宋海峡",
+            centroid=(122.4, 20.9),
+            radius_km=165,
+            started_at=NOW - timedelta(days=2),
+            status="watch",
+            severity=0.48,
+            severity_label="moderate",
+            confidence=0.76,
+            affected_area_km2=84000,
+            variables=["CURRENT", "SSH", "WIND"],
+            sources=["Surface Currents", "Altimetry SSH", "ERA5 winds"],
+            references=REFERENCES["current_anomaly"],
+            evidence=[
+                _evidence(current, "1", "表层海流分析", "CURRENT", 1.22, 0.72, "m s-1", "输运断面异常", 0.82),
+                _evidence(current, "2", "多任务卫星测高", "SSH_GRADIENT", 0.19, 0.11, "m per 100 km", "跨海峡压力梯度", 0.77),
+            ],
+            reasoning_chain=[
+                ReasoningStep(order=1, claim="输运异常在动力学上与压力梯度一致。", mechanism="增强的跨海峡海面高度梯度支持地转流加速。", evidence_ids=[f"{current}-E1", f"{current}-E2"], reference_ids=["REF-CURRENT-01", "REF-CURRENT-02"], confidence=0.78),
+            ],
+            timeline=_timeline(2),
+            potential_impacts=["太平洋与南海之间的水体交换增强", "短期漂移预报误差增大"],
+            uncertainty="在强风强迫期间，表层输运可能与深度积分输运存在差异。",
+        ),
+    ]
+
+    events.extend(_additional_events())
+    for event in events:
+        event.validation_state = "scenario"
+        for evidence in event.evidence:
+            evidence.validation_state = "scenario"
+    return events
+
+
+EVENTS = build_events()

@@ -1,0 +1,23 @@
+{
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	reverse_proxy app:8000 {
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	header {
+		-Server
+		X-Frame-Options "DENY"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

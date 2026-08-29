@@ -1,0 +1,20 @@
+{
+  "name": "海洋智能分析平台",
+  "short_name": "海洋智能分析",
+  "description": "实时海洋监测、异常研判与科学报告平台",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#171b1d",
+  "theme_color": "#171b1d",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071824" />
+    <meta name="description" content="海洋智能分析平台全量操作演示，包含中文讲解、配音和字幕。" />
+    <title>海洋智能分析平台｜全量操作演示</title>
+    <style>
+      :root { color-scheme: dark; font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; color: #edfaff; background: radial-gradient(circle at 70% 8%, #164b61 0, #0a2535 28%, #05131e 65%, #02080d 100%); }
+      body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .18; background-image: linear-gradient(rgba(101,211,244,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(101,211,244,.12) 1px, transparent 1px); background-size: 52px 52px; mask-image: linear-gradient(to bottom, #000, transparent 75%); }
+      main { position: relative; width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 54px 0 64px; }
+      header { display: flex; justify-content: space-between; align-items: end; gap: 28px; margin-bottom: 24px; }
+      .eyebrow { display: inline-flex; align-items: center; gap: 8px; color: #72dfff; font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+      .eyebrow::before { content: ""; width: 25px; height: 2px; background: #72dfff; box-shadow: 0 0 16px #4dcff7; }
+      h1 { margin: 12px 0 8px; font-size: clamp(30px, 5vw, 58px); line-height: 1.08; letter-spacing: -.035em; }
+      header p { margin: 0; color: #a8c8d5; font-size: 17px; }
+      .badge { flex: none; padding: 10px 14px; border: 1px solid rgba(114,223,255,.38); border-radius: 999px; color: #bcefff; background: rgba(8,37,51,.62); font-size: 13px; }
+      .player { overflow: hidden; border: 1px solid rgba(116,220,255,.4); border-radius: 22px; background: #02070a; box-shadow: 0 30px 90px rgba(0,0,0,.48), 0 0 0 1px rgba(255,255,255,.03) inset; }
+      video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+      .player-footer { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 15px 18px; color: #98bdcb; background: linear-gradient(90deg, rgba(12,43,57,.98), rgba(5,23,34,.98)); font-size: 13px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+      a { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; border: 1px solid rgba(114,223,255,.35); border-radius: 11px; color: #dff8ff; background: rgba(13,58,76,.72); text-decoration: none; font-weight: 700; }
+      a.primary { color: #021018; background: #72dfff; border-color: #72dfff; }
+      section { display: grid; grid-template-columns: 1.35fr .65fr; gap: 18px; margin-top: 20px; }
+      article { padding: 22px; border: 1px solid rgba(111,202,231,.2); border-radius: 17px; background: rgba(5,26,38,.72); backdrop-filter: blur(12px); }
+      h2 { margin: 0 0 12px; font-size: 18px; }
+      ol { columns: 2; column-gap: 34px; margin: 0; padding-left: 22px; color: #b9d3de; line-height: 1.9; }
+      .facts { display: grid; gap: 11px; }
+      .fact { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 10px; border-bottom: 1px solid rgba(126,198,222,.14); color: #a8c8d5; }
+      .fact:last-child { border: 0; padding: 0; }
+      .fact strong { color: #e8faff; }
+      footer { margin-top: 22px; color: #7597a6; font-size: 12px; text-align: center; }
+      @media (max-width: 760px) { main { padding-top: 30px; } header { display: block; } .badge { display: inline-block; margin-top: 16px; } section { grid-template-columns: 1fr; } ol { columns: 1; } .player-footer { align-items: flex-start; flex-direction: column; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">OCEAN INTELLIGENCE · VIDEO</span>
+          <h1>海洋智能分析平台<br />全量操作演示</h1>
+          <p>从登录、海域态势到事件证据、地图探针、Argo 浮标和数据 Agent。</p>
+        </div>
+        <span class="badge">2026-08-29 · 中文配音与字幕</span>
+      </header>
+
+      <div class="player">
+        <video controls preload="none" poster="./ocean-intelligence-cover-20260829.jpg" playsinline>
+          <source src="./ocean-intelligence-full-operation-cn.mp4" type="video/mp4" />
+          <track src="./ocean-intelligence-full-operation.zh-CN.vtt" kind="subtitles" srclang="zh-CN" label="简体中文" default />
+          当前浏览器不支持 HTML5 视频，请使用下方按钮下载观看。
+        </video>
+        <div class="player-footer">
+          <span>时长 04:12 · 1280×720 · H.264 / AAC</span>
+          <div class="actions">
+            <a href="./voiceover-script.md">查看配音文案</a>
+            <a class="primary" href="./ocean-intelligence-full-operation-cn.mp4" download>下载 MP4</a>
+          </div>
+        </div>
+      </div>
+
+      <section>
+        <article>
+          <h2>视频章节</h2>
+          <ol>
+            <li>项目介绍与安全登录</li><li>首页和区域态势</li><li>海域切换</li><li>新手教程与今日简报</li><li>事件队列和分类筛选</li><li>证据、报告与文献</li><li>数据来源与布局</li><li>地图坐标探针</li><li>Argo 浮标总览</li><li>海洋数据 Agent</li><li>账户和模型设置</li><li>完整使用建议</li>
+          </ol>
+        </article>
+        <article>
+          <h2>成片信息</h2>
+          <div class="facts">
+            <div class="fact"><span>画面</span><strong>720p / 25 FPS</strong></div>
+            <div class="fact"><span>音频</span><strong>中文 AI 配音</strong></div>
+            <div class="fact"><span>字幕</span><strong>画面字幕 + VTT</strong></div>
+            <div class="fact"><span>文件</span><strong>约 22 MB</strong></div>
+          </div>
+        </article>
+      </section>
+      <footer>异常候选属于自动筛查结果，不等同于最终科学结论，仍需持续观测和人工复核。</footer>
+    </main>
+  </body>
+</html>

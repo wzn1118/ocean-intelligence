@@ -1,0 +1,46 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>标准地图服务系统</title>
+</head>
+<link rel="shortcut icon" href="image/sbsm.ico" type="image/x-icon" />
+<link rel="stylesheet" href="css/font-awesome-4.7.0/css/font-awesome.min.css">
+<script type="text/javascript" src="js/global/common.js"></script>
+
+<body>
+    <!--登录-->
+    <div class="global-html" linkHtml="login"></div>
+
+    <!--顶部-->
+    <div class="global-html" linkHtml="logo"></div>
+
+    <!--搜索区-->
+    <div class="global-html" linkHtml="search"></div>
+
+    <!--菜单栏-->
+    <div class="global-html" linkHtml="menu"></div>
+
+    <!--查询 -->
+    <div class="children-html" linkHtml="category"></div>
+
+    <!-- 内容显示区 -->
+    <div class="children-html" linkHtml="preview"></div>
+
+    <!--下载提示窗口-->
+    <div class="global-html" linkHtml="downtip"></div>
+
+    <!--底部提示栏-->
+    <div class="global-html" linkHtml="footer"></div>
+
+</body>
+<script type="text/javascript" src="libs/jquery/jquery.page.js"></script>
+<script src="./libs/sm2.js"></script>
+<script type="text/javascript">
+    $(document).ready(function () {
+        loadDivHtml(this, "view/global/", "view/download/");
+    });
+</script>
+
+</html>
