@@ -108,6 +108,7 @@ from app.models import (
 
 
 IS_PRODUCTION = os.getenv("APP_ENV", "development").strip().lower() == "production"
+IS_LOCAL_ONLY = os.getenv("LOCAL_ONLY_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 configured_origins = [
     item.strip()
     for item in os.getenv("ALLOWED_ORIGINS", "").split(",")
@@ -195,14 +196,16 @@ async def request_telemetry(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    if IS_PRODUCTION:
+    if IS_PRODUCTION and not IS_LOCAL_ONLY:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if IS_PRODUCTION:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
             "form-action 'self'; script-src 'self' https://static.cloudflareinsights.com; "
             "style-src 'self' 'unsafe-inline'; "
             "font-src 'self' data:; img-src 'self' data: blob: https:; "
-            "connect-src 'self' https:; worker-src 'self' blob:; upgrade-insecure-requests"
+            "connect-src 'self' https:; worker-src 'self' blob:"
+            + ("" if IS_LOCAL_ONLY else "; upgrade-insecure-requests")
         )
     return response
 

@@ -2,17 +2,19 @@
 
 > **使用文档：** 面向业务用户、研究人员、开发者与运维人员的完整操作说明见 [《海洋智能分析平台全量使用手册》](docs/USER_MANUAL.md)。
 
-> 项目状态：截至 2026 年 8 月 29 日，系统已经具备多源数据接入、异常筛查、事件档案、Argo 剖面调查、每日简报、账户隔离和 Ubuntu 生产部署能力。
+> 项目状态：截至 2026 年 8 月 29 日，`main` 默认入口已经是 Windows 本地回环生产版：配置 Copernicus 后双击启动，不要求域名、证书、Docker 或公网服务器。
 
 这个项目做的事情很具体：**把散落在 Argo、NOAA、Copernicus Marine 等系统里的观测，整理成可以持续跟踪、逐条核对证据的海洋事件档案。**
 
 它不生产浮标，不替代 Argo 数据中心，也不是另一个通用地图或聊天框架。Argo 负责“测到海里发生了什么”，各类数据服务负责“把数据提供出来”，本项目负责“把不同来源放到同一个海域、时间和事件上下文中，说明哪些只是观测，哪些值得继续核查，以及结论依据是什么”。
 
-## 开始前先看：公网入口、体验群与必备账号
+## 开始前先看：本地一键入口、体验群与必备账号
+
+**默认使用方式：** 配置 Copernicus Marine 账号后，双击仓库根目录的 `run_ocean_intelligence.bat`，浏览器使用 `http://127.0.0.1:8000/`。这条默认链路只监听本机回环地址，不需要把应用部署到公网。
 
 **当前公网地址：** [https://ocean.hegelsalon.com/](https://ocean.hegelsalon.com/)
 
-这个地址是当前部署的访问入口。公网服务依赖服务器、Cloudflare Tunnel/Caddy 和上游数据服务，任何一项临时维护都可能导致短时不可访问；遇到问题时请先看本文“常见问题”和部署日志。
+这个地址是项目维护方提供的体验入口，不是本地使用的前置条件。普通用户不需要配置 Cloudflare、Caddy、域名、证书或公网服务器。
 
 ### 知海使用体验群
 
@@ -472,14 +474,14 @@ GET /api/daily-briefing/dashboard
 
 环境要求：
 
-- Python 3.10 或更高版本；
+- Python 3.11 或更高版本；
 - Node.js 20 或更高版本；
 - npm；
 - 已注册并验证的 Copernicus Marine 账号；
 - 已设置 `COPERNICUSMARINE_USERNAME` 和 `COPERNICUSMARINE_PASSWORD`；
-- 如需 Codex 工作台，需安装并可运行 Codex CLI。
+- 已安装并可运行当前用户的 Codex CLI（Agent 工作台需要）。
 
-第一次启动前，先完成[“Copernicus Marine：从零开始配置”](#copernicus-config)。然后双击：
+第一次启动前，先完成[“Copernicus Marine：从零开始配置”](#copernicus-config)。Windows 用户只需双击：
 
 ```text
 run_ocean_intelligence.bat
@@ -491,20 +493,26 @@ run_ocean_intelligence.bat
 powershell -ExecutionPolicy Bypass -File .\start_ocean_intelligence.ps1
 ```
 
-启动脚本会检查依赖，按需安装 Python 和 npm 包，并依次启动：
+启动脚本会检查依赖，按需安装 Python 和 npm 包，先执行一次前端生产构建，再启动：
 
-- FastAPI：`http://127.0.0.1:8000`；
-- Codex sidecar：`http://127.0.0.1:8011`；
-- Vite 前端：`http://127.0.0.1:5173`。
+- FastAPI 本地生产应用：`http://127.0.0.1:8000`；
+- Codex sidecar：仅绑定 `127.0.0.1:8011`，由 FastAPI 同源代理，不直接暴露给浏览器。
+
+默认链路只有一个用户入口 `8000`：FastAPI 同时托管 `frontend/dist`、REST API 和登录会话。脚本不会启动 Vite 开发服务器，不需要 `5173`，也不会监听 `0.0.0.0` 或其他公网地址。前端没有天地图 Token 时，`local-production` 构建会使用仓库内的自然资源部标准地图和离线边界数据；如果已经配置 `VITE_TIANDITU_TOKEN`，则会使用天地图服务。
+
+首次运行时脚本会在仓库根目录创建 `.venv`，并把 Python 依赖安装到这个隔离环境；前端有 `package-lock.json` 时使用 `npm ci`。每次启动都会重新执行生产构建并重启由当前仓库记录的本地实例，避免继续使用旧代码。只有后端健康、静态生产页面、Ocean MCP、Codex app-server 和 `ocean-intelligence` 工具目录全部就绪后，脚本才显示 `running`。
+
+首次打开页面时请注册一个本地研究账户并登录。这个账户只用于本机的会话、Agent 会话和加密配置隔离，不是 Copernicus 账号，也不会把 Copernicus 密码发送到浏览器。
 
 常用地址：
 
 | 功能 | 地址 |
 | --- | --- |
-| 应用首页 | `http://127.0.0.1:5173/` |
-| API 文档 | `http://127.0.0.1:8000/docs` |
+| 应用首页 | `http://127.0.0.1:8000/` |
 | 健康检查 | `http://127.0.0.1:8000/api/health` |
-| Codex 状态 | `http://127.0.0.1:8011/api/codex-runtime/status` |
+| Codex 状态（登录后） | `http://127.0.0.1:8000/api/codex-runtime/status` |
+
+本地生产模式默认关闭 FastAPI 的 `/docs`、`/redoc` 和 OpenAPI 文档，以免把调试面误当成产品入口；需要接口调试时请使用手动开发模式或代码测试。
 
 停止服务：
 
@@ -546,11 +554,11 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 ### 开发环境说明
 
-- 开发环境默认 `AUTH_REQUIRED=false`，便于本地调试；
+- 开发环境默认 `AUTH_REQUIRED=false`，便于本地调试；Windows 一键入口使用本地生产配置并固定 `AUTH_REQUIRED=true`；
 - 生产 Compose 固定设置 `AUTH_REQUIRED=true`；
 - Copernicus Marine 账号和项目变量是实时海流、风、浪、数据量统计及完整简报的必需配置；
 - 凭据缺失或上游故障时，部分页面可能仍显示缓存、内置证据或情景数据；必须根据数据模式和观测时次判断，不能把页面可见等同于实时数据可用；
-- Vite 会把普通 `/api` 请求代理到 `8000`，Codex 相关请求代理到 `8011`。
+- 只有手动开发模式才使用 Vite 的 `5173` 代理；一键本地生产模式使用 FastAPI 同源页面和 `/api`，Codex 请求通过后端签名代理到 `8011`。
 
 ## 八、环境变量配置
 
@@ -604,12 +612,14 @@ Copernicus Marine 是本项目的上游海洋数据服务。这里要求的是 C
 
 #### 2.3 用官方 Toolbox 先做一次凭据检查
 
-项目依赖 copernicusmarine Python 包，版本范围见 backend/requirements.txt。先安装依赖：
+项目依赖 `copernicusmarine` Python 包，版本范围见 `backend/requirements.txt`。在仓库根目录创建与一键脚本相同的虚拟环境并安装依赖：
 
-~~~bash
-cd backend
-python -m pip install -r requirements.txt
+~~~powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r .\backend\requirements.txt
 ~~~
+
+Linux/macOS 对应命令是 `python -m venv .venv`、`source .venv/bin/activate` 和 `python -m pip install -r backend/requirements.txt`。
 
 Linux/macOS 在当前终端执行：
 
@@ -627,7 +637,7 @@ $env:COPERNICUSMARINE_SERVICE_PASSWORD = "你的 Copernicus 密码"
 copernicusmarine login --check-credentials-valid
 ~~~
 
-如果系统提示找不到命令，请在项目虚拟环境中执行：
+如果系统提示找不到命令，请回到仓库根目录并在项目虚拟环境中执行：
 
 ~~~powershell
 .\.venv\Scripts\copernicusmarine.exe login --check-credentials-valid
@@ -727,7 +737,7 @@ COPERNICUSMARINE_PASSWORD=你的 Copernicus 密码
 1. copernicusmarine login --check-credentials-valid 返回凭据有效；
 2. 后端启动日志中不再出现“Copernicus Marine 凭证未配置”；
 3. 浏览器打开项目后，来源状态中的 Copernicus 不应显示 degraded 或 missing_credentials；
-4. 在 API 文档 http://127.0.0.1:8000/docs 试跑以下接口：
+4. 本地一键生产版关闭 `/docs`。在浏览器的“数据来源”面板和地图点选流程中检查以下能力；需要逐个调试接口时再使用“方式二：手动启动”的开发模式：
 
 ~~~text
 GET /api/copernicus/index/status
@@ -738,13 +748,14 @@ GET /api/copernicus/wind/point
 ~~~
 
 5. 地图点选海域，确认海流、风和波浪卡片显示真实观测时次、数据源和延迟，而不是“缓存”“情景”或“未配置”；
-6. 生产环境检查：
+6. 本地运行检查：
 
-~~~bash
-docker compose --env-file deploy/production.env -f compose.prod.yaml config --quiet
-docker compose --env-file deploy/production.env -f compose.prod.yaml ps
-docker compose --env-file deploy/production.env -f compose.prod.yaml logs --tail=100 app
+~~~powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+Get-NetTCPConnection -State Listen | Where-Object LocalPort -in 8000,8011,5173
 ~~~
+
+健康接口应返回 `status=operational`；端口列表只能出现 `127.0.0.1:8000` 和 `127.0.0.1:8011`，不应出现 `0.0.0.0` 或 `5173`。
 
 #### 2.8 常见错误怎么判断
 
@@ -921,9 +932,11 @@ POST   /api/codex/mcp
 DELETE /api/codex/mcp
 ```
 
-完整请求参数和响应模型以运行后的 Swagger 文档 `http://127.0.0.1:8000/docs` 为准。
+完整请求参数和响应模型以代码中的 Pydantic 模型及测试为准；本地一键生产版不会开放 Swagger。需要交互式 Swagger 时，请按“方式二：手动启动”运行开发模式。
 
-## 十、生产部署
+## 十、可选的公网维护部署
+
+这一章只面向项目维护者。普通本地用户不需要执行，`main` 的默认一键链路也不会调用 Docker、Caddy、Cloudflare 或公网配置。
 
 当前生产方案面向 Ubuntu 22.04 单机。
 
@@ -1092,7 +1105,7 @@ GET /api/performance
 
 项目内中国离线底图来源于自然资源部标准地图服务系统，界面标注审图号 `GS(2023)2767号` 并提供原图入口。公开发布、裁切、修改或生成新的地图成果前，应根据实际使用方式复核地图审核、审图号标注和数据服务授权要求。
 
-生产环境固定使用天地图提供中国大陆和台湾省底图及简体中文注记。缺少 `VITE_TIANDITU_TOKEN` 时，生产构建会失败；开发环境的离线后备仅用于研发和诊断。
+公网生产 Compose 固定使用天地图提供中国大陆和台湾省底图及简体中文注记，缺少 `VITE_TIANDITU_TOKEN` 时构建会失败。Windows 一键本地生产模式显式使用 `local-production` 构建：没有天地图 Token 时使用仓库内的自然资源部标准地图和离线边界数据，仍保留审图号和原图入口；这条本地回退不改变公网 Compose 的合规要求。
 
 ### 科学结论边界
 

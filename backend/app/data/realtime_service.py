@@ -196,7 +196,7 @@ def _load_persisted_bundle(region_id: str) -> tuple[float, dict[str, Any]] | Non
     try:
         with path.open("r", encoding="utf-8") as handle:
             document = json.load(handle)
-        if document.get("format_version") not in {1, 2, REALTIME_CACHE_FORMAT_VERSION} or document.get("region_id") != region_id:
+        if document.get("format_version") != REALTIME_CACHE_FORMAT_VERSION or document.get("region_id") != region_id:
             return None
         bundle = document["bundle"]
         bundle["events"] = [OceanEvent.model_validate(event) for event in bundle["events"]]

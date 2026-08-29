@@ -47,9 +47,9 @@
 
 | 组成 | 默认端口 | 用途 |
 | --- | ---: | --- |
-| React / Vite 前端 | `5173` | 地图、事件队列、详情、探针、Agent 界面 |
-| FastAPI 后端 | `8000` | 数据聚合、认证、事件、Argo、Copernicus、Agent、MCP |
+| FastAPI 本地生产应用 | `8000` | 托管生产前端、数据聚合、认证、事件、Argo、Copernicus、Agent 和 MCP |
 | Codex sidecar | `8011` | Codex 线程、流式执行、工具调用和报告任务 |
+| Vite 开发服务器 | `5173` | 仅手动开发模式使用，不属于一键入口 |
 | PostgreSQL | 生产容器内部 | 用户、会话、模型密钥、监测浮标和租户状态 |
 | SQLite / 文件缓存 | 本地或容器卷 | Agent 检查点、实时缓存、MCP 作业和导出结果 |
 
@@ -113,7 +113,7 @@ Ocean MCP 是平台向 Codex 或其他 MCP 客户端暴露的领域工具接口�
 
 ### 1. Windows 一键启动
 
-确保已安装 Python 3.10+、Node.js 20+ 和 npm，然后双击：
+确保已安装 Python 3.11+、Node.js 20+、npm、Codex CLI，且已完成 Copernicus Marine 账号验证和环境变量配置，然后双击：
 
 ```text
 run_ocean_intelligence.bat
@@ -128,8 +128,10 @@ powershell -ExecutionPolicy Bypass -File .\start_ocean_intelligence.ps1
 启动完成后访问：
 
 ```text
-http://127.0.0.1:5173/
+http://127.0.0.1:8000/
 ```
+
+一键脚本会创建仓库级 `.venv`、按需安装依赖、执行前端生产构建，并只在 `127.0.0.1:8000/8011` 启动。它不会启动 `5173`，也不会把服务暴露到公网。首次打开页面时先注册本地研究账户并登录。
 
 停止服务：
 
@@ -178,12 +180,10 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 | 功能 | 地址 |
 | --- | --- |
-| 前端应用 | `http://127.0.0.1:5173/` |
-| FastAPI 文档 | `http://127.0.0.1:8000/docs` |
-| OpenAPI JSON | `http://127.0.0.1:8000/openapi.json` |
+| 本地生产应用 | `http://127.0.0.1:8000/` |
 | 后端健康检查 | `http://127.0.0.1:8000/api/health` |
-| Codex runtime 状态 | `http://127.0.0.1:8011/api/codex-runtime/status` |
-| MCP 入口 | `http://127.0.0.1:8000/api/codex/mcp` |
+| Codex runtime 状态（登录后） | `http://127.0.0.1:8000/api/codex-runtime/status` |
+| FastAPI 文档 | 一键生产模式关闭；仅手动开发模式开放 |
 
 ---
 
@@ -192,6 +192,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 ### 1. 开发与生产认证差异
 
 - 本地开发默认可使用 `AUTH_REQUIRED=false`，便于直接查看工作台；
+- Windows 一键入口属于本地生产模式，固定使用 `AUTH_REQUIRED=true`；
 - 生产 Compose 固定启用认证；
 - 生产账户、会话和模型配置存入 PostgreSQL；
 - 用户模型 API 密钥使用 `ENCRYPTION_KEY` 加密后保存；
@@ -625,10 +626,10 @@ GET /api/daily-briefing/dashboard?refresh=true
 
 | 软件 | 最低建议版本 | 用途 |
 | --- | ---: | --- |
-| Python | 3.10+ | FastAPI、数据处理、测试 |
+| Python | 3.11+ | FastAPI、数据处理、测试 |
 | Node.js | 20+ | 前端与 Codex sidecar |
 | npm | 随 Node.js | 安装前端依赖 |
-| Codex CLI | 可选 | Codex 工作台 |
+| Codex CLI | 一键入口必需 | Codex 工作台 |
 | Git | 可选 | 版本管理 |
 
 NetCDF、PyArrow、NumPy 等依赖由 `backend/requirements.txt` 安装。
@@ -688,7 +689,7 @@ VITE_TIANDITU_TOKEN=你的天地图密钥
 VITE_API_ROOT=
 ```
 
-生产构建必须配置天地图密钥，并在天地图控制台限制允许使用的生产域名。开发环境未配置时，系统只会使用诊断性后备地图能力。
+公网生产构建必须配置天地图密钥，并在天地图控制台限制允许使用的生产域名。Windows 一键本地生产构建使用 `local-production` 模式；未配置天地图密钥时使用仓库内标准地图和离线边界数据，不影响公网生产要求。
 
 ---
 
@@ -703,7 +704,7 @@ VITE_API_ROOT=
 | `SITE_ORIGIN` | 生产建议 | 完整站点 Origin |
 | `DEPLOY_TRANSPORT` | 是 | `direct` 或 `tunnel` |
 | `TUNNEL_TOKEN` | tunnel 必需 | Cloudflare Tunnel Token |
-| `VITE_TIANDITU_TOKEN` | 生产必需 | 浏览器端天地图密钥 |
+| `VITE_TIANDITU_TOKEN` | 公网生产必需；本地可选 | 浏览器端天地图密钥；本地 `local-production` 无此值时使用仓库内标准地图 |
 | `DEPLOY_HEALTH_TIMEOUT_SECONDS` | 否 | 发布健康检查超时，默认 180 秒 |
 
 ### 2. 数据库与认证
@@ -1378,11 +1379,11 @@ docker build \
 
 检查：
 
-```bash
-curl -I http://127.0.0.1:5173/
+```powershell
+Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing
 ```
 
-然后检查 Node.js 版本、`npm install` 是否成功、5173 端口是否被占用，以及 `frontend` 终端错误。
+然后检查 Python/Node.js 版本、`.runtime/backend.err.log`、`.runtime/codex.err.log`，以及 `8000/8011` 端口是否被其他程序占用。`5173` 只用于手动开发模式，不应出现在一键生产链路中。
 
 ### 2. 页面打开但 API 全部失败
 

@@ -7,7 +7,9 @@ export default defineConfig(({ command, mode }) => {
     process?: { env?: Record<string, string | undefined> };
   }).process?.env;
   const tiandituToken = (runtimeEnvironment?.VITE_TIANDITU_TOKEN ?? environment.VITE_TIANDITU_TOKEN ?? "").trim();
-  if (command === "build" && !tiandituToken) {
+  const localOnly = mode === "local-production"
+    || (runtimeEnvironment?.VITE_LOCAL_ONLY ?? environment.VITE_LOCAL_ONLY ?? "").trim().toLowerCase() === "true";
+  if (command === "build" && !localOnly && !tiandituToken) {
     throw new Error("生产构建必须配置 VITE_TIANDITU_TOKEN，中国大陆和台湾省底图固定使用天地图。");
   }
 
