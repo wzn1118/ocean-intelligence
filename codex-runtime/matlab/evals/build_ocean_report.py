@@ -28,6 +28,15 @@ EXPECTED_FIXTURES = {
     "paired-observation-model": "paired_observation_model.json",
     "repeat-cast-salinity-profiles": "repeat_cast_salinity_profiles.json",
 }
+FIXTURE_KINDS = {
+    "crossed-time-depth-temperature": "time_depth_grid",
+    "paired-observation-model": "paired_records",
+    "repeat-cast-salinity-profiles": "repeat_profiles",
+}
+FIXTURE_BINDING_LIMITATION = (
+    "Runtime records contain fixture IDs but no fixture content hashes or coordinate values; "
+    "matching metadata does not verify which numeric fixture snapshot MATLAB consumed."
+)
 EXPECTED_FIGURES = {
     "crossed-time-depth-temperature",
     "paired-interactive",
@@ -89,7 +98,7 @@ def require_positive_number(value: Any, field: str) -> float:
 
 def parse_utc(value: Any, field: str) -> datetime:
     text = require_text(value, field)
-    if not text.endswith("Z"):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", text):
         raise ReportBuildError(f"{field} must be a UTC timestamp ending in Z")
     try:
         parsed = datetime.fromisoformat(text[:-1] + "+00:00")
@@ -116,23 +125,41 @@ def require_regular_file(path: Path, label: str) -> Path:
     return path
 
 
-def load_json(path: Path, label: str) -> dict[str, Any]:
+def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ReportBuildError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value: str) -> None:
+    raise ReportBuildError(f"non-finite JSON number: {value}")
+
+
+def load_json_snapshot(path: Path, label: str) -> tuple[dict[str, Any], dict[str, Any]]:
     require_regular_file(path, label)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        content = path.read_bytes()
+        payload = json.loads(content, object_pairs_hook=unique_json_object, parse_constant=reject_json_constant)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ReportBuildError(f"invalid {label} JSON {path}: {error}") from error
     if not isinstance(payload, dict):
         raise ReportBuildError(f"{label} must contain a JSON object")
-    return payload
+    return payload, {"bytes": len(content), "sha256": sha256_bytes(content)}
+
+
+def load_json(path: Path, label: str) -> dict[str, Any]:
+    return load_json_snapshot(path, label)[0]
 
 
 def safe_artifact_path(root: Path, value: Any, field: str) -> tuple[str, Path]:
     relative = require_text(value, field)
-    if "\\" in relative or "\x00" in relative:
+    if "\\" in relative or ":" in relative or any(ord(character) < 32 for character in relative):
         raise ReportBuildError(f"{field} must be a normalized relative POSIX path: {relative!r}")
     pure_path = PurePosixPath(relative)
-    if pure_path.is_absolute() or any(part in {"", ".", ".."} for part in pure_path.parts):
+    if pure_path.is_absolute() or any(part in {"", ".", ".."} for part in relative.split("/")):
         raise ReportBuildError(f"unsafe artifact path in {field}: {relative!r}")
     candidate = root.joinpath(*pure_path.parts)
     current = root
@@ -279,7 +306,7 @@ def shape_size(shape: Any, field: str) -> int:
     return math.prod(values)
 
 
-def verify_scientific_contract(figure: dict[str, Any], expected_counts: dict[str, int]) -> dict[str, Any]:
+def verify_scientific_contract(figure: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
     figure_id = require_text(figure.get("id"), "figure.id")
     contract = figure.get("scientific_data_contract")
     if not isinstance(contract, dict):
@@ -289,22 +316,48 @@ def verify_scientific_contract(figure: dict[str, Any], expected_counts: dict[str
     if contract.get("dataType") != "synthetic_fixture":
         raise ReportBuildError(f"figure {figure_id} must identify synthetic_fixture data")
     total_from_shape = shape_size(contract.get("shape"), f"{figure_id}.scientific_data_contract.shape")
+    shape = contract["shape"] if isinstance(contract["shape"], list) else [contract["shape"]]
+    dimension_order = contract.get("dimensionOrder")
+    dimension_order = dimension_order if isinstance(dimension_order, list) else [dimension_order]
+    if shape != expected["shape"] or dimension_order != expected["dimension_order"]:
+        raise ReportBuildError(f"figure {figure_id} shape or dimension order differs from fixture selection")
+    if (require_nonnegative_integer(contract.get("rank"), f"{figure_id}.rank") != len(shape)
+            or contract.get("observationDimension") != dimension_order[0]):
+        raise ReportBuildError(f"figure {figure_id} rank or observation dimension differs from fixture")
+    coordinates = contract.get("coordinates")
+    if not isinstance(coordinates, dict) or set(coordinates) != set(dimension_order):
+        raise ReportBuildError(f"figure {figure_id} coordinate axes differ from fixture selection")
+    for name, count in zip(dimension_order, shape):
+        coordinate = coordinates[name]
+        if not isinstance(coordinate, dict):
+            raise ReportBuildError(f"figure {figure_id} coordinate {name} must be an object")
+        expected_unit = {"depth": "m", "time": "datetime", "observation": "1"}[name]
+        expected_direction = "positive_down" if name == "depth" else "increasing"
+        if (require_nonnegative_integer(coordinate.get("count"), f"{figure_id}.{name}.count") != count
+                or coordinate.get("unit") != expected_unit or coordinate.get("direction") != expected_direction):
+            raise ReportBuildError(f"figure {figure_id} coordinate count/unit/direction differs from fixture")
+        if name == "time" and (coordinate.get("timezone") != "UTC" or contract.get("timeZone") != "UTC"):
+            raise ReportBuildError(f"figure {figure_id} time coordinate must use UTC")
     units = contract.get("units")
     if not isinstance(units, dict):
         raise ReportBuildError(f"figure {figure_id} missing units")
     unit = require_text(units.get("value"), f"{figure_id}.scientific_data_contract.units.value")
+    if unit != expected["unit"]:
+        raise ReportBuildError(f"figure {figure_id} unit differs from fixture: {unit}")
     missing = contract.get("missing")
     if not isinstance(missing, dict) or missing.get("status") != "present" or missing.get("policy") != "preserve":
         raise ReportBuildError(f"figure {figure_id} must preserve explicit missing data")
+    if missing.get("representation") != "NaN" or require_nonnegative_integer(missing.get("masked_count"), "masked_count") != 0:
+        raise ReportBuildError(f"figure {figure_id} missing representation or masked count differs from gate")
     total = require_nonnegative_integer(missing.get("total_count"), f"{figure_id}.missing.total_count")
     valid = require_nonnegative_integer(missing.get("valid_count"), f"{figure_id}.missing.valid_count")
     missing_count = require_nonnegative_integer(missing.get("missing_count"), f"{figure_id}.missing.missing_count")
     if total != total_from_shape or valid + missing_count != total:
         raise ReportBuildError(f"figure {figure_id} scientific count reconciliation failed")
     if (total, valid, missing_count) != (
-        expected_counts["raw_count"],
-        expected_counts["valid_count"],
-        expected_counts["missing_count"],
+        expected["counts"]["raw_count"],
+        expected["counts"]["valid_count"],
+        expected["counts"]["missing_count"],
     ):
         raise ReportBuildError(f"figure {figure_id} counts do not match fixture measurements")
     qc = contract.get("qc")
@@ -313,17 +366,23 @@ def verify_scientific_contract(figure: dict[str, Any], expected_counts: dict[str
         raise ReportBuildError(f"figure {figure_id} QC contract is incomplete")
     if not isinstance(uncertainty, dict) or uncertainty.get("status") != "present":
         raise ReportBuildError(f"figure {figure_id} uncertainty contract is incomplete")
-    return {"unit": unit, "raw_count": total, "valid_count": valid, "missing_count": missing_count}
+    return {
+        "unit": unit, "raw_count": total, "valid_count": valid, "missing_count": missing_count,
+        "shape": shape, "dimension_order": dimension_order,
+        "qc": {"source_status": "present", "report_policy": "preserve_including_suspect",
+               "report_rejected_count": 0, "plot_filtering": "not_verified"},
+        "uncertainty": {"source_status": "present", "plot_display": "not_verified"},
+    }
 
 
-def validate_runtime_bundle(runtime_root: Path, figure_counts: dict[str, dict[str, int]]) -> dict[str, Any]:
+def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[str, Any]]) -> dict[str, Any]:
     if runtime_root.is_symlink() or not runtime_root.is_dir():
         raise ReportBuildError(f"runtime output directory is missing or unsafe: {runtime_root}")
     runtime_root = runtime_root.resolve()
     manifest_path = runtime_root / "figures.json"
     runtime_path = runtime_root / "matlab-runtime.json"
-    manifest = load_json(manifest_path, "figures.json")
-    runtime = load_json(runtime_path, "matlab-runtime.json")
+    manifest, manifest_snapshot = load_json_snapshot(manifest_path, "figures.json")
+    runtime, runtime_snapshot = load_json_snapshot(runtime_path, "matlab-runtime.json")
 
     if runtime.get("schema_version") != 1:
         raise ReportBuildError("matlab-runtime.json schema_version must be 1")
@@ -341,7 +400,8 @@ def validate_runtime_bundle(runtime_root: Path, figure_counts: dict[str, dict[st
     if manifest_reference != "figures.json" or referenced_manifest != manifest_path:
         raise ReportBuildError("runtime.manifest must reference figures.json in the runtime output directory")
     fixture_ids = runtime.get("fixture_ids")
-    if not isinstance(fixture_ids, list) or set(fixture_ids) != set(EXPECTED_FIXTURES):
+    if (not isinstance(fixture_ids, list) or not all(isinstance(identifier, str) for identifier in fixture_ids)
+            or len(fixture_ids) != len(EXPECTED_FIXTURES) or set(fixture_ids) != set(EXPECTED_FIXTURES)):
         raise ReportBuildError("runtime.fixture_ids do not match the run_matlab_gate fixtures")
     interaction = runtime.get("interaction")
     if not isinstance(interaction, dict) or any(
@@ -352,7 +412,7 @@ def validate_runtime_bundle(runtime_root: Path, figure_counts: dict[str, dict[st
 
     if manifest.get("schema_version") != 2:
         raise ReportBuildError("figures.json schema_version must be 2")
-    parse_utc(manifest.get("generated_at"), "manifest.generated_at")
+    manifest_generated_at = parse_utc(manifest.get("generated_at"), "manifest.generated_at")
     require_text(manifest.get("generator"), "manifest.generator")
     if manifest.get("runtime_status") != "ready" or manifest.get("execution_verified") is not True:
         raise ReportBuildError("figures.json does not contain verified runtime execution")
@@ -384,21 +444,28 @@ def validate_runtime_bundle(runtime_root: Path, figure_counts: dict[str, dict[st
     for figure in figures:
         figure_id = figure["id"]
         title = require_text(figure.get("title"), f"figure {figure_id}.title")
+        if title != figure_contexts[figure_id]["title"]:
+            raise ReportBuildError(f"figure {figure_id} title differs from fixture selection")
         source = require_text(figure.get("source"), f"figure {figure_id}.source")
         figure_runtime = figure.get("runtime")
         if not isinstance(figure_runtime, dict) or normalize_matlab_release(
             figure_runtime.get("matlab_release"), f"figure {figure_id}.runtime.matlab_release"
         ) != runtime_release:
             raise ReportBuildError(f"figure {figure_id} MATLAB release does not match runtime record")
-        scientific = verify_scientific_contract(figure, figure_counts[figure_id])
+        scientific = verify_scientific_contract(figure, figure_contexts[figure_id])
         exports = figure.get("exports")
         if not isinstance(exports, dict) or set(exports) != set(REQUIRED_FORMATS):
             raise ReportBuildError(f"figure {figure_id} must contain exactly PNG, PDF, and SVG exports")
         checked_exports = []
         for format_name in REQUIRED_FORMATS:
             export = exports[format_name]
-            if export.get("figure_id") != figure_id:
+            if not isinstance(export, dict) or export.get("figure_id") != figure_id:
                 raise ReportBuildError(f"figure identity mismatch in {figure_id} {format_name} export")
+            if any(export.get(key) != figure.get(key) for key in ("title", "source", "theme")):
+                raise ReportBuildError(f"figure metadata mismatch in {figure_id} {format_name} export")
+            if export.get("file") != f"{figure_id}.{format_name}":
+                safe_artifact_path(runtime_root, export.get("file"), "export.file")
+                raise ReportBuildError(f"figure {figure_id} export path does not match gate figure identity")
             checked = verify_artifact(runtime_root, figure_id, format_name, export, seen_paths)
             checked["figure_id"] = figure_id
             artifacts.append(checked)
@@ -409,6 +476,16 @@ def validate_runtime_bundle(runtime_root: Path, figure_counts: dict[str, dict[st
                 "title": title,
                 "source": source,
                 "scientific_data": scientific,
+                "fixture_binding": {
+                    "fixture_id": figure_contexts[figure_id]["fixture_id"],
+                    "fixture_file": figure_contexts[figure_id]["fixture_file"],
+                    "fixture_sha256": figure_contexts[figure_id]["fixture_sha256"],
+                    "selection": figure_contexts[figure_id]["selection"],
+                    "metadata_match": True,
+                    "runtime_fixture_hash_verified": False,
+                    "limitations": FIXTURE_BINDING_LIMITATION,
+                },
+                "scientific_context": figure_contexts[figure_id],
                 "exports": checked_exports,
             }
         )
@@ -416,8 +493,9 @@ def validate_runtime_bundle(runtime_root: Path, figure_counts: dict[str, dict[st
         "manifest": manifest,
         "runtime": runtime,
         "matlab_release": runtime_release,
-        "manifest_file": {"file": "figures.json", "bytes": manifest_path.stat().st_size, "sha256": sha256_file(manifest_path)},
-        "runtime_file": {"file": "matlab-runtime.json", "bytes": runtime_path.stat().st_size, "sha256": sha256_file(runtime_path)},
+        "manifest_generated_at": manifest_generated_at.isoformat().replace("+00:00", "Z"),
+        "manifest_file": {"file": "figures.json", **manifest_snapshot},
+        "runtime_file": {"file": "matlab-runtime.json", **runtime_snapshot},
         "figures": figure_evidence,
         "artifacts": artifacts,
     }
@@ -456,14 +534,29 @@ def validate_fixture_identity(payload: dict[str, Any], expected_id: str, file_na
         raise ReportBuildError(f"fixture identity mismatch: {file_name}")
     if payload.get("synthetic") is not True:
         raise ReportBuildError(f"fixture must declare synthetic=true: {file_name}")
+    if payload.get("kind") != FIXTURE_KINDS[expected_id]:
+        raise ReportBuildError(f"fixture kind does not match its id: {file_name}")
     provenance = payload.get("provenance")
     if not isinstance(provenance, dict):
         raise ReportBuildError(f"fixture provenance missing: {file_name}")
-    require_text(provenance.get("method"), f"{file_name}.provenance.method")
+    if provenance.get("method") != "deterministic_formula":
+        raise ReportBuildError(f"fixture method must be deterministic_formula: {file_name}")
     require_text(provenance.get("formula"), f"{file_name}.provenance.formula")
     purpose = require_text(provenance.get("purpose"), f"{file_name}.provenance.purpose").lower()
     if "not an observed ocean dataset" not in purpose:
         raise ReportBuildError(f"fixture must disclaim observed ocean data: {file_name}")
+    if any(key in payload for key in ("area", "bounds", "sea_area", "spatial_coverage", "longitude", "latitude")):
+        raise ReportBuildError(f"unsupported geographic metadata in fixed fixture: {file_name}")
+    if payload["kind"] == "paired_records" and "coordinates" in payload:
+        raise ReportBuildError(f"paired coordinates must come from individual records: {file_name}")
+
+
+def validate_design(payload: dict[str, Any], pair_count: int, file_name: str) -> None:
+    design = payload.get("design")
+    if not isinstance(design, dict) or design.get("time_depth_relationship") != "fully_crossed":
+        raise ReportBuildError(f"fixture must declare a fully_crossed design: {file_name}")
+    if require_nonnegative_integer(design.get("expected_pair_count"), "design.expected_pair_count") != pair_count:
+        raise ReportBuildError(f"fixture design count does not match coordinates: {file_name}")
 
 
 def summarize_grid_fixture(payload: dict[str, Any], file_name: str) -> dict[str, Any]:
@@ -473,6 +566,8 @@ def summarize_grid_fixture(payload: dict[str, Any], file_name: str) -> dict[str,
     variables = payload.get("variables")
     if not isinstance(coordinates, dict) or not isinstance(variables, dict):
         raise ReportBuildError(f"fixture coordinates or variables missing: {file_name}")
+    if set(coordinates) != {"time", "depth"}:
+        raise ReportBuildError(f"unsupported coordinates in fixed fixture: {file_name}")
     time_coordinate = coordinates.get("time")
     depth_coordinate = coordinates.get("depth")
     if not isinstance(time_coordinate, dict) or not isinstance(depth_coordinate, dict):
@@ -484,19 +579,28 @@ def summarize_grid_fixture(payload: dict[str, Any], file_name: str) -> dict[str,
     parsed_times = [parse_utc(value, f"{file_name}.coordinates.time") for value in times]
     if any(current <= previous for previous, current in zip(parsed_times, parsed_times[1:])):
         raise ReportBuildError(f"fixture time coordinate must be strictly increasing: {file_name}")
-    if time_coordinate.get("timezone") != "UTC" or depth_coordinate.get("unit") != "m" or depth_coordinate.get("direction") != "positive_down":
+    if (time_coordinate.get("timezone") != "UTC" or time_coordinate.get("direction") != "increasing"
+            or time_coordinate.get("unit") != "datetime" or depth_coordinate.get("unit") != "m"
+            or depth_coordinate.get("direction") != "positive_down"):
         raise ReportBuildError(f"fixture coordinate contract is incomplete: {file_name}")
-    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in depths):
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in depths):
         raise ReportBuildError(f"fixture depths must be numeric: {file_name}")
     numeric_depths = [float(value) for value in depths]
     if min(numeric_depths) < 0 or any(current <= previous for previous, current in zip(numeric_depths, numeric_depths[1:])):
         raise ReportBuildError(f"fixture depths must be nonnegative and increasing: {file_name}")
+    reference = require_text(depth_coordinate.get("reference"), f"{file_name}.depth.reference")
+    validate_design(payload, len(times) * len(depths), file_name)
 
     primary = variables.get(variable_name)
     uncertainty = variables.get(f"{variable_name}_standard_uncertainty")
     qc_variable = variables.get("qc")
     if not isinstance(primary, dict) or not isinstance(uncertainty, dict) or not isinstance(qc_variable, dict):
         raise ReportBuildError(f"fixture value, uncertainty, or QC variable missing: {file_name}")
+    if any(variable.get("dimension_order") != ["depth", "time"] for variable in (primary, uncertainty, qc_variable)):
+        raise ReportBuildError(f"fixture dimension_order must be depth,time for values, QC and uncertainty: {file_name}")
+    if (primary.get("missing_policy") != "preserve" or primary.get("missing_representation") != "null_to_NaN"
+            or qc_variable.get("policy") != "preserve"):
+        raise ReportBuildError(f"fixture missing and QC policies must preserve data: {file_name}")
     rows, columns = len(depths), len(times)
     primary_raw = flatten_matrix(primary.get("values"), rows, columns, f"{file_name}.{variable_name}")
     uncertainty_raw = flatten_matrix(uncertainty.get("values"), rows, columns, f"{file_name}.uncertainty")
@@ -513,6 +617,8 @@ def summarize_grid_fixture(payload: dict[str, Any], file_name: str) -> dict[str,
         if (value is None) != (qc_value == "missing"):
             raise ReportBuildError(f"fixture missing values and QC state differ: {file_name}")
     unit = require_text(primary.get("unit"), f"{file_name}.{variable_name}.unit")
+    if unit != ("degC" if variable_name == "temperature" else "g kg-1"):
+        raise ReportBuildError(f"fixture unit does not match run_matlab_gate: {file_name}")
     if uncertainty.get("unit") != unit or uncertainty.get("type") != "standard_uncertainty":
         raise ReportBuildError(f"fixture uncertainty unit or type mismatch: {file_name}")
     raw_count = rows * columns
@@ -524,14 +630,18 @@ def summarize_grid_fixture(payload: dict[str, Any], file_name: str) -> dict[str,
         "kind": kind,
         "variable": variable_name,
         "unit": unit,
-        "time": {"start": times[0], "end": times[-1], "timezone": "UTC", "count": len(times)},
+        "shape": [rows, columns],
+        "dimension_order": ["depth", "time"],
+        "time": {"start": times[0], "end": times[-1], "timezone": "UTC", "count": len(times), "values": times},
         "coordinates": {
             "longitude": {"status": "not_provided", "unit": "degrees_east", "values": None},
             "latitude": {"status": "not_provided", "unit": "degrees_north", "values": None},
-            "depth": {"minimum": min(numeric_depths), "maximum": max(numeric_depths), "unit": "m", "positive": "down", "count": len(depths)},
+            "depth": {"minimum": min(numeric_depths), "maximum": max(numeric_depths), "unit": "m", "positive": "down", "count": len(depths), "reference": reference, "values": numeric_depths},
         },
         "counts": {"raw_count": raw_count, "valid_count": len(values), "missing_count": missing_count},
         "qc": dict(sorted(Counter(qc_raw).items())),
+        "missing_indices_depth_time": [[index // columns, index % columns] for index, value in enumerate(primary_raw) if value is None],
+        "statistics_method": {"weighting": "equal_weight_finite_cells", "qc_policy": "preserve_including_suspect", "qc_rejected": 0},
         "statistics": summarize_numbers(values),
         "uncertainty": {"type": "standard_uncertainty", "unit": unit, **summarize_numbers(uncertainties)},
         "provenance": payload["provenance"],
@@ -560,12 +670,20 @@ def summarize_paired_fixture(payload: dict[str, Any], file_name: str) -> dict[st
     if contract.get("time_zone") != "UTC" or contract.get("depth_direction") != "positive_down":
         raise ReportBuildError(f"paired fixture coordinate contract is incomplete: {file_name}")
     unit = require_text(contract.get("observation_unit"), f"{file_name}.observation_unit")
-    if contract.get("model_unit") != unit or contract.get("uncertainty_unit") != unit:
+    if unit != "degC" or contract.get("model_unit") != unit or contract.get("uncertainty_unit") != unit:
         raise ReportBuildError(f"paired fixture units differ: {file_name}")
+    if (contract.get("missing_policy") != "preserve" or contract.get("qc_policy") != "preserve"
+            or contract.get("stable_id_field") != "id"):
+        raise ReportBuildError(f"paired fixture must preserve missing, QC and stable id: {file_name}")
     if contract.get("uncertainty_type") != "standard_uncertainty":
         raise ReportBuildError(f"paired fixture uncertainty type is unsupported: {file_name}")
 
     identifiers: set[str] = set()
+    coordinate_pairs: set[tuple[datetime, float]] = set()
+    valid_ids: list[str] = []
+    missing_ids: list[str] = []
+    observation_missing_ids: list[str] = []
+    model_missing_ids: list[str] = []
     times: list[str] = []
     depths: list[float] = []
     qc_values: list[str] = []
@@ -578,34 +696,45 @@ def summarize_paired_fixture(payload: dict[str, Any], file_name: str) -> dict[st
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise ReportBuildError(f"paired record {index} must be an object")
+        if set(record) != {"id", "time", "depth_m", "observation_degC", "model_degC", "uncertainty_degC", "qc"}:
+            raise ReportBuildError(f"paired record has missing or unsupported fields: {index}")
         identifier = require_text(record.get("id"), f"{file_name}.records[{index}].id")
         if identifier in identifiers:
             raise ReportBuildError(f"duplicate paired record id: {identifier}")
         identifiers.add(identifier)
         timestamp = require_text(record.get("time"), f"{file_name}.records[{index}].time")
-        parse_utc(timestamp, f"{file_name}.records[{index}].time")
+        parsed_time = parse_utc(timestamp, f"{file_name}.records[{index}].time")
         depth = record.get("depth_m")
         if isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or depth < 0:
             raise ReportBuildError(f"invalid paired record depth: {identifier}")
+        coordinate_pair = (parsed_time, float(depth))
+        if coordinate_pair in coordinate_pairs:
+            raise ReportBuildError(f"duplicate time/depth pair: {identifier}")
+        coordinate_pairs.add(coordinate_pair)
         qc = require_text(record.get("qc"), f"{file_name}.records[{index}].qc")
         if qc not in {"good", "suspect", "missing"}:
             raise ReportBuildError(f"unsupported paired record QC: {qc}")
         observation = record.get("observation_degC")
         model = record.get("model_degC")
         uncertainty = record.get("uncertainty_degC")
+        for field, value in (("observation", observation), ("model", model), ("uncertainty", uncertainty)):
+            numeric_values([value], f"paired {field} for {identifier}")
         times.append(timestamp)
         depths.append(float(depth))
         qc_values.append(qc)
         if observation is None:
-            missing_count += 1
+            observation_missing_ids.append(identifier)
             if uncertainty is not None or qc != "missing":
                 raise ReportBuildError(f"missing paired observation must preserve uncertainty and QC: {identifier}")
+        elif uncertainty is None or uncertainty < 0 or qc == "missing":
+            raise ReportBuildError(f"finite paired observation requires uncertainty and non-missing QC: {identifier}")
+        if model is None:
+            model_missing_ids.append(identifier)
+        if observation is None or model is None:
+            missing_ids.append(identifier)
+            missing_count += 1
             continue
-        for field, value in (("observation", observation), ("model", model), ("uncertainty", uncertainty)):
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-                raise ReportBuildError(f"paired {field} must be finite for {identifier}")
-        if uncertainty < 0:
-            raise ReportBuildError(f"paired uncertainty must be nonnegative for {identifier}")
+        valid_ids.append(identifier)
         observation_value = float(observation)
         model_value = float(model)
         uncertainty_value = float(uncertainty)
@@ -614,14 +743,17 @@ def summarize_paired_fixture(payload: dict[str, Any], file_name: str) -> dict[st
         models.append(model_value)
         uncertainties.append(uncertainty_value)
         differences.append(difference)
-        within_uncertainty += int(abs(difference) <= uncertainty_value)
+        within_uncertainty += int(abs(difference) <= uncertainty_value or math.isclose(abs(difference), uncertainty_value, rel_tol=1e-12, abs_tol=1e-12))
 
-    unique_times = sorted(set(times))
+    unique_times = sorted(set(times), key=lambda value: parse_utc(value, "paired.time"))
     unique_depths = sorted(set(depths))
     expected_pairs = len(unique_times) * len(unique_depths)
-    if len(records) != expected_pairs or payload.get("design", {}).get("expected_pair_count") != expected_pairs:
+    if len(unique_times) < 2 or len(unique_depths) < 2 or len(coordinate_pairs) != expected_pairs:
         raise ReportBuildError(f"paired fixture is not a complete crossed design: {file_name}")
+    validate_design(payload, expected_pairs, file_name)
     valid_count = len(differences)
+    if valid_count == 0:
+        raise ReportBuildError(f"paired fixture has no complete finite pairs: {file_name}")
     correlation = pearson_correlation(observations, models)
     return {
         "id": payload["id"],
@@ -630,14 +762,23 @@ def summarize_paired_fixture(payload: dict[str, Any], file_name: str) -> dict[st
         "kind": payload.get("kind"),
         "variable": "observation_model_temperature",
         "unit": unit,
-        "time": {"start": unique_times[0], "end": unique_times[-1], "timezone": "UTC", "count": len(unique_times)},
+        "shape": [len(records)],
+        "dimension_order": ["observation"],
+        "time": {"start": unique_times[0], "end": unique_times[-1], "timezone": "UTC", "count": len(unique_times), "values": unique_times},
         "coordinates": {
             "longitude": {"status": "not_provided", "unit": "degrees_east", "values": None},
             "latitude": {"status": "not_provided", "unit": "degrees_north", "values": None},
-            "depth": {"minimum": min(unique_depths), "maximum": max(unique_depths), "unit": "m", "positive": "down", "count": len(unique_depths)},
+            "depth": {"minimum": min(unique_depths), "maximum": max(unique_depths), "unit": "m", "positive": "down", "count": len(unique_depths), "reference": "not_provided", "values": unique_depths},
         },
         "counts": {"raw_count": len(records), "valid_count": valid_count, "missing_count": missing_count},
         "qc": dict(sorted(Counter(qc_values).items())),
+        "pairing": {
+            "method": "same_record_id_time_depth", "error": "model_minus_observation",
+            "valid_ids": valid_ids, "missing_ids": missing_ids,
+            "observation_missing_ids": observation_missing_ids, "model_missing_ids": model_missing_ids,
+            "records": [{key: record[key] for key in ("id", "time", "depth_m", "qc")} for record in records],
+        },
+        "statistics_method": {"weighting": "equal_weight_complete_pairs", "qc_policy": "preserve_including_suspect", "qc_rejected": 0},
         "statistics": {
             "observation_mean": statistics.fmean(observations),
             "model_mean": statistics.fmean(models),
@@ -648,19 +789,20 @@ def summarize_paired_fixture(payload: dict[str, Any], file_name: str) -> dict[st
             "within_standard_uncertainty_count": within_uncertainty,
             "within_standard_uncertainty_fraction": within_uncertainty / valid_count,
         },
-        "uncertainty": {"type": "standard_uncertainty", "unit": unit, **summarize_numbers(uncertainties)},
+        "uncertainty": {"type": "standard_uncertainty", "unit": unit, "scope": "observation_in_complete_pairs", "count": len(uncertainties), **summarize_numbers(uncertainties)},
         "provenance": payload["provenance"],
         "sha256": None,
     }
 
 
-def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any]], dict[str, dict[str, int]]]:
+def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     if fixture_directory.is_symlink() or not fixture_directory.is_dir():
         raise ReportBuildError(f"fixture directory is missing or unsafe: {fixture_directory}")
     summaries: list[dict[str, Any]] = []
+    payloads: dict[str, dict[str, Any]] = {}
     for expected_id, file_name in EXPECTED_FIXTURES.items():
         path = fixture_directory / file_name
-        payload = load_json(path, f"fixture {file_name}")
+        payload, snapshot = load_json_snapshot(path, f"fixture {file_name}")
         validate_fixture_identity(payload, expected_id, file_name)
         if payload.get("kind") in {"time_depth_grid", "repeat_profiles"}:
             summary = summarize_grid_fixture(payload, file_name)
@@ -668,29 +810,52 @@ def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any
             summary = summarize_paired_fixture(payload, file_name)
         else:
             raise ReportBuildError(f"unsupported fixture kind in {file_name}: {payload.get('kind')!r}")
-        summary["sha256"] = sha256_file(path)
-        summary["bytes"] = path.stat().st_size
+        summary.update(snapshot)
+        payloads[expected_id] = payload
         summaries.append(summary)
     summaries.sort(key=lambda item: item["id"])
     by_id = {item["id"]: item for item in summaries}
     temperature = by_id["crossed-time-depth-temperature"]
-    temperature_payload = load_json(
-        fixture_directory / EXPECTED_FIXTURES["crossed-time-depth-temperature"],
-        "temperature fixture",
-    )
+    temperature_payload = payloads["crossed-time-depth-temperature"]
+    if len(temperature_payload["coordinates"]["depth"]["values"]) < 3:
+        raise ReportBuildError("temperature fixture lacks the gate's third depth row")
     interactive_row = temperature_payload["variables"]["temperature"]["values"][2]
     interactive_counts = {
         "raw_count": len(interactive_row),
         "valid_count": sum(value is not None for value in interactive_row),
         "missing_count": sum(value is None for value in interactive_row),
     }
-    figure_counts = {
-        "crossed-time-depth-temperature": temperature["counts"],
-        "paired-interactive": interactive_counts,
-        "paired-observation-model": by_id["paired-observation-model"]["counts"],
-        "repeat-cast-salinity-profiles": by_id["repeat-cast-salinity-profiles"]["counts"],
+    figure_contexts = {}
+    for summary in summaries:
+        figure_contexts[summary["id"]] = {
+            "fixture_id": summary["id"], "fixture_file": summary["file"], "fixture_sha256": summary["sha256"],
+            "title": summary["title"], "variable": summary["variable"], "unit": summary["unit"],
+            "shape": summary["shape"], "dimension_order": summary["dimension_order"],
+            "time": summary["time"], "coordinates": summary["coordinates"],
+            "counts": summary["counts"], "qc": summary["qc"], "uncertainty": summary["uncertainty"],
+            "statistics": summary["statistics"], "selection": {"kind": "whole_fixture"},
+        }
+    interactive_depth = temperature_payload["coordinates"]["depth"]["values"][2]
+    if interactive_depth != 50:
+        raise ReportBuildError("third temperature depth must be 50 m for gate ObservationIDs temp-050m")
+    interactive_uncertainty = temperature_payload["variables"]["temperature_standard_uncertainty"]["values"][2]
+    interactive_qc = temperature_payload["variables"]["qc"]["values"][2]
+    figure_contexts["paired-interactive"] = {
+        **figure_contexts["crossed-time-depth-temperature"],
+        "title": "温度时间序列 / Temperature time series", "shape": [len(interactive_row)],
+        "dimension_order": ["time"], "counts": interactive_counts,
+        "selection": {"kind": "depth_row", "index_zero_based": 2, "depth_m": interactive_depth},
+        "coordinates": {**temperature["coordinates"], "depth": {
+            "minimum": interactive_depth, "maximum": interactive_depth, "values": [interactive_depth],
+            "unit": "m", "positive": "down", "count": 1, "reference": temperature["coordinates"]["depth"]["reference"],
+        }},
+        "qc": dict(sorted(Counter(interactive_qc).items())),
+        "uncertainty": {"type": "standard_uncertainty", "unit": "degC", **summarize_numbers(numeric_values(interactive_uncertainty, "interactive uncertainty"))},
+        "statistics": summarize_numbers(numeric_values(interactive_row, "interactive temperature")),
+        "observation_ids": [f"temp-050m-{index + 1:03d}" for index in range(len(interactive_row))],
+        "missing_time_indices": [index for index, value in enumerate(interactive_row) if value is None],
     }
-    return summaries, figure_counts
+    return summaries, figure_contexts
 
 
 def format_number(value: float | None, digits: int = 3) -> str:
@@ -714,7 +879,7 @@ def render_report(evidence: dict[str, Any]) -> str:
     lines = [
         "# MATLAB 海洋合成基准证据报告",
         "",
-        f"> 数据来源={SOURCE_CLASSIFICATION}。本报告只复述本地确定性 fixture 的复算统计与 `run_matlab_gate` 真实导出产物，不代表任何真实海区当前或历史海况。",
+        f"> 数据来源={SOURCE_CLASSIFICATION}。本报告复述本地确定性 fixture 的复算统计与清单登记的导出产物，不代表任何真实海区当前或历史海况。",
         "",
         "## 1. 报告范围与结论边界",
         "",
@@ -724,10 +889,12 @@ def render_report(evidence: dict[str, Any]) -> str:
         "- 水平坐标：经度与纬度均未提供，状态为 `not_provided`。",
         f"- 运行证据：{runtime['runtime']} {runtime['matlab_release']}；`figures.json` 记录执行已验证和产物校验通过。",
         "- 验证边界：未执行桌面人工验证，未执行人工视觉检查，不形成任何评分或生产验收结论。",
+        "- 输入绑定：运行记录没有 fixture 内容哈希或实际坐标值。图与本地 fixture 的 ID、标题、维度、单位和计数已核对，但运行时数值快照一致性未验证。",
         "",
         "## 2. 数据来源与复算方法",
         "",
-        "三份输入均声明 `synthetic=true`，来源方法为确定性公式，目的限定为 evaluation fixture。生成器独立读取原始 JSON，逐值复算有效数、缺测数、QC 分布、均值、极值、标准不确定度以及观测-模式配对误差；未从图中文字反推数值。[E1-E3]",
+        "三份输入均声明 `synthetic=true`，来源方法为确定性公式，目的限定为 evaluation fixture。生成器从 JSON 中存储的数值逐值复算有效数、缺测数、QC 分布、均值、极值、标准不确定度以及观测-模式配对误差。未按说明公式重新生成数据，也未从图中文字反推数值。[E1-E3]",
+        "统计口径：网格按有限单元等权，配对按双方有限的同记录等权；保留 suspect，不做面积、层厚或时间加权。标准不确定度均值是输入数值的描述统计，不是均值估计的不确定度。",
         "",
         "| Fixture | 变量 | UTC 时间 | 深度 | 单位 | 原始/有效/缺测 | QC |",
         "|---|---|---|---|---|---:|---|",
@@ -784,6 +951,9 @@ def render_report(evidence: dict[str, Any]) -> str:
             f"Pearson 相关系数为 {format_number(paired_stats['pearson_correlation'], 4)}。"
             f"绝对误差不超过逐记录标准不确定度的配对数为 {paired_stats['within_standard_uncertainty_count']}/{paired['counts']['valid_count']}。"
             "这是合成观测-模式基准的配对表现，不是生产模式验证结果。[E2]",
+            f"观测侧缺测 {len(paired['pairing']['observation_missing_ids'])} 条，模式侧缺测 {len(paired['pairing']['model_missing_ids'])} 条；"
+            "观测均值和模式均值均限定在相同完整配对上。记录 ID、时间和深度用于唯一匹配，suspect 保留。",
+            "误差覆盖分母为完整配对数，阈值仅取观测侧标准不确定度。fixture 未提供模式不确定度，不能据此声明联合置信区间、概率校准或独立实测验证。",
             "",
             f"![{paired_figure['title']}]({paired_png['file']})",
             "",
@@ -794,12 +964,17 @@ def render_report(evidence: dict[str, Any]) -> str:
         ]
     )
     interactive = next(item for item in runtime["figures"] if item["id"] == "paired-interactive")
+    interactive_context = interactive["scientific_context"]
     interactive_png = next(item for item in interactive["exports"] if item["format"] == "png")
     interactive_pdf = next(item for item in interactive["exports"] if item["format"] == "pdf")
     interactive_svg = next(item for item in interactive["exports"] if item["format"] == "svg")
     lines.extend(
         [
             "`matlab-runtime.json` 记录 DataTip 回调、Brush 稳定 ObservationID 和 headless fallback 断言成功。该证据来自批处理函数断言，只证明本次 headless 路径，不等于桌面交互或人工视觉验证。[E5]",
+            f"关联 E1 的第三行：深度 {interactive_context['selection']['depth_m']:g} m，"
+            f"UTC {interactive_context['time']['start']} 至 {interactive_context['time']['end']}；"
+            f"原始/有效/缺测 {interactive_context['counts']['raw_count']}/{interactive_context['counts']['valid_count']}/{interactive_context['counts']['missing_count']}。"
+            f"本地有限值均值 {format_number(interactive_context['statistics']['mean'])} degC。对应 ObservationID 和缺测时次索引保存在证据 JSON。[E1]",
             "",
             f"![{interactive['title']}]({interactive_png['file']})",
             "",
@@ -825,6 +1000,8 @@ def render_report(evidence: dict[str, Any]) -> str:
             "",
             "- 缺测保持为 `null -> NaN` 语义，不填补、不按零值处理。",
             "- QC 保留 `good`、`suspect`、`missing` 原状态；统计未把 `suspect` 自动删除，因此有效数与严格高质量样本数含义不同。",
+            "- 清单 `qc.status=present`、`uncertainty.status=present` 表示源 fixture 元数据存在；不能证明图件已接收、筛选或呈现这些字段，绘图应用状态记为 `not_verified`。",
+            "- 当前 gate 的温度场、盐度剖面和配对图调用未传 QC/不确定度数组；本报告相关统计来自源 fixture，不代表这些图已应用 QC 或绘制误差。交互调用传入 QCFlag 和 Uncertainty，但 QCFlag 用于点位元数据，不构成质量筛选。",
             "- 不确定度为 fixture 提供的标准不确定度，仅用于描述合成输入和逐记录误差覆盖；没有扩展为现实仪器误差、代表性误差或海区综合不确定度。",
             "- 三份 fixture 的时间窗不同，合并包络不代表连续采样，也不用于趋势计算。",
             "",
@@ -835,12 +1012,13 @@ def render_report(evidence: dict[str, Any]) -> str:
             "3. 样本规模只服务于绘图和合同回归，不能外推季节变化、异常事件或动力机制。",
             "4. `figures.json` 明确记录人工视觉检查未运行；本报告不补写桌面、字形、PDF 字体嵌入或人工审阅结论。",
             "5. 本报告不读取评分结果，也不声明满分、生产就绪或业务验收通过。",
+            "6. fixture 哈希记录的是本次报告读取的本地字节；运行清单缺少输入哈希，无法排除运行后同形数据被替换。图上数值、QC 和不确定度呈现尚未独立核验。",
             "",
             "## 10. 引用与可复核入口",
             "",
-            f"- [E1] `{fixtures['crossed-time-depth-temperature']['file']}`，SHA-256 `{fixtures['crossed-time-depth-temperature']['sha256']}`。",
-            f"- [E2] `{fixtures['paired-observation-model']['file']}`，SHA-256 `{fixtures['paired-observation-model']['sha256']}`。",
-            f"- [E3] `{fixtures['repeat-cast-salinity-profiles']['file']}`，SHA-256 `{fixtures['repeat-cast-salinity-profiles']['sha256']}`。",
+            f"- [E1] `{fixtures['crossed-time-depth-temperature']['reference_file']}`，SHA-256 `{fixtures['crossed-time-depth-temperature']['sha256']}`。",
+            f"- [E2] `{fixtures['paired-observation-model']['reference_file']}`，SHA-256 `{fixtures['paired-observation-model']['sha256']}`。",
+            f"- [E3] `{fixtures['repeat-cast-salinity-profiles']['reference_file']}`，SHA-256 `{fixtures['repeat-cast-salinity-profiles']['sha256']}`。",
             f"- [E4] `figures.json`，SHA-256 `{runtime['manifest_file']['sha256']}`。",
             f"- [E5] `matlab-runtime.json`，SHA-256 `{runtime['runtime_file']['sha256']}`。",
             "- 机器可读复核结果：[`report-evidence.json`](report-evidence.json)。",
@@ -859,6 +1037,8 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
         "schema_version": 1,
         "generated_at": generated_at,
         "status": "passed",
+        "validation_scope": "local_fixture_statistics_and_manifest_artifact_consistency",
+        "runtime_fixture_binding": {"status": "unverified", "reason": FIXTURE_BINDING_LIMITATION},
         "data_source": {
             "classification": "synthetic_benchmark",
             "label": SOURCE_CLASSIFICATION,
@@ -888,7 +1068,9 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
             "runtime": runtime_bundle["runtime"]["runtime"],
             "matlab_version": runtime_bundle["runtime"]["matlab_version"],
             "matlab_release": runtime_bundle["matlab_release"],
+            "manifest_generated_at": runtime_bundle["manifest_generated_at"],
             "execution_verified": True,
+            "execution_evidence_source": "matlab-runtime.json and figures.json declarations; not independently re-executed",
             "batch_startup_option_used": runtime_bundle["runtime"]["batch_startup_option_used"],
             "jvm_available": runtime_bundle["runtime"]["jvm_available"],
             "desktop_available": runtime_bundle["runtime"]["desktop_available"],
@@ -906,11 +1088,12 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
             "Fixture time windows are separate and do not form a continuous record.",
             "Desktop validation and trusted visual inspection were not performed.",
             "No evaluation score or production-readiness claim is made.",
+            FIXTURE_BINDING_LIMITATION,
+            "QC/uncertainty presence in a source contract does not verify filtering or visual presentation.",
         ],
         "references": [
-            {"id": "E1", "type": "fixture", "file": "crossed_time_depth_temperature.json"},
-            {"id": "E2", "type": "fixture", "file": "paired_observation_model.json"},
-            {"id": "E3", "type": "fixture", "file": "repeat_cast_salinity_profiles.json"},
+            *[{"id": f"E{index + 1}", "type": "fixture", "file": item["reference_file"], "sha256": item["sha256"]}
+              for index, item in enumerate(fixtures)],
             {"id": "E4", "type": "manifest", "file": "figures.json"},
             {"id": "E5", "type": "runtime", "file": "matlab-runtime.json"},
         ],
@@ -929,7 +1112,7 @@ def write_outputs(runtime_root: Path, report_text: str, evidence: dict[str, Any]
         "bytes": len(report_payload),
         "sha256": sha256_bytes(report_payload),
     }
-    evidence_payload = (json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    evidence_payload = (json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
     temporary_paths: list[Path] = []
     try:
         for payload in (report_payload, evidence_payload):
@@ -954,13 +1137,28 @@ def write_outputs(runtime_root: Path, report_text: str, evidence: dict[str, Any]
 
 
 def build_ocean_report(runtime_output: Path, fixture_directory: Path = DEFAULT_FIXTURE_DIRECTORY) -> dict[str, Any]:
+    if runtime_output.is_symlink() or fixture_directory.is_symlink():
+        raise ReportBuildError("runtime and fixture directories must not be symlinks")
     runtime_root = runtime_output.resolve()
-    fixtures, figure_counts = load_fixture_statistics(fixture_directory.resolve())
-    runtime_bundle = validate_runtime_bundle(runtime_root, figure_counts)
+    fixtures, figure_contexts = load_fixture_statistics(fixture_directory.resolve())
+    for fixture in fixtures:
+        fixture["reference_file"] = Path(os.path.relpath(fixture_directory.resolve() / fixture["file"], runtime_root)).as_posix()
+    runtime_bundle = validate_runtime_bundle(runtime_root, figure_contexts)
     generated_at = utc_now()
     evidence = build_evidence(fixtures, runtime_bundle, generated_at)
     report_text = render_report(evidence)
+    for item in [runtime_bundle["manifest_file"], runtime_bundle["runtime_file"], *runtime_bundle["artifacts"]]:
+        _, input_path = safe_artifact_path(runtime_root, item["file"], "input.file")
+        verify_input_snapshot(input_path, item)
+    for fixture in fixtures:
+        verify_input_snapshot(fixture_directory / fixture["file"], fixture)
     return write_outputs(runtime_root, report_text, evidence)
+
+
+def verify_input_snapshot(path: Path, snapshot: dict[str, Any]) -> None:
+    require_regular_file(path, "input snapshot")
+    if path.stat().st_size != snapshot["bytes"] or sha256_file(path) != snapshot["sha256"]:
+        raise ReportBuildError(f"input changed during report generation: {path}")
 
 
 def main(argv: list[str] | None = None) -> int:

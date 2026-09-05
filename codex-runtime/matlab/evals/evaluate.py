@@ -359,6 +359,37 @@ def collect_manifest_exports(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return exports
 
 
+def normalize_matlab_release(value: Any, field: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"R?[0-9]{4}[ab]", value) is None:
+        raise EvaluationError(f"{field} must be YYYYa/b or RYYYYa/b: {value!r}")
+    return value if value.startswith("R") else f"R{value}"
+
+
+def validate_runtime_releases(runtime_record: dict[str, Any], manifest: Any) -> None:
+    expected = normalize_matlab_release(runtime_record.get("matlab_release"), "runtime.matlab_release")
+    if not isinstance(manifest, dict):
+        raise EvaluationError("figures.json must be an object")
+    sources = [("manifest", manifest)]
+    manifest_runtime = manifest.get("runtime")
+    if not isinstance(manifest_runtime, dict):
+        raise EvaluationError("manifest.runtime must be an object with matlab_release")
+    sources.append(("manifest.runtime", manifest_runtime))
+    figures = manifest.get("figures")
+    if not isinstance(figures, list) or not figures:
+        raise EvaluationError("manifest.figures must be a nonempty array")
+    for index, figure in enumerate(figures):
+        field = f"manifest.figures[{index}].runtime"
+        if not isinstance(figure, dict) or not isinstance(figure.get("runtime"), dict):
+            raise EvaluationError(f"{field} must be an object with matlab_release")
+        sources.append((field, figure["runtime"]))
+    for field, source in sources:
+        actual = normalize_matlab_release(source.get("matlab_release"), f"{field}.matlab_release")
+        if actual != expected:
+            raise EvaluationError(
+                f"{field}.matlab_release does not match runtime.matlab_release: {actual} != {expected}"
+            )
+
+
 def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> dict[str, Any]:
     runtime_record = load_json(output_root / "matlab-runtime.json")
     if not isinstance(runtime_record, dict) or runtime_record.get("nonce") != nonce:
@@ -366,8 +397,8 @@ def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> d
     if runtime_record.get("runtime") != "MathWorks MATLAB" or runtime_record.get("success") is not True:
         raise EvaluationError("runtime record does not prove a successful MathWorks MATLAB run")
     require_text(runtime_record.get("matlab_version"), "runtime.matlab_version")
-    require_text(runtime_record.get("matlab_release"), "runtime.matlab_release")
     manifest = load_json(output_root / "figures.json")
+    validate_runtime_releases(runtime_record, manifest)
     exports = collect_manifest_exports(manifest)
     checked: list[dict[str, Any]] = []
     for export in exports:

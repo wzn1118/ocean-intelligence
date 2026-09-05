@@ -25,17 +25,17 @@ if strlength(strtrim(originalViewBox)) > 0
     viewBox = sscanf(char(replace(originalViewBox, ",", " ")), '%f')';
 else
     viewBox = [0 0 native_length(root, 'width') native_length(root, 'height')];
-    root.setAttribute('viewBox', sprintf('%.9g %.9g %.9g %.9g', viewBox));
+    root.setAttribute('viewBox', sprintf('%.17g %.17g %.17g %.17g', viewBox));
 end
 assert(numel(viewBox) == 4 && all(isfinite(viewBox)) && all(viewBox(3:4) > 0), ...
     "oi_annotate_svg:InvalidViewBox", "SVG viewBox must have four finite coordinates and positive extents");
 root.setAttribute('width', char(string(widthPixels) + "px"));
 root.setAttribute('height', char(string(heightPixels) + "px"));
 originalStyle = string(char(root.getAttribute('style')));
-root.setAttribute('style', char(originalStyle + compose(";width:%.9gin;height:%.9gin", ...
+root.setAttribute('style', char(originalStyle + compose(";width:%.17gin;height:%.17gin", ...
     widthPoints / 72, heightPoints / 72)));
-root.setAttribute('data-physical-width-in', char(compose("%.9g", widthPoints / 72)));
-root.setAttribute('data-physical-height-in', char(compose("%.9g", heightPoints / 72)));
+root.setAttribute('data-physical-width-in', char(compose("%.17g", widthPoints / 72)));
+root.setAttribute('data-physical-height-in', char(compose("%.17g", heightPoints / 72)));
 root.setAttribute('role', 'img');
 root.setAttribute('aria-label', char(description));
 children = root.getChildNodes();

@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "evaluate.py"
@@ -98,6 +99,128 @@ class AntiCheatTests(unittest.TestCase):
         payload["score"] = 100
         with self.assertRaisesRegex(matlab_eval.EvaluationError, "computed only"):
             matlab_eval.validate_result_shape(payload, rubric)
+
+
+class RuntimeReleaseValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runtime = {
+            "nonce": "unit-test-only-nonce",
+            "runtime": "MathWorks MATLAB",
+            "success": True,
+            "matlab_version": "9.10.0.2198249 (R2021a) Update 8",
+            "matlab_release": "R2021a",
+        }
+        self.manifest = {
+            "matlab_release": "2021a",
+            "runtime": {"matlab_release": "2021a"},
+            "figures": [
+                {"id": f"unit-test-{index}", "runtime": {"matlab_release": "2021a"},
+                 "exports": {format_name: {} for format_name in ("png", "pdf", "svg")}}
+                for index in range(3)
+            ],
+        }
+
+    def release_sources(self) -> list[tuple[str, dict]]:
+        return [("runtime", self.runtime), ("manifest", self.manifest),
+                ("manifest.runtime", self.manifest["runtime"])] + [
+                    (f"manifest.figures[{index}].runtime", figure["runtime"])
+                    for index, figure in enumerate(self.manifest["figures"])
+                ]
+
+    def test_normal_forms_compare_without_rewriting_evidence(self) -> None:
+        for release in ("2021a", "2021b", "2026a", "2026b"):
+            self.runtime["matlab_release"] = f"R{release}"
+            self.manifest["matlab_release"] = release
+            self.manifest["runtime"]["matlab_release"] = f"R{release}"
+            for index, figure in enumerate(self.manifest["figures"]):
+                figure["runtime"]["matlab_release"] = release if index % 2 == 0 else f"R{release}"
+            original = copy.deepcopy((self.runtime, self.manifest))
+            with self.subTest(release=release):
+                matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+                self.assertEqual((self.runtime, self.manifest), original)
+
+    def test_missing_empty_and_nonstring_releases_are_rejected_at_every_level(self) -> None:
+        for field, source in self.release_sources():
+            original = source["matlab_release"]
+            for value in (None, "", " ", "\n", 2021, True, [], {}):
+                with self.subTest(field=field, value=value):
+                    source["matlab_release"] = value
+                    with self.assertRaises(matlab_eval.EvaluationError) as caught:
+                        matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+                    self.assertIn(f"{field}.matlab_release", str(caught.exception))
+            del source["matlab_release"]
+            with self.subTest(field=field, missing=True), self.assertRaises(matlab_eval.EvaluationError):
+                matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+            source["matlab_release"] = original
+
+    def test_malformed_release_strings_are_rejected_at_every_level(self) -> None:
+        invalid = (
+            "R9.10.0.2198249 (R2021a) Update 8", "9.10.0.2198249 (R2021a) Update 8",
+            "(R2021a)", "R2021a Update 8", "release R2021a", "R2021a/R2026a",
+            "r2021a", "R2021A", "R2021c", "R2021", "2021", "R21a", "R20210a",
+            "RR2021a", " R2021a", "R2021a ", "R2021a\n", "2021a\x00", "R\uFF12\uFF10\uFF12\uFF11a",
+        )
+        for field, source in self.release_sources():
+            original = source["matlab_release"]
+            for value in invalid:
+                with self.subTest(field=field, value=value):
+                    source["matlab_release"] = value
+                    with self.assertRaises(matlab_eval.EvaluationError) as caught:
+                        matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+                    self.assertIn(f"{field}.matlab_release", str(caught.exception))
+            source["matlab_release"] = original
+
+    def test_release_mismatches_are_rejected_at_every_level(self) -> None:
+        for field, source in self.release_sources():
+            original = source["matlab_release"]
+            for value in ("2021b", "R2021b", "2026a", "R2026a"):
+                with self.subTest(field=field, value=value):
+                    source["matlab_release"] = value
+                    with self.assertRaisesRegex(matlab_eval.EvaluationError, "does not match runtime.matlab_release"):
+                        matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+            source["matlab_release"] = original
+
+    def test_consistently_malformed_release_is_not_accepted_as_agreement(self) -> None:
+        for _, source in self.release_sources():
+            source["matlab_release"] = "R9.10.0.2198249 (R2021a) Update 8"
+        with self.assertRaisesRegex(matlab_eval.EvaluationError, "runtime.matlab_release must be"):
+            matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+
+    def test_missing_or_invalid_runtime_objects_are_rejected(self) -> None:
+        for source in [self.manifest, *self.manifest["figures"]]:
+            original = source["runtime"]
+            for value in (None, "R2021a", [], {}):
+                source["runtime"] = value
+                with self.subTest(value=value), self.assertRaises(matlab_eval.EvaluationError):
+                    matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+            del source["runtime"]
+            with self.assertRaises(matlab_eval.EvaluationError):
+                matlab_eval.validate_runtime_releases(self.runtime, self.manifest)
+            source["runtime"] = original
+        for manifest in (None, [], "2021a"):
+            with self.subTest(manifest=manifest), self.assertRaises(matlab_eval.EvaluationError):
+                matlab_eval.validate_runtime_releases(self.runtime, manifest)
+
+    def test_runtime_output_rejects_bad_release_before_artifact_checks(self) -> None:
+        for field, source in self.release_sources():
+            original = source["matlab_release"]
+            for value in (None, "R9.10.0.2198249 (R2021a) Update 8", "R2026a"):
+                source["matlab_release"] = value
+                with self.subTest(field=field, value=value), \
+                        mock.patch.object(matlab_eval, "load_json", side_effect=[self.runtime, self.manifest]), \
+                        mock.patch.object(matlab_eval, "collect_manifest_exports") as collect_exports:
+                    with self.assertRaises(matlab_eval.EvaluationError):
+                        matlab_eval.validate_runtime_output(Path("unit-test-only"), self.runtime["nonce"], 0)
+                    collect_exports.assert_not_called()
+            source["matlab_release"] = original
+
+    def test_valid_release_still_requires_existing_artifact_checks(self) -> None:
+        with mock.patch.object(matlab_eval, "load_json", side_effect=[self.runtime, self.manifest]), \
+                mock.patch.object(matlab_eval, "collect_manifest_exports",
+                                  side_effect=matlab_eval.EvaluationError("unit-test artifact failure")) as collect_exports:
+            with self.assertRaisesRegex(matlab_eval.EvaluationError, "unit-test artifact failure"):
+                matlab_eval.validate_runtime_output(Path("unit-test-only"), self.runtime["nonce"], 0)
+            collect_exports.assert_called_once_with(self.manifest)
 
 
 class FreezeTests(unittest.TestCase):

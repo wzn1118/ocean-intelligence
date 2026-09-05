@@ -41,6 +41,21 @@ result.setAttribute('height', '240pt');
 xmlwrite(char(path), verified);
 bounds = oi_annotate_svg(path, titleText, description, 576, 360, 2400, 1500);
 assert(isequal(bounds, [0 0 384 240]));
+verified = xmlread(char(path));
+result = verified.getDocumentElement();
+result.removeAttribute('viewBox');
+result.setAttribute('width', '192pt');
+result.setAttribute('height', '144pt');
+xmlwrite(char(path), verified);
+bounds = oi_annotate_svg(path, titleText, description, 192, 144, 400, 300);
+assert(isequal(bounds, [0 0 192 144]));
+verified = xmlread(char(path));
+result = verified.getDocumentElement();
+assert(str2double(char(result.getAttribute('data-physical-width-in'))) == 400 / 150, ...
+    "Fractional-inch physical dimensions must round-trip without precision loss");
+assert(contains(string(char(result.getAttribute('style'))), ...
+    compose(";width:%.17gin;height:%.17gin", 400 / 150, 300 / 150)), ...
+    "CSS and physical metadata must use the same full-precision dimensions");
 clear cleanup;
 fprintf("MATLAB_SVG_METADATA=passed\n");
 end

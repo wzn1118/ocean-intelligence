@@ -93,31 +93,27 @@ figureHandle.InvertHardcopy = "off";
 apply_export_font(figureHandle);
 drawnow;
 exportGraphicsAvailable = has_exportgraphics();
+useExactExportGraphics = exportGraphicsAvailable && ~verLessThan('matlab', '25.1');
 directSvgAvailable = options.ExportSVG && has_direct_svg_export();
 pdfApi = "print";
 pdfDevice = "-dpdf -painters";
-if exportGraphicsAvailable
-    exportgraphics(figureHandle, pngPath, "Resolution", dpi, "BackgroundColor", "white");
-    exportgraphics(figureHandle, pdfPath, "ContentType", "vector", "BackgroundColor", "white");
-    [probeWidthPoints, probeHeightPoints, probePages] = pdf_geometry(pdfPath);
-    if probePages == 1 && abs(probeWidthPoints - widthPoints) <= 1 ...
-            && abs(probeHeightPoints - heightPoints) <= 1
-        pdfApi = "exportgraphics";
-        pdfDevice = "";
-    else
-        delete(pdfPath);
-        print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches);
-    end
+geometryArgs = {"Units", "inches", "Width", widthInches, "Height", heightInches, ...
+    "Padding", "figure", "PreserveAspectRatio", "on", "BackgroundColor", "white"};
+if useExactExportGraphics
+    exportgraphics(figureHandle, pngPath, geometryArgs{:}, "Resolution", dpi);
+    exportgraphics(figureHandle, pdfPath, geometryArgs{:}, "ContentType", "vector");
+    pdfApi = "exportgraphics";
+    pdfDevice = "";
 else
     warning("oi_export_figure:LegacyPrintFallback", ...
-        "exportgraphics is unavailable; using the documented print fallback");
+        "Exact exportgraphics sizing requires R2025a or newer; using print for this runtime");
     resolutionOption = char("-r" + string(dpi));
     print(figureHandle, char(pngPath), "-dpng", resolutionOption);
     print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches);
 end
 if options.ExportSVG
     if directSvgAvailable
-        exportgraphics(figureHandle, svgPath, "BackgroundColor", "white");
+        exportgraphics(figureHandle, svgPath, geometryArgs{:});
     else
         print(figureHandle, char(svgPath), "-dsvg", "-painters");
     end
@@ -126,7 +122,9 @@ pngInfo = verify_file(pngPath, "png");
 pdfInfo = verify_file(pdfPath, "pdf");
 imageInfo = imfinfo(pngPath);
 assert(imageInfo.Width == widthPixels && imageInfo.Height == heightPixels, ...
-    "oi_export_figure:InvalidPngDimensions", "PNG dimensions are invalid");
+    "oi_export_figure:InvalidPngDimensions", ...
+    "PNG dimensions %dx%d must match requested %dx%d at %g DPI", ...
+    imageInfo.Width, imageInfo.Height, widthPixels, heightPixels, dpi);
 [embeddedDpiX, embeddedDpiY] = png_physical_dpi(pngPath);
 if options.RequireEmbeddedDPI
     assert(isfinite(embeddedDpiX) && isfinite(embeddedDpiY), ...
@@ -251,7 +249,18 @@ entry.interaction = struct("requested", false, "enabled", false, ...
     "headless", struct("supported", true, "mode", "static_export", ...
         "verified", string(figureHandle.Visible) == "off"));
 entry.runtime = runtime_evidence(figureHandle, requiredToolboxes, installedToolboxes, ...
-    exportGraphicsAvailable, pdfApi, pdfDevice, options.ExportSVG, directSvgAvailable);
+    useExactExportGraphics, pdfApi, pdfDevice, options.ExportSVG, directSvgAvailable);
+entry.runtime.exportgraphics_available = exportGraphicsAvailable;
+entry.runtime.exact_exportgraphics_available = useExactExportGraphics;
+entry.runtime.export_fallback_reason = "";
+if ~useExactExportGraphics
+    entry.runtime.export_device.png = "-dpng -r" + string(dpi);
+    if exportGraphicsAvailable
+        entry.runtime.export_fallback_reason = "exact sizing parameters require MATLAB R2025a";
+    else
+        entry.runtime.export_fallback_reason = "exportgraphics unavailable";
+    end
+end
 entry.exports = struct( ...
     "png", struct("figure_id", figureId, "title", options.Title, ...
         "source", options.Source, "theme", options.Theme, ...
@@ -300,7 +309,8 @@ end
 end
 
 function available = has_exportgraphics()
-available = exist("exportgraphics", "file") == 2 || exist("exportgraphics", "builtin") == 5;
+available = any(exist('exportgraphics', 'file') == [2 3 6]) ...
+    || exist('exportgraphics', 'builtin') == 5;
 end
 
 function available = has_direct_svg_export()
@@ -456,7 +466,7 @@ end
 visible = string(figureHandle.Visible);
 evidence = struct("minimum_release", "R2019b", ...
     "matlab_version", string(version), ...
-    "matlab_release", string(version("-release")), ...
+    "matlab_release", string(version('-release')), ...
     "jvm_available", logical(usejava("jvm")), ...
     "desktop_available", logical(usejava("desktop")), ...
     "display_environment_present", strlength(string(getenv("DISPLAY"))) > 0, ...

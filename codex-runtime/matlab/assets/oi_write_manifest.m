@@ -6,6 +6,8 @@ function manifest = oi_write_manifest(manifestPath, figureEntries)
 % toolbox, format, byte-count, signature, dimension, and SHA-256 evidence is
 % revalidated before the manifest is written. Supplied evidence is immutable:
 % mismatches fail instead of being refreshed into a passing record.
+% Mixed per-format APIs are summarized as api="mixed" plus sorted unique apis;
+% each figure retains its concrete export_api and matching runtime evidence.
 arguments
     manifestPath (1,1) string
     figureEntries struct
@@ -207,8 +209,12 @@ for index = 1:numel(figureEntries)
             "oi_write_manifest:MetadataMismatch", ...
             "Every format must preserve the figure id, title, source, and theme");
         exportApi = string(exportRecord.export_api);
-        assert(any(exportApi == ["exportgraphics" "print"]) ...
-            && exportApi == string(entry.runtime.export_api.(char(format))), ...
+        require_fields(entry.runtime.export_api, format);
+        runtimeApi = string(entry.runtime.export_api.(char(format)));
+        assert(isscalar(exportApi) && ~ismissing(exportApi) ...
+            && isscalar(runtimeApi) && ~ismissing(runtimeApi) ...
+            && any(exportApi == ["exportgraphics" "print"]) ...
+            && exportApi == runtimeApi, ...
             "oi_write_manifest:ExportApiMismatch", ...
             "Artifact and runtime export APIs must match for %s", format);
         formatApis = exportApis.(char(format));
@@ -256,9 +262,11 @@ exportStrategies = struct();
 for formatIndex = 1:numel(exportFormats)
     format = exportFormats(formatIndex);
     formatApis = unique(exportApis.(char(format)));
-    assert(numel(formatApis) == 1, "oi_write_manifest:MixedExportApi", ...
-        "All %s artifacts in one manifest must use the same export API", format);
-    exportStrategies.(char(format)) = struct("api", formatApis(1));
+    if isscalar(formatApis)
+        exportStrategies.(char(format)) = struct("api", formatApis(1));
+    else
+        exportStrategies.(char(format)) = struct("api", "mixed", "apis", formatApis);
+    end
 end
 artifactValidation = struct("status", "passed", ...
     "verified_by", "oi_export_figure and oi_write_manifest");

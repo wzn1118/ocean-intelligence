@@ -36,6 +36,21 @@ The regression and interactive figures use an explicit 8 by 5 inch publication
 canvas at 300 DPI (2400 by 1500 pixels). Smaller export geometries remain
 available through the export helpers and interactive publication size options.
 
+R2025a and newer use `exportgraphics` with explicit `Width`, `Height`, `Units`,
+`Padding="figure"`, and `PreserveAspectRatio="on"` for all three formats.
+Sizing failures stop the export instead of silently retrying another API.
+Earlier releases use the documented `print` path for exact physical dimensions;
+their manifests record the actual device and compatibility reason. MATLAB
+P-code (`exist(..., 'file') == 6`) is a callable API, not a missing function.
+Exact dimensions do not establish PDF font embedding or visual fidelity.
+
+The report checks local fixture units, coordinate order, missing/QC counts,
+paired statistics and artifact snapshots independently. Its current runtime
+record binds fixture IDs, not input content hashes; the report states that
+limitation and does not claim to prove which numerical input snapshot MATLAB
+consumed. Source QC and uncertainty presence is not a claim that every plot
+filtered or displayed those fields.
+
 For local automated artifact inspection, install the pinned Python packages in
 `codex-runtime/matlab/evals/requirements.txt` and the `poppler-utils` system
 package. Missing dependencies are reported as unverified, not passed. The

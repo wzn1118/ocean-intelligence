@@ -5,8 +5,9 @@ assetDirectory = fullfile(testDirectory, "..", "assets");
 originalPath = path;
 pathCleanup = onCleanup(@() path(originalPath));
 addpath(assetDirectory);
-fontName = installed_font();
+fontName = publication_font();
 
+test_courier_font_metrics();
 test_axes_text_and_rotation(fontName);
 test_colorbar_label(fontName);
 test_font_refresh(fontName);
@@ -18,8 +19,42 @@ fprintf("MATLAB_TEXT_BOUNDS=passed\n");
 end
 
 function test_axes_text_and_rotation(fontName)
-figureHandle = make_pixel_figure([800 480]);
+[figureHandle, axesHandle, titleHandle, xlabelHandle, ylabelHandle, textHandle] ...
+    = make_nested_figure(fontName);
 figureCleanup = onCleanup(@() close_if_valid(figureHandle));
+
+originalUnits = string(textHandle.Units);
+[titleBounds, titleDetails] = measure_bounds(titleHandle, figureHandle, "axes title");
+[xlabelBounds, xlabelDetails] = measure_bounds(xlabelHandle, figureHandle, "x label");
+[ylabelBounds, ylabelDetails] = measure_bounds(ylabelHandle, figureHandle, "rotated y label");
+[horizontalBounds, horizontalDetails] = measure_bounds(textHandle, figureHandle, "axes text");
+export_nested_evidence(figureHandle, "nested-publication", xlabelDetails);
+assert(string(textHandle.Units) == originalUnits, ...
+    "test_text_bounds:Units", "oi_text_bounds did not restore text Units");
+assert_inside(titleBounds, "axes title", titleDetails);
+assert_inside(xlabelBounds, "x label", xlabelDetails);
+assert_inside(ylabelBounds, "rotated y label", ylabelDetails);
+assert_inside(horizontalBounds, "axes text", horizontalDetails);
+assert_centered_in_parent(horizontalBounds, axesHandle, figureHandle, [0.32 0.55]);
+assert(horizontalBounds(3) > horizontalBounds(4), ...
+    "test_text_bounds:HorizontalExtent", ...
+    "Horizontal text must be wider than it is tall; geometry=%s", horizontalDetails);
+
+textHandle.Rotation = 90;
+[verticalBounds, verticalDetails] = measure_bounds(textHandle, figureHandle, "90-degree axes text");
+assert_inside(verticalBounds, "90-degree axes text", verticalDetails);
+assert(verticalBounds(4) > verticalBounds(3), ...
+    "test_text_bounds:RotatedExtent", ...
+    "A 90-degree text extent must reflect its rendered rotation; geometry=%s", verticalDetails);
+assert_rotated_dimensions(horizontalBounds, verticalBounds, figureHandle);
+
+clear figureCleanup;
+close_if_valid(figureHandle);
+end
+
+function [figureHandle, axesHandle, titleHandle, xlabelHandle, ylabelHandle, textHandle] ...
+        = make_nested_figure(fontName)
+figureHandle = make_pixel_figure([800 480]);
 panelHandle = uipanel("Parent", figureHandle, "Units", "pixels", ...
     "Position", [40 30 720 420], "BorderType", "none");
 axesHandle = axes("Parent", panelHandle, "Units", "pixels", ...
@@ -35,30 +70,52 @@ textHandle = text(axesHandle, 0.32, 0.55, "Rotated geometry probe", ...
     "Units", "normalized", "FontName", fontName, "FontSize", 12, ...
     "HorizontalAlignment", "center", "VerticalAlignment", "middle", ...
     "Interpreter", "none");
+end
 
-originalUnits = string(textHandle.Units);
-[titleBounds, titleDetails] = measure_bounds(titleHandle, figureHandle, "axes title");
-[xlabelBounds, xlabelDetails] = measure_bounds(xlabelHandle, figureHandle, "x label");
-[ylabelBounds, ylabelDetails] = measure_bounds(ylabelHandle, figureHandle, "rotated y label");
-[horizontalBounds, horizontalDetails] = measure_bounds(textHandle, figureHandle, "axes text");
-assert(string(textHandle.Units) == originalUnits, ...
-    "test_text_bounds:Units", "oi_text_bounds did not restore text Units");
-assert_inside(titleBounds, "axes title", titleDetails);
-assert_inside(xlabelBounds, "x label", xlabelDetails);
-assert_inside(ylabelBounds, "rotated y label", ylabelDetails);
-assert_inside(horizontalBounds, "axes text", horizontalDetails);
-assert_centered_in_parent(horizontalBounds, axesHandle, figureHandle, [0.32 0.55]);
-assert(horizontalBounds(3) > horizontalBounds(4), ...
-    "test_text_bounds:HorizontalExtent", ...
-    "Horizontal text must be wider than it is tall");
+function test_courier_font_metrics()
+[figureHandle, axesHandle, ~, xlabelHandle] = make_nested_figure("Courier");
+figureCleanup = onCleanup(@() close_if_valid(figureHandle));
+drawnow;
+nativeExtent = double(xlabelHandle.Extent);
+nativeUnits = string(xlabelHandle.Units);
+axesPixels = double(getpixelposition(axesHandle, true));
+figurePixels = double(getpixelposition(figureHandle));
+assert(nativeUnits == "data" && axesHandle.XScale == "linear" ...
+    && axesHandle.YScale == "linear" && axesHandle.XDir == "normal" ...
+    && axesHandle.YDir == "normal", "test_text_bounds:CourierFixture", ...
+    "Courier fixture must retain its original linear data coordinates");
+dataScale = axesPixels(3:4) ./ [diff(axesHandle.XLim) diff(axesHandle.YLim)];
+nativeOrigin = axesPixels(1:2) - 1 ...
+    + (nativeExtent(1:2) - [axesHandle.XLim(1) axesHandle.YLim(1)]) .* dataScale;
+nativeSize = nativeExtent(3:4) .* dataScale;
+nativeBounds = [nativeOrigin nativeSize] ./ figurePixels([3 4 3 4]);
 
-textHandle.Rotation = 90;
-[verticalBounds, verticalDetails] = measure_bounds(textHandle, figureHandle, "90-degree axes text");
-assert_inside(verticalBounds, "90-degree axes text", verticalDetails);
-assert(verticalBounds(4) > verticalBounds(3), ...
-    "test_text_bounds:RotatedExtent", ...
-    "A 90-degree text extent must reflect its rendered rotation");
-assert_rotated_dimensions(horizontalBounds, verticalBounds, figureHandle);
+[bounds, details] = measure_bounds(xlabelHandle, figureHandle, "Courier x label");
+evidence = jsondecode(details);
+evidence.courier_listed = oi_font_available("Courier", string(listfonts));
+evidence.native_bounds = nativeBounds;
+evidence.native_size_pixels = nativeSize;
+evidence.horizontal_metrics_anomalous = nativeSize(1) <= nativeSize(2);
+nativeClipped = nativeBounds(1) < 0 || nativeBounds(2) < 0 ...
+    || nativeBounds(1) + nativeBounds(3) > 1 ...
+    || nativeBounds(2) + nativeBounds(4) > 1;
+evidence.native_clipped = nativeClipped;
+details = jsonencode(evidence);
+fprintf("MATLAB_COURIER_FONT_EVIDENCE=%s\n", details);
+export_nested_evidence(figureHandle, "nested-courier", details);
+assert(string(xlabelHandle.FontName) == "Courier" ...
+    && string(xlabelHandle.Units) == nativeUnits, ...
+    "test_text_bounds:CourierMutation", ...
+    "Measurement must preserve Courier and the original text units; geometry=%s", details);
+errorPixels = abs(bounds - nativeBounds) .* figurePixels([3 4 3 4]);
+assert(all(errorPixels <= 1e-6), "test_text_bounds:CourierNativeGeometry", ...
+    "Pixel bounds must match the independently measured native data extent; error_pixels=%s; geometry=%s", ...
+    mat2str(errorPixels, 17), details);
+if nativeClipped
+    must_throw(@() assert_inside(bounds, "Courier x label", details), "UnexpectedClipping");
+else
+    assert_inside(bounds, "Courier x label", details);
+end
 
 clear figureCleanup;
 close_if_valid(figureHandle);
@@ -111,17 +168,13 @@ assert(largeBounds(3) > smallBounds(3) && largeBounds(4) > smallBounds(4), ...
     "Text bounds must be re-rendered after final typography changes; before=%s; after=%s", ...
     smallDetails, largeDetails);
 
-fontNames = unique(string(listfonts), "stable");
-alternate = fontNames(fontNames ~= string(fontName));
-if ~isempty(alternate)
-    textHandle.FontName = alternate(1);
-    [switchedBounds, switchedDetails] = measure_bounds(textHandle, figureHandle, "switched font");
-    assert(all(isfinite(switchedBounds)) && all(switchedBounds(3:4) > 0) ...
-        && string(textHandle.FontName) == alternate(1), ...
-        "test_text_bounds:FontNameRefresh", ...
-        "Final FontName geometry was not measured after renderer refresh; geometry=%s", ...
-        switchedDetails);
-end
+textHandle.FontName = "Courier";
+[switchedBounds, switchedDetails] = measure_bounds(textHandle, figureHandle, "switched font");
+assert(all(isfinite(switchedBounds)) && all(switchedBounds(3:4) > 0) ...
+    && string(textHandle.FontName) == "Courier", ...
+    "test_text_bounds:FontNameRefresh", ...
+    "Final FontName geometry was not measured after renderer refresh; geometry=%s", ...
+    switchedDetails);
 
 clear figureCleanup;
 close_if_valid(figureHandle);
@@ -165,11 +218,44 @@ figureHandle = figure("Visible", "off", "Units", "pixels", ...
     "Position", [100 100 sizePixels], "Color", "white");
 end
 
-function fontName = installed_font()
-fontNames = string(listfonts);
-assert(~isempty(fontNames), "test_text_bounds:Fonts", ...
-    "At least one installed MATLAB font is required");
-fontName = fontNames(1);
+function fontName = publication_font()
+theme = oi_ocean_theme();
+fontName = string(theme.FontName);
+assert(fontName ~= "Courier", "test_text_bounds:PublicationFont", ...
+    "The positive geometry fixture requires a configured publication font");
+fprintf("MATLAB_TEXT_BOUNDS_PUBLICATION_FONT=%s\n", fontName);
+end
+
+function export_nested_evidence(figureHandle, artifactName, details)
+outputRoot = string(getenv("MATLAB_FULL100_OUTPUT"));
+if strlength(outputRoot) == 0
+    return;
+end
+try
+    outputDirectory = fullfile(outputRoot, "text-bounds");
+    if ~isfolder(outputDirectory)
+        mkdir(outputDirectory);
+    end
+    jsonPath = fullfile(outputDirectory, artifactName + ".json");
+    fileId = fopen(jsonPath, "w");
+    assert(fileId >= 0, "test_text_bounds:EvidenceFile", ...
+        "Cannot write nested figure evidence: %s", jsonPath);
+    fileCleanup = onCleanup(@() fclose(fileId));
+    fprintf(fileId, "%s\n", details);
+    clear fileCleanup;
+    figurePixels = double(getpixelposition(figureHandle));
+    pixelsPerInch = double(get(groot, "ScreenPixelsPerInch"));
+    figureHandle.PaperUnits = "inches";
+    figureHandle.PaperPosition = [0 0 figurePixels(3:4) / pixelsPerInch];
+    figureHandle.PaperSize = figurePixels(3:4) / pixelsPerInch;
+    figureHandle.PaperPositionMode = "manual";
+    pngPath = fullfile(outputDirectory, artifactName + ".png");
+    print(figureHandle, char(pngPath), '-dpng', '-r0');
+    fprintf("MATLAB_TEXT_BOUNDS_ARTIFACT=%s\n", pngPath);
+catch errorDetails
+    warning("test_text_bounds:DiagnosticExport", ...
+        "Nested figure diagnostic export failed: %s", errorDetails.message);
+end
 end
 
 function [bounds, details] = measure_bounds(textHandle, figureHandle, role)
