@@ -2,6 +2,7 @@ function test_asset_contracts()
 %TEST_ASSET_CONTRACTS Run focused MATLAB-native contract and lifecycle checks.
 theme = oi_ocean_theme();
 test_small_clipping_rejected(theme);
+test_text_overlap_diagnostics(theme);
 assert(oi_get_option(struct("Value", 4), "Value", 0) == 4, ...
     "oi_get_option did not return a present value");
 
@@ -632,6 +633,42 @@ must_throw(@() oi_export_figure(figure_handle, output_directory, "small-clipping
 assert(~isfile(fullfile(output_directory, "small-clipping.png")) ...
     && ~isfile(fullfile(output_directory, "small-clipping.pdf")), ...
     "Clipped artifacts must not be promoted as verified exports");
+clear cleanup_figure cleanup_directory;
+end
+
+function test_text_overlap_diagnostics(theme)
+output_directory = string(tempname);
+mkdir(output_directory);
+cleanup_directory = onCleanup(@() remove_directory(output_directory));
+figure_handle = oi_figure(2400, 1500, "off");
+cleanup_figure = onCleanup(@() close_if_valid(figure_handle));
+figure_handle.Units = "inches";
+figure_handle.Position(3:4) = [8 5];
+axes_handle = axes("Parent", figure_handle, "Units", "normalized", ...
+    "Position", [0.1 0.15 0.8 0.65]);
+plot(axes_handle, [0 1], [0 1]);
+title(axes_handle, "Overlap diagnostics", "Interpreter", "none");
+oi_apply_axes(axes_handle, theme);
+for label = ["Overlap alpha" "Overlap beta"]
+    text(axes_handle, 0.5, 0.5, label, "Units", "normalized", ...
+        "FontName", theme.FontName, "FontSize", 10, "Interpreter", "none");
+end
+thrown = false;
+try
+    oi_export_figure(figure_handle, output_directory, "text-overlap", ...
+        2400, 1500, 300, "Title", "Overlap diagnostics", ...
+        "Source", "MATLAB overlap contract", "Theme", theme.Name);
+catch error_record
+    thrown = true;
+    assert(string(error_record.identifier) == "oi_export_figure:OverlappingText" ...
+        && all(contains(string(error_record.message), ...
+        ["Overlap alpha" "Overlap beta" "first_role" "second_role" "first_bounds" "second_bounds"])), ...
+        "Overlap rejection must identify measured text pairs: %s", error_record.message);
+end
+assert(thrown, "Overlapping visible text must be rejected");
+assert(~isfile(fullfile(output_directory, "text-overlap.png")) ...
+    && ~isfile(fullfile(output_directory, "text-overlap.pdf")), ...
+    "Overlapping artifacts must not be promoted as verified exports");
 clear cleanup_figure cleanup_directory;
 end
 

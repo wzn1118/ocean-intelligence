@@ -64,13 +64,14 @@ assert(comparisonResult.ValidCount == 2 ...
     && comparisonResult.QCRejectedCount == 1 ...
     && numel(comparisonResult.StratifiedMetrics) == 2, ...
     "family_b:ComparisonCounts","Pairing, QC, or confounder accounting is incorrect");
+render_comparison_probe(figureHandle,outputDirectory,"family-b-comparison-before-export");
 assert_comparison_legend_layout(comparisonResult,figureHandle);
 entries = append_entry(entries,oi_export_figure(figureHandle,outputDirectory, ...
     "family-b-comparison",1200,675,180,"Title","Family B paired comparison", ...
     "Source","full100_family_b_runtime","Theme",theme.Name,"ExportSVG",true));
 assert_comparison_legend_layout(comparisonResult,figureHandle);
 clear cleanup;
-test_comparison_legend_overrides(observationTable,modelTable,comparisonOptions,comparisonResult);
+test_comparison_legend_overrides(observationTable,modelTable,comparisonOptions,comparisonResult,outputDirectory);
 fprintf("FAMILY_B_COMPARISON_LAYOUT=passed\n");
 
 tsTable = table([34.2;34.5;34.7;35.0],[12;9;NaN;5],[0;20;40;60], ...
@@ -108,7 +109,6 @@ fprintf("FAMILY_B_EXPORT_COUNT=%d\n",numel(entries));
 end
 
 function assert_comparison_legend_layout(result,figureHandle)
-drawnow;
 assert(string(result.Legend.Location) == "southoutside", ...
     "family_b:ComparisonLegendLocation", ...
     "Default comparison legend must remain southoutside after layout and export");
@@ -122,12 +122,31 @@ end
 assert(nnz(diagnosticMask) == 1,"family_b:ComparisonDiagnostics", ...
     "Comparison must retain one complete metrics and QC diagnostic block");
 metricBounds = oi_text_bounds(textHandles(diagnosticMask),figureHandle);
+titleBounds = oi_text_bounds(result.Axes.Title,figureHandle);
+xlabelBounds = oi_text_bounds(result.Axes.XLabel,figureHandle);
+ylabelBounds = oi_text_bounds(result.Axes.YLabel,figureHandle);
 figurePixels = double(getpixelposition(figureHandle));
 legendPixels = double(getpixelposition(result.Legend,true));
 legendBounds = [(legendPixels(1:2) - 1) ./ figurePixels(3:4), ...
     legendPixels(3:4) ./ figurePixels(3:4)];
 assert(all(isfinite(legendBounds)) && all(legendBounds(3:4) > 0), ...
     "family_b:ComparisonLegendBounds","Legend must have finite positive rendered bounds");
+diagnostics = struct("release",version('-release'),"figure_pixels",figurePixels, ...
+    "axes_pixels",double(getpixelposition(result.Axes,true)), ...
+    "statistics",metricBounds,"title",titleBounds,"xlabel",xlabelBounds, ...
+    "ylabel",ylabelBounds,"legend",legendBounds, ...
+    "statistics_font_size",textHandles(diagnosticMask).FontSize, ...
+    "axes_font_size",result.Axes.FontSize, ...
+    "title_font_size_multiplier",result.Axes.TitleFontSizeMultiplier);
+fprintf("FAMILY_B_COMPARISON_GEOMETRY=%s\n",jsonencode(diagnostics));
+otherBounds = [titleBounds;xlabelBounds;ylabelBounds];
+for textIndex = 1:size(otherBounds,1)
+    textOverlap = min(metricBounds(1:2) + metricBounds(3:4), ...
+        otherBounds(textIndex,1:2) + otherBounds(textIndex,3:4)) ...
+        - max(metricBounds(1:2),otherBounds(textIndex,1:2));
+    assert(~all(textOverlap > 0),"family_b:ComparisonTextOverlap", ...
+        "Statistics overlap title or axis labels: %s",jsonencode(diagnostics));
+end
 overlap = min(metricBounds(1:2) + metricBounds(3:4), ...
     legendBounds(1:2) + legendBounds(3:4)) ...
     - max(metricBounds(1:2),legendBounds(1:2));
@@ -136,12 +155,12 @@ assert(~all(overlap > 0),"family_b:ComparisonLegendOverlap", ...
     mat2str(metricBounds,17),mat2str(legendBounds,17));
 end
 
-function test_comparison_legend_overrides(observations,modelValues,options,defaultResult)
+function test_comparison_legend_overrides(observations,modelValues,options,defaultResult,outputDirectory)
 for location = ["northwest" "best"]
     [figureHandle,axesHandle,cleanup] = make_axes(options.Theme); %#ok<ASGLU>
     options.LegendLocation = location;
     result = oi_plot_comparison(axesHandle,observations,modelValues,options);
-    drawnow;
+    render_comparison_probe(figureHandle,outputDirectory,"family-b-comparison-" + location);
     assert(string(result.Legend.Location) == location, ...
         "family_b:ComparisonLegendOverride", ...
         "Explicit LegendLocation='%s' must override the default",location);
@@ -156,6 +175,16 @@ for location = ["northwest" "best"]
         "Legend placement must not change paired statistics or QC accounting");
     clear cleanup;
 end
+end
+
+function render_comparison_probe(figureHandle,outputDirectory,identifier)
+filePath = fullfile(outputDirectory,identifier + ".png");
+assert(~isfile(filePath),"family_b:StaleLayoutProbe", ...
+    "Refusing to overwrite a comparison layout probe");
+print(figureHandle,char(filePath),"-dpng","-r180");
+imageInfo = imfinfo(filePath);
+assert(imageInfo.Width == 1200 && imageInfo.Height == 675, ...
+    "family_b:LayoutProbeDimensions","Layout must be rendered at the final physical size");
 end
 
 function run_negative_contracts(theme)
@@ -182,6 +211,13 @@ end
 
 function [figureHandle,axesHandle,cleanup] = make_axes(theme)
 figureHandle = oi_figure(1200,675,"off");
+pageSize = [1200 675] / 180;
+figureHandle.Units = "inches";
+figureHandle.Position(3:4) = pageSize;
+figureHandle.PaperUnits = "inches";
+figureHandle.PaperPosition = [0 0 pageSize];
+figureHandle.PaperSize = pageSize;
+figureHandle.PaperPositionMode = "manual";
 layout = tiledlayout(figureHandle,1,1,"TileSpacing","compact","Padding","compact");
 axesHandle = nexttile(layout);
 axesHandle.Color = theme.AxesColor;

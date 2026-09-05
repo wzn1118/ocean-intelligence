@@ -166,9 +166,10 @@ if clippedCount > 0
         "Visible text or axes extend outside the export canvas: %s", ...
         strjoin(clippedDetails, "; "));
 end
-textOverlapCount = count_text_overlaps(textEvidence);
+[textOverlapCount, overlapPairs] = count_text_overlaps(textEvidence);
 assert(textOverlapCount == 0, "oi_export_figure:OverlappingText", ...
-    "Visible text objects overlap in the final export layout");
+    "Visible text objects overlap in the final export layout (%d pairs; first 10 shown): %s", ...
+    textOverlapCount, jsonencode(overlapPairs));
 normalizedMargins = layout_margins(allEvidence);
 [fontSelectionVerified, cjkTextPresent, cjkFontVerified, selectedFonts] = font_audit( ...
     figureHandle, textEvidence, axesEvidence, unmeasuredTextEvidence);
@@ -849,12 +850,24 @@ elseif strlength(fallbackProperty) > 0 && isprop(axesHandle, fallbackProperty) .
 end
 end
 
-function count = count_text_overlaps(textEvidence)
+function [count, pairs] = count_text_overlaps(textEvidence)
 count = 0;
+pairs = repmat(struct("first_role", "", "first_string", "", "first_bounds", [], ...
+    "second_role", "", "second_string", "", "second_bounds", []), 0, 1);
 for first = 1:numel(textEvidence)
     for second = first + 1:numel(textEvidence)
         if rectangles_overlap(textEvidence(first).bounds, textEvidence(second).bounds)
             count = count + 1;
+            if count <= 10
+                firstText = string(textEvidence(first).string);
+                secondText = string(textEvidence(second).string);
+                pairs(count, 1) = struct("first_role", textEvidence(first).role, ...
+                    "first_string", extractBefore(firstText, min(strlength(firstText) + 1, 241)), ...
+                    "first_bounds", textEvidence(first).bounds, ...
+                    "second_role", textEvidence(second).role, ...
+                    "second_string", extractBefore(secondText, min(strlength(secondText) + 1, 241)), ...
+                    "second_bounds", textEvidence(second).bounds);
+            end
         end
     end
 end

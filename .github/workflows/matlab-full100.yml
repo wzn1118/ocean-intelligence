@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-zenhei fonts-droid-fallback poppler-utils
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-zenhei fonts-droid-fallback poppler-utils xvfb x11-utils
           fc-cache -f
           fc-list | grep -Ei 'Noto Sans CJK|WenQuanYi Zen Hei|Droid Sans Fallback' | head -n 12
       - name: Install and license MathWorks MATLAB
@@ -127,6 +127,33 @@ jobs:
           MW_BATCH_LICENSING_ONLINE: "true"
           MATLAB_ACTIONS_RUN_COMMAND: ${{ github.workspace }}/../../_actions/matlab-actions/run-command/v3/dist/bin/glnxa64/run-matlab-command
         run: bash scripts/matlab-github-full100.sh "${{ matrix.release }}" "$MATLAB_FULL100_OUTPUT" "$MATLAB_EVAL_NONCE" "$MATLAB_FULL100_OUTPUT/runtime-start.marker"
+      - name: Start isolated virtual display for diagnostic comparison
+        id: virtual-display
+        if: always() && env.MATLAB_FULL100_OUTPUT != ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          test ! -e /tmp/.X98-lock
+          Xvfb :98 -screen 0 1600x1200x24 -nolisten tcp > "$MATLAB_FULL100_OUTPUT/display-server.log" 2>&1 &
+          echo "MATLAB_XVFB_PID=$!" >> "$GITHUB_ENV"
+          for attempt in {1..30}; do
+            if xdpyinfo -display :98 > "$MATLAB_FULL100_OUTPUT/display-server-info.txt" 2>&1; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Compare native rendering with a virtual display
+        if: always() && steps.virtual-display.outcome == 'success'
+        continue-on-error: true
+        env:
+          DISPLAY: ":98"
+        uses: matlab-actions/run-command@v3
+        with:
+          startup-options: -display :98
+          command: addpath('codex-runtime/matlab/tests'); test_display_rendering('${{ matrix.release }}', fullfile(getenv('MATLAB_FULL100_OUTPUT'), 'display-comparison'))
+      - name: Stop diagnostic virtual display
+        if: always() && env.MATLAB_XVFB_PID != ''
+        shell: bash
+        run: kill "$MATLAB_XVFB_PID" || true
       - name: Enforce MATLAB runtime and score gate
         if: always()
         shell: bash
