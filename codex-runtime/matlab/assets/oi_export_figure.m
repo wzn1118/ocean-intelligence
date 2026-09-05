@@ -521,7 +521,11 @@ if isappdata(figureHandle, "OI_OceanTheme")
     end
 end
 if cjkPresent && (strlength(selectedFont) == 0 || ~is_cjk_font(selectedFont))
-    match = candidates(ismember(lower(candidates), lower(installedFonts)));
+    candidateAvailable = false(size(candidates));
+    for index = 1:numel(candidates)
+        candidateAvailable(index) = publication_font_available(candidates(index), installedFonts);
+    end
+    match = candidates(candidateAvailable);
     assert(~isempty(match), "oi_export_figure:CJKFontUnavailable", ...
         "CJK text is present but no configured CJK-capable font is installed");
     selectedFont = match(1);
@@ -627,6 +631,7 @@ for index = 1:numel(objects)
     evidence(index).bounds = graphics_bounds(objects(index), figureHandle);
     evidence(index).clipped = ~bounds_inside_canvas(evidence(index).bounds);
 end
+end
 
 function evidence = collect_layout_containers(figureHandle)
 allObjects = findall(figureHandle);
@@ -655,7 +660,6 @@ for index = 1:numel(allObjects)
         evidence(visibleIndex).bounds);
 end
 evidence = evidence(1:visibleIndex);
-end
 end
 
 function objects = collect_visible_axes(figureHandle)
@@ -737,13 +741,29 @@ for index = 1:numel(fontObjects)
     fontNames(index) = string(fontObjects(index).FontName);
 end
 installedFonts = string(listfonts);
+fontAvailable = false(size(fontNames));
+for index = 1:numel(fontNames)
+    fontAvailable(index) = publication_font_available(fontNames(index), installedFonts);
+end
 verified = ~isempty(fontNames) && all(strlength(fontNames) > 0) ...
-    && all(ismember(lower(fontNames), lower(installedFonts)));
+    && all(fontAvailable);
 renderedText = strjoin([string({textEvidence.string}) ...
     string({axesEvidence.xlabel}) string({axesEvidence.ylabel})], " ");
 cjkPresent = contains_cjk(renderedText);
 cjkVerified = ~cjkPresent || all(is_cjk_font(fontNames));
 selectedFonts = sort(unique(fontNames));
+end
+
+function available = publication_font_available(fontName, installedFonts)
+fontName = strtrim(string(fontName));
+available = strlength(fontName) > 0 ...
+    && any(strcmpi(installedFonts, fontName));
+if available || ~isunix
+    return;
+end
+command = sprintf("fc-match -f '%%{family}' '%s' 2>/dev/null", char(fontName));
+[status, output] = system(command);
+available = status == 0 && contains(lower(string(output)), lower(fontName));
 end
 
 function present = contains_cjk(textValue)
