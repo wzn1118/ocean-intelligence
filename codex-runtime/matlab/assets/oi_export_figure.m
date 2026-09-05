@@ -156,7 +156,8 @@ if clippedCount > 0
     clippedDetails = strings(numel(clippedEvidence), 1);
     for clippedIndex = 1:numel(clippedEvidence)
         clippedDetails(clippedIndex) = string(clippedEvidence(clippedIndex).role) ...
-            + "=" + string(mat2str(clippedEvidence(clippedIndex).bounds, 5));
+            + "=" + string(mat2str(clippedEvidence(clippedIndex).bounds, 5)) ...
+            + " " + string(jsonencode(clippedEvidence(clippedIndex).string));
     end
     error("oi_export_figure:ClippedContent", ...
         "Visible text or axes extend outside the export canvas: %s", ...
@@ -498,9 +499,9 @@ for index = 1:numel(stringObjects)
     end
 end
 cjkPresent = contains_cjk(strjoin(allText, " "));
-candidates = ["Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
+candidates = ["WenQuanYi Zen Hei" "Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Noto Sans CJK JP" "Noto Sans CJK KR" "Source Han Sans SC" ...
-    "WenQuanYi Zen Hei" "Droid Sans Fallback" "Microsoft YaHei" ...
+    "Droid Sans Fallback" "Microsoft YaHei" ...
     "PingFang SC" "SimHei" ...
     "SimSun" "Arial Unicode MS"];
 selectedFont = "";
@@ -575,6 +576,14 @@ for index = 1:numel(objects)
     evidence(visibleIndex).role = string(objects(index).Tag);
     if strlength(evidence(visibleIndex).role) == 0
         evidence(visibleIndex).role = "text";
+        parentHandle = objects(index).Parent;
+        for propertyName = ["Title" "Subtitle" "XLabel" "YLabel" "ZLabel" "Label"]
+            if isprop(parentHandle, propertyName) ...
+                    && isequal(parentHandle.(char(propertyName)), objects(index))
+                evidence(visibleIndex).role = lower(propertyName);
+                break;
+            end
+        end
     end
     evidence(visibleIndex).string = renderedString;
     if isprop(objects(index), "FontName")

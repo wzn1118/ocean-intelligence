@@ -18,6 +18,50 @@ ci_summary = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ci_summary)
 
 
+RENDERED_EVIDENCE_FIXTURE = {
+    "schema_version": 1,
+    "evidence_type": "automated_rendered_artifact_inspection",
+    "generated_at": "2026-09-05T18:40:24.397540Z",
+    "scope": "automated_artifact_checks_only",
+    "human_visual_inspection": "not_verified",
+    "desktop_interaction": "not_verified",
+    "cjk_glyph_rendering": "not_verified",
+    "matlab_execution": "not_verified",
+    "dependencies": {"pdffonts": {"status": "available", "path": "/usr/bin/pdffonts"}},
+    "checks": [{"name": "manifest_snapshot", "status": "passed",
+                "reason": "original manifest bytes still match inspected SHA-256"}],
+    "artifacts": [
+        {"file": "crossed-time-depth-temperature.png", "format": "png", "status": "passed",
+         "checks": [{"name": "png_dimensions", "status": "passed", "reason": "dimensions match",
+                     "width": 2400, "height": 1500, "expected_width": 2400, "expected_height": 1500}]},
+        {"file": "crossed-time-depth-temperature.pdf", "format": "pdf", "status": "failed",
+         "checks": [
+             {"name": "pdf_font_inventory", "status": "passed", "reason": "pdffonts table parsed",
+              "fonts": [{"name": "Courier", "type": "Type 1", "encoding": "WinAnsi",
+                         "embedded": "no", "subset": "no", "unicode_map": "no"}]},
+             {"name": "pdf_font_embedding", "status": "failed",
+              "reason": "embedding flags only; does not verify glyph appearance, CJK coverage or visual correctness"},
+         ]},
+    ],
+    "status": "failed",
+    "summary": {"passed": 1, "failed": 1, "not_verified": 0, "artifact_count": 2},
+}
+
+VALIDATION_SUMMARY_FIXTURE = {
+    "schema_version": 1,
+    "generated_at": "2026-09-05T18:40:24Z",
+    "expected_release": "R2021a",
+    "status": "failed",
+    "checks": [
+        {"id": "stage-status", "status": "passed", "detail": "ci-stage-status.json"},
+        {"id": "regression-contract", "status": "failed", "detail": "exit 1; log: regression-contract.log"},
+        {"id": "rendered-artifacts", "status": "failed", "detail": "exit 1; log: rendered-artifacts.log"},
+    ],
+    "failures": ["regression-contract: exit 1; log: regression-contract.log",
+                 "rendered-artifacts: exit 1; log: rendered-artifacts.log"],
+}
+
+
 class SummaryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -60,8 +104,39 @@ class SummaryTests(unittest.TestCase):
             self.stages(release)
             self.probe(release)
 
+    def postprocessing(self, release: str, passed: bool = False) -> None:
+        rendered = copy.deepcopy(RENDERED_EVIDENCE_FIXTURE)
+        validation = copy.deepcopy(VALIDATION_SUMMARY_FIXTURE)
+        validation["expected_release"] = release
+        if passed:
+            rendered["status"] = validation["status"] = "passed"
+            rendered["summary"] = {"passed": 999, "failed": 0, "not_verified": 0, "artifact_count": 999}
+            for artifact in rendered["artifacts"]:
+                artifact["status"] = "passed"
+                for check in artifact["checks"]:
+                    check["status"] = "passed"
+            for check in validation["checks"]:
+                check["status"] = "passed"
+            validation["failures"] = []
+        self.write_json(release, "rendered-artifact-evidence.json", rendered)
+        self.write_json(release, "ci-validation-summary.json", validation)
+
     def release_result(self, release: str = "R2021a") -> dict:
         return next(result for result in ci_summary.summarize(self.root)["releases"] if result["release"] == release)
+
+    def test_empty_artifacts_never_report_postprocessing_pass(self) -> None:
+        self.complete_runtime()
+        for reported_status in ("passed", "pending", "failed"):
+            with self.subTest(status=reported_status):
+                payload = copy.deepcopy(RENDERED_EVIDENCE_FIXTURE)
+                payload["status"] = reported_status
+                payload["artifacts"] = []
+                self.write_json("R2021a", "rendered-artifact-evidence.json", payload)
+                result = self.release_result()
+                expected = "failed" if reported_status == "failed" else "pending"
+                self.assertEqual(result["postprocessing"]["status"], expected)
+                self.assertTrue(any(item["identifier"] == "ci_summary:MissingArtifacts"
+                                    and item["status"] == "pending" for item in result["issues"]))
 
     def test_real_shape_counts_each_failure_and_nested_evaluator_error(self) -> None:
         for release in ci_summary.RELEASES:
@@ -127,6 +202,173 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(ci_summary.summarize(self.root)["status"], "passed")
         self.evaluator("R2021a", status="passed", score=100, gates=[], visual_audit={"status": "passed"})
         self.assertEqual(self.release_result()["status"], "pending")
+
+    def test_real_postprocessing_failures_override_pending_visual_audit(self) -> None:
+        self.complete_runtime()
+        for release in ("R2021a", "R2024b"):
+            self.evaluator(release)
+            self.postprocessing(release)
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["status_source"], "local_artifact_evidence")
+        self.assertIsNone(summary["github_status"])
+        self.assertEqual(summary["release_counts"], {"total": 3, "passed": 0, "failed": 2, "pending": 1, "running": 0})
+        self.assertEqual(summary["stage_counts"], {"total": 21, "passed": 21, "failed": 0, "pending": 0, "running": 0})
+        for result in summary["releases"][:2]:
+            self.assertEqual(result["runtime_status"], "passed")
+            self.assertEqual(result["postprocessing"]["status"], "failed")
+            self.assertEqual(len(result["postprocessing"]["sources"]), 2)
+            self.assertEqual(result["evaluator"]["reported_score"], 90)
+            self.assertEqual(result["evaluator"]["visual_status"], "pending")
+            self.assertEqual([item["identifier"] for item in result["issues"]],
+                             ["pdf_font_embedding", "regression-contract", "rendered-artifacts"])
+            self.assertTrue(result["issues"][0]["source"].endswith(":crossed-time-depth-temperature.pdf"))
+        report = ci_summary.markdown(summary)
+        self.assertIn("本地证据推断", report)
+        self.assertIn("未提供 GitHub 状态、未查询远端", report)
+        self.assertIn("后处理", report)
+        self.assertEqual(report.count("pdf_font_embedding"), 2)
+
+    def test_each_postprocessing_source_independently_blocks_pass(self) -> None:
+        self.complete_runtime()
+        for name, fixture in (("rendered-artifact-evidence.json", RENDERED_EVIDENCE_FIXTURE),
+                              ("ci-validation-summary.json", VALIDATION_SUMMARY_FIXTURE)):
+            with self.subTest(name=name):
+                path = self.write_json("R2021a", name, fixture)
+                result = self.release_result()
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(result["postprocessing"]["status"], "failed")
+                self.assertEqual(result["runtime_status"], "passed")
+                path.unlink()
+
+    def test_postprocessing_leaf_failure_overrides_claimed_parent_passes(self) -> None:
+        self.complete_runtime()
+        for name, fixture in (("rendered-artifact-evidence.json", RENDERED_EVIDENCE_FIXTURE),
+                              ("ci-validation-summary.json", VALIDATION_SUMMARY_FIXTURE)):
+            with self.subTest(name=name):
+                payload = copy.deepcopy(fixture)
+                payload["status"] = "passed"
+                payload["summary"] = {"passed": 999, "failed": 0}
+                if "artifacts" in payload:
+                    for artifact in payload["artifacts"]:
+                        artifact["status"] = "passed"
+                else:
+                    payload["failures"] = []
+                path = self.write_json("R2021a", name, payload)
+                result = self.release_result()
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(result["postprocessing"]["sources"][0]["reported_status"], "passed")
+                path.unlink()
+
+    def test_validation_failures_array_alone_blocks_pass_and_preserves_first_line(self) -> None:
+        self.complete_runtime()
+        payload = copy.deepcopy(VALIDATION_SUMMARY_FIXTURE)
+        payload.update(status="passed", checks=payload["checks"][:1], failures=[
+            "rendered-artifacts: exit 1 | <details>\nstack trace", "failure without identifier\nmore"])
+        self.write_json("R2021a", "ci-validation-summary.json", payload)
+        summary = ci_summary.summarize(self.root)
+        result = summary["releases"][0]
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual([item["identifier"] for item in result["issues"]],
+                         ["rendered-artifacts", "(无 identifier)"])
+        report = ci_summary.markdown(summary)
+        self.assertIn("rendered-artifacts: exit 1 &#124; &lt;details&gt;", report)
+        self.assertIn("failure without identifier", report)
+        self.assertNotIn("stack trace", report)
+
+    def test_rendered_top_and_artifact_status_failures_are_not_ignored(self) -> None:
+        self.complete_runtime()
+        for level in ("root", "artifact", "check"):
+            with self.subTest(level=level):
+                payload = copy.deepcopy(RENDERED_EVIDENCE_FIXTURE)
+                payload["status"] = "passed"
+                payload["artifacts"] = payload["artifacts"][:1]
+                record = {"root": payload, "artifact": payload["artifacts"][0],
+                          "check": payload["checks"][0]}[level]
+                record.update(status="failed", reason="first failure line\nnot shown")
+                self.write_json("R2021a", "rendered-artifact-evidence.json", payload)
+                result = self.release_result()
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(result["issues"][0]["message"], "first failure line")
+
+    def test_automated_pass_never_supplies_score_or_visual_approval(self) -> None:
+        self.complete_runtime()
+        self.postprocessing("R2021a", passed=True)
+        for has_evaluator in (False, True):
+            with self.subTest(has_evaluator=has_evaluator):
+                if has_evaluator:
+                    self.evaluator("R2021a")
+                result = self.release_result()
+                self.assertEqual(result["postprocessing"]["status"], "passed")
+                self.assertEqual(result["status"], "pending")
+                self.assertEqual(result["evaluator"]["reported_score"], 90 if has_evaluator else None)
+                self.assertEqual(result["evaluator"]["visual_status"], "pending")
+                self.assertEqual(result["issues"], [])
+                self.assertEqual(result["stage_counts"]["passed"], 7)
+
+    def test_rendered_not_verified_and_other_incomplete_statuses_block_pass(self) -> None:
+        self.complete_runtime()
+        self.evaluator("R2021a", status="passed", score=100, visual_audit={"status": "passed"},
+                       gates=[{"id": "artifact_visual_audit", "status": "passed"}])
+        for reported, expected in (("not_verified", "pending"), ("pending", "pending"), ("running", "running")):
+            for level in ("root", "artifact", "check"):
+                with self.subTest(reported=reported, level=level):
+                    payload = copy.deepcopy(RENDERED_EVIDENCE_FIXTURE)
+                    payload["status"] = "passed"
+                    payload["artifacts"] = payload["artifacts"][:1]
+                    record = {"root": payload, "artifact": payload["artifacts"][0],
+                              "check": payload["artifacts"][0]["checks"][0]}[level]
+                    record["status"] = reported
+                    self.write_json("R2021a", "rendered-artifact-evidence.json", payload)
+                    result = self.release_result()
+                    self.assertEqual(result["postprocessing"]["status"], expected)
+                    self.assertEqual(result["status"], expected)
+                    self.assertEqual(result["runtime_status"], "passed")
+
+    def test_postprocessing_unknown_statuses_fail_closed(self) -> None:
+        self.complete_runtime()
+        for status in ("success", "skipped", "error", None, True, [], {}):
+            for level in ("root", "artifact", "check"):
+                with self.subTest(status=status, level=level):
+                    payload = copy.deepcopy(RENDERED_EVIDENCE_FIXTURE)
+                    payload["status"] = "passed"
+                    payload["artifacts"] = payload["artifacts"][:1]
+                    record = {"root": payload, "artifact": payload["artifacts"][0],
+                              "check": payload["artifacts"][0]["checks"][0]}[level]
+                    record["status"] = status
+                    self.write_json("R2021a", "rendered-artifact-evidence.json", payload)
+                    result = self.release_result()
+                    self.assertEqual(result["status"], "failed")
+                    self.assertEqual(result["runtime_status"], "passed")
+                    self.assertIn("ci_summary:InvalidStatus", [item["identifier"] for item in result["issues"]])
+
+    def test_postprocessing_malformed_records_and_release_binding_fail_closed(self) -> None:
+        self.complete_runtime()
+        cases = (
+            ("rendered-artifact-evidence.json", RENDERED_EVIDENCE_FIXTURE,
+             [{"schema_version": 2}, {"artifacts": None}, {"artifacts": [None]},
+              {"artifacts": [{"file": [], "status": "passed"}]},
+              {"artifacts": [{"file": "plot.pdf", "status": "passed", "checks": None}]},
+              {"checks": None}, {"checks": [{"name": [], "status": "passed"}]}]),
+            ("ci-validation-summary.json", VALIDATION_SUMMARY_FIXTURE,
+             [{"expected_release": "R2026a"}, {"expected_release": None}, {"status": "not_verified"},
+              {"checks": {}}, {"checks": [{"id": "rendered-artifacts", "status": "success"}]},
+              {"failures": "failure"}, {"failures": [None]}, {"failures": [""]}]),
+        )
+        for name, fixture, overrides in cases:
+            for override in overrides:
+                with self.subTest(name=name, override=override):
+                    payload = copy.deepcopy(fixture)
+                    payload.update(status="passed", checks=[], failures=[])
+                    if "artifacts" in payload:
+                        payload["artifacts"] = []
+                    payload.update(override)
+                    path = self.write_json("R2021a", name, payload)
+                    result = self.release_result()
+                    self.assertEqual(result["status"], "failed")
+                    self.assertEqual(result["postprocessing"]["status"], "failed")
+                    self.assertEqual(result["runtime_status"], "passed")
+                    path.unlink()
 
     def test_missing_release_is_pending_and_not_dropped(self) -> None:
         self.stages("R2021a")
@@ -204,7 +446,8 @@ class SummaryTests(unittest.TestCase):
 
     def test_corrupt_and_invalid_json_are_reported_without_aborting_matrix(self) -> None:
         self.complete_runtime()
-        for name in ("ci-stage-status.json", "matlab-runtime-probe.json", "evaluator-result.json"):
+        for name in ("ci-stage-status.json", "matlab-runtime-probe.json", "evaluator-result.json",
+                     *ci_summary.POSTPROCESSING_FILES):
             for content in (b"{", b"[]", b"null", b"\xff"):
                 with self.subTest(name=name, content=content):
                     self.complete_runtime()
@@ -217,6 +460,9 @@ class SummaryTests(unittest.TestCase):
                         self.assertEqual(summary["releases"][0]["probe"]["status"], "failed")
                     if name == "evaluator-result.json":
                         self.assertEqual(summary["releases"][0]["evaluator"]["status"], "failed")
+                    if name in ci_summary.POSTPROCESSING_FILES:
+                        self.assertEqual(summary["releases"][0]["postprocessing"]["status"], "failed")
+                        self.assertEqual(summary["releases"][0]["runtime_status"], "passed")
                     path.unlink()
 
     def test_malformed_stage_shapes_do_not_crash_or_pass(self) -> None:
@@ -279,11 +525,15 @@ class SummaryTests(unittest.TestCase):
 
     def test_cli_writes_both_formats_outside_input_without_modifying_sources(self) -> None:
         self.complete_runtime()
+        self.postprocessing("R2021a")
         before = self.fingerprint()
         output = Path(self.temporary.name) / "summary"
         process = self.run_cli("--output-dir", str(output), "--format", "json")
         self.assertEqual(process.returncode, 0, process.stderr)
         summary = json.loads(process.stdout)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["status_source"], "local_artifact_evidence")
+        self.assertIsNone(summary["github_status"])
         self.assertEqual(json.loads((output / "summary.json").read_text(encoding="utf-8")), summary)
         self.assertEqual((output / "summary.md").read_text(encoding="utf-8"), ci_summary.markdown(summary))
         self.assertEqual(before, self.fingerprint())

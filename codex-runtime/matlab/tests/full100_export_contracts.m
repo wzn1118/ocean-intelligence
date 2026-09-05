@@ -14,9 +14,17 @@ assert(~isfolder(outputDirectory), "full100_export_contracts:FreshOutput", ...
 mkdir(outputDirectory);
 cleanupOutput = onCleanup(@() maybe_remove_output(outputDirectory, keepArtifacts));
 theme = oi_ocean_theme();
+if oi_font_available("WenQuanYi Zen Hei")
+    assert(theme.FontName == "WenQuanYi Zen Hei", ...
+        "full100_export_contracts:FontPreference", ...
+        "The available cross-release CJK and Latin font must be preferred");
+end
 figureHandle = oi_figure(1200, 675, "off");
 cleanupFigure = onCleanup(@() close_if_valid(figureHandle));
-axesHandle = axes("Parent", figureHandle);
+figureHandle.Units = "inches";
+figureHandle.Position(3:4) = [4 2.25];
+axesHandle = axes("Parent", figureHandle, "Units", "normalized", ...
+    "PositionConstraint", "outerposition", "OuterPosition", [0.04 0.04 0.92 0.92]);
 timeValues = 1:20;
 lineOne = plot(axesHandle, timeValues, sin(timeValues / 3), "-o", ...
     "DisplayName", "observed");
@@ -32,6 +40,8 @@ title(axesHandle, titleText);
 xlabel(axesHandle, xLabelText);
 ylabel(axesHandle, yLabelText);
 legend(axesHandle, [lineOne lineTwo], "Location", "southoutside");
+axesHandle.PositionConstraint = "outerposition";
+axesHandle.OuterPosition = [0.04 0.04 0.92 0.92];
 drawnow;
 entry = oi_export_figure(figureHandle, outputDirectory, "publication", ...
     1200, 675, 300, "Title", titleText, ...
@@ -69,6 +79,11 @@ assert(abs(entry.exports.svg.physical_height_in - 2.25) < 1e-9);
 assert(entry.rendering_evidence.physical_dimensions_verified);
 assert(entry.rendering_evidence.png_embedded_dpi_verified);
 assert(entry.accessibility.cjk_text_present && entry.accessibility.cjk_font_verified);
+for labelRole = ["title" "xlabel" "ylabel"]
+    assert(any(string({entry.text_objects.role}) == labelRole), ...
+        "full100_export_contracts:MissingTextRole", ...
+        "Final layout evidence must identify the %s object", labelRole);
+end
 assert(entry.publication.color.automated_palette_safe);
 assert(~entry.publication.color.colorblind_safe);
 assert(entry.publication.color.redundant_encoding);

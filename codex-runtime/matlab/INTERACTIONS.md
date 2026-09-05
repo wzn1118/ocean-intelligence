@@ -2,7 +2,7 @@
 
 ## 双路径边界
 
-- 桌面探索使用 `Interactive=true`。无 MATLAB desktop、`matlab -batch` 或 CI 中必须自动降级为不可见传统 `figure`，关闭数据光标和 brush，并通过 `exportgraphics` 导出。
+- 桌面探索使用 `Interactive=true`。无 MATLAB desktop、`matlab -batch` 或 CI 中必须自动降级为不可见传统 `figure`，关闭数据光标和 brush，并走审计导出路径。固定尺寸 PNG/PDF/SVG 在 R2025a+ 使用精确尺寸 `exportgraphics`，旧版显式使用 `print`；不得把失败后的静默切换写成成功。
 - 运行时请求必须把 `taskType="interactive"` 传入 MATLAB 路由；该路径实际调用 `interactive_timeseries_native_template.m` 并额外传入逐点元数据。普通 `create`/`export` 时间序列保持非交互生成路径，避免路由声明与实际调用不一致。
 - 路由必须把出版契约解析出的 `selectedFontName` 传给交互模板，避免模板先因 CJK 候选不一致失败、随后又被通用排版代码覆盖。未显式声明布局 padding 时，交互路由沿用模板的 `loose` 外边距；显式出版契约可覆盖并由运行时边界检查负责拒绝裁剪风险。
 - `UseUIFigure=true` 只在桌面路径生效。`ExportMode="auto"` 对 `uifigure` 使用 `exportapp` 捕获完整 UI，对传统 figure/layout 使用 `exportgraphics` 保留科学图层与矢量 PDF。
@@ -52,7 +52,7 @@
 
 ## 出版质量与可访问性
 
-- 交互模板通过 `listfonts` 确认实际安装的字体。可用 `FontName` 显式指定字体，但只要标题、物理量、站位、QC 或 ID 含 CJK 字符，该字体也必须属于配置的 CJK 候选；未指定时同样只从这些候选中选择。无候选统一以 `CJKFontUnavailable` 失败，不静默退回 `Helvetica` 或删改中文。
-- 字体被 `listfonts` 返回只代表候选可用。输出固定记录 `FontName`、`CJKTextPresent` 和 `FontRenderingVerified=false`；只有实际检查 PNG 字形与 PDF 字体/字形后，外部验证流程才能提升验证状态。
+- 交互模板通过 `listfonts` 或 Unix fontconfig 字体族枚举的精确匹配确认字体候选。可用 `FontName` 显式指定字体，但只要标题、物理量、站位、QC 或 ID 含 CJK 字符，该字体也必须属于配置的 CJK 候选。无候选统一以 `CJKFontUnavailable` 失败，不静默退回 `Helvetica` 或删改中文；`fc-match` 的替代结果不构成请求字体已安装的证据。
+- 候选匹配不等于字体嵌入或字形正确。输出固定记录 `FontName`、`CJKTextPresent` 和 `FontRenderingVerified=false`；只有实际检查各格式字体和字形后，外部验证流程才能提升验证状态。33985570222 的字体探针支持文泉驿在三个版本的原生矢量 PDF 中呈现中英文，不能据此代签完整图件、旧版精确纸张或桌面交互。
 - 标题、坐标轴和标签统一使用同一字体、`Interpreter="none"`、高对比文字色和浅色背景。主/次序列同时使用颜色与线型/marker 区分，不让颜色成为唯一编码；误差棒保持独立深灰形状编码且不抢占数据提示。
 - `tiledlayout` 使用紧凑面板间距与宽松外边距，降低中文标题、长单位和刻度在导出边界被裁剪的风险。仍须在最终 PNG/PDF 上检查文字范围、标记边缘和页面裁剪，代码属性本身不构成视觉验证。

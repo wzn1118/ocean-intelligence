@@ -248,8 +248,12 @@ if ui_figure_enabled
   figure_handle = uifigure('Color', theme.CanvasColor, 'Position', [80 80 1200 720], ...
     'Visible', visible);
 else
-  figure_handle = figure('Color', theme.CanvasColor, 'Units', 'pixels', ...
-    'Position', [80 80 1200 720], 'Visible', visible);
+  publication_size = [options.PublicationWidthPixels options.PublicationHeightPixels] ...
+    / options.PublicationDPI;
+  figure_handle = figure('Color', theme.CanvasColor, 'Units', 'inches', ...
+    'Position', [1 1 publication_size], 'Visible', visible, ...
+    'PaperUnits', 'inches', 'PaperPosition', [0 0 publication_size], ...
+    'PaperSize', publication_size, 'PaperPositionMode', 'manual');
 end
 figure_cleanup = onCleanup(@() close_unowned_figure(figure_handle));
 figure_handle.CloseRequestFcn = @close_interactive_figure;
@@ -257,6 +261,12 @@ figure_handle.CloseRequestFcn = @close_interactive_figure;
 panel_count = 1 + has_secondary;
 layout = tiledlayout(figure_handle, panel_count, 1, ...
   'TileSpacing', 'compact', 'Padding', 'loose');
+if ~ui_figure_enabled
+  page_margin = min(0.25 ./ publication_size, 0.1);
+  layout.Units = 'normalized';
+  layout.PositionConstraint = 'outerposition';
+  layout.OuterPosition = [page_margin 1 - 2 * page_margin];
+end
 axes_handles = gobjects(panel_count, 1);
 line_handles = gobjects(panel_count, 1);
 uncertainty_handles = gobjects(panel_count, 1);
@@ -895,13 +905,13 @@ if strlength(requested_font) > 0
   return;
 end
 if cjk_text_present
-  candidates = ["Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
+  candidates = ["WenQuanYi Zen Hei" "Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Noto Sans CJK JP" "Noto Sans CJK KR" "Source Han Sans SC" ...
-    "WenQuanYi Zen Hei" "Droid Sans Fallback" "Microsoft YaHei" ...
+    "Droid Sans Fallback" "Microsoft YaHei" ...
     "PingFang SC" "SimHei" "SimSun" ...
     "Arial Unicode MS"];
 else
-  candidates = string(fallback_font);
+  candidates = ["WenQuanYi Zen Hei" string(fallback_font)];
 end
 font_name = "";
 for candidate_index = 1:numel(candidates)

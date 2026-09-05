@@ -231,16 +231,33 @@ end
 function entry = export_plot(output_directory, identifier, title_text, theme, plotter, contract)
 figure_handle = oi_figure(2400, 1500, "off");
 cleanup = onCleanup(@() close_if_valid(figure_handle));
-axes_handle = axes("Parent", figure_handle);
+page_size_inches = [8 5];
+figure_handle.Units = "inches";
+figure_handle.Position(3:4) = page_size_inches;
+figure_handle.PaperUnits = "inches";
+figure_handle.PaperPosition = [0 0 page_size_inches];
+figure_handle.PaperSize = page_size_inches;
+figure_handle.PaperPositionMode = "manual";
+page_margin = 0.3 ./ page_size_inches;
+axes_handle = axes("Parent", figure_handle, "Units", "normalized", ...
+    "PositionConstraint", "outerposition", ...
+    "OuterPosition", [page_margin 1 - 2 * page_margin]);
 result = plotter(axes_handle);
 assert(result.ValidCount + result.MissingCount == prod(contract.shape), ...
     "run_matlab_gate:Counts", "Plot counts must match fixture shape");
 oi_apply_axes(axes_handle, theme);
+axes_handle.PositionConstraint = "outerposition";
 drawnow;
 entry = oi_export_figure(figure_handle, output_directory, identifier, ...
     2400, 1500, 300, "Title", title_text, ...
     "Source", "Ocean Intelligence MATLAB full-score fixture", ...
     "Theme", theme.Name, "ExportSVG", true);
+measured_margins_inches = entry.rendering_evidence.normalized_margins ...
+    .* [page_size_inches page_size_inches];
+assert(all(measured_margins_inches >= 0.1), ...
+    "run_matlab_gate:PageMargins", ...
+    "Final layout must retain at least 0.1 inch on every page edge: %s", ...
+    mat2str(measured_margins_inches, 5));
 contract.missing.total_count = prod(contract.shape);
 contract.missing.valid_count = result.ValidCount;
 contract.missing.missing_count = result.MissingCount;

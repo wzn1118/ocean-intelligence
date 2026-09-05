@@ -366,11 +366,16 @@ assert(created, "test_asset_contracts:CreateDirectory", "%s", message);
 cleanup_directory = onCleanup(@() remove_directory(temporary_directory));
 [figure_handle, axes_handle] = make_axes();
 cleanup_figure = onCleanup(@() close_if_valid(figure_handle));
+figure_handle.Units = "inches";
+figure_handle.Position(3:4) = [400 / 150 300 / 150];
 plot(axes_handle, [0 1], [0 1], "LineWidth", 1.4);
 xlabel(axes_handle, "Distance (km)", "Interpreter", "none");
 ylabel(axes_handle, "Value (degC)", "Interpreter", "none");
 title(axes_handle, cjk_label, "Interpreter", "none");
 oi_apply_axes(axes_handle, theme);
+set(axes_handle, "Units", "normalized", "PositionConstraint", "outerposition", ...
+    "OuterPosition", [0.04 0.04 0.92 0.92]);
+drawnow;
 entry = oi_export_figure(figure_handle, temporary_directory, "contract", 400, 300, 150, ...
     "Title", cjk_label, "Source", "MATLAB contract test", ...
     "Theme", theme.Name, "ExportSVG", true);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -6,6 +7,8 @@ import {
   matlabPlotRequestResolutionBlock,
   matlabPlottingInstructions,
 } from './matlab-plotting-instructions.mjs';
+
+const repositorySkill = readFileSync(new URL('../matlab/SKILL.md', import.meta.url), 'utf8');
 
 test('exports the complete Chinese Octave and MATLAB plotting contract', () => {
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /运行时检测与兼容性/u);
@@ -141,8 +144,112 @@ test('injects safe caller paths and rejects multiline or escaping path fragments
 });
 
 test('routes an explicit Octave context to Octave templates without changing MATLAB defaults', () => {
-  const instructions = matlabPlottingInstructions({ runtime: 'octave' });
-  assert.match(instructions, /优先模板目录：\.\/codex-runtime\/octave/u);
+  for (const runtime of ['octave', 'OCTAVE']) {
+    const instructions = matlabPlottingInstructions({ runtime });
+    assert.match(instructions, /优先模板目录：\.\/codex-runtime\/octave/u);
+    assert.match(instructions, /Octave 默认使用不可见 figure 和 Qt 工具包/u);
+    assert.match(instructions, /优先 Noto Sans CJK SC，其次 WenQuanYi Zen Hei/u);
+    assert.doesNotMatch(instructions, /MATLAB 仓库实跑约束/u);
+    assert.doesNotMatch(instructions, /默认优先 WenQuanYi Zen Hei/u);
+    assert.doesNotMatch(instructions, /字体探针 33985570222/u);
+    assert.doesNotMatch(instructions, /figureHandle\.Position\(3:4\) = \[widthPixels heightPixels\] \/ dpi/u);
+    assert.deepEqual(repositoryExportTable(instructions), []);
+  }
+});
+
+test('sets final inches before plot construction without weakening clipping gates', () => {
+  for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions()]) {
+    assert.match(instructions, /输入是屏幕 pixels，不是最终输出的物理尺寸/u);
+    assert.match(instructions, /绘图前、创建 axes\/tiledlayout 前设置 figureHandle\.Units = "inches"/u);
+    assert.match(instructions, /figureHandle\.Position\(3:4\) = \[widthPixels heightPixels\] \/ dpi/u);
+    assert.match(instructions, /1200 x 675 输出像素在 300 DPI 下是 4 x 2\.25 inches/u);
+    assert.match(instructions, /OuterPosition\/外框约束和真实页边距，或 tiledlayout 的 Padding\/TileSpacing/u);
+    assert.match(instructions, /不得放宽裁切\/遮挡门禁、忽略对象或改写 manifest/u);
+  }
+  assert.match(repositorySkill, /final inches before creating axes/u);
+  assert.match(repositorySkill, /figureHandle\.Position\(3:4\) = \[widthPixels heightPixels\] \/ dpi;/u);
+  assert.match(repositorySkill, /Fix the layout rather than relaxing clipping\/overlap gates/u);
+});
+
+test('distinguishes general API availability from the repository exact export policy', () => {
+  const expectedTable = [
+    ['R2019b-R2024b', 'print -dpng', 'print -dpdf', 'print -dsvg'],
+    ['R2025a+', 'exact exportgraphics', 'exact exportgraphics', 'exact exportgraphics'],
+  ];
+  assert.deepEqual(repositoryExportTable(repositorySkill), expectedTable);
+  assert.deepEqual(repositoryExportTable(MATLAB_PLOTTING_INSTRUCTIONS), expectedTable);
+  for (const matlabRelease of ['R2019b', 'R2020a', 'R2021a', 'R2024b', 'R2025a', 'R2026a']) {
+    const instructions = matlabPlottingInstructions({ runtime: 'matlab', matlabRelease });
+    assert.deepEqual(repositoryExportTable(instructions), expectedTable, matlabRelease);
+    assert.match(instructions, matlabRelease === 'R2019b'
+      ? /exportgraphics: 明确降级/u
+      : /exportgraphics: 原生 \(R2020a\+\)/u);
+    assert.ok(instructions.indexOf('【MATLAB 仓库实跑约束】') > instructions.indexOf('【MATLAB release 能力矩阵】'));
+    assert.match(instructions, /通用 exportgraphics 自 R2020a 可用/u);
+    assert.match(instructions, /oi_export_figure \+ oi_write_manifest 的严格固定尺寸路径/u);
+    assert.match(instructions, /失败必须保留错误并停止，不得静默 print 重试/u);
+    assert.match(instructions, /逐图、逐格式记录实际 export_api，并与 runtime 一致/u);
+  }
+  assert.match(repositorySkill, /General `exportgraphics` is available from R2020a/u);
+  assert.match(repositorySkill, /never silently retry with `print`/u);
+  assert.match(repositorySkill, /actual per-figure, per-format `export_api` consistently with runtime evidence/u);
+});
+
+test('requires exact installed fonts without claiming PDF embedding or CJK readability', () => {
+  const instructions = matlabPlottingInstructions();
+  assert.match(instructions, /listfonts 或 fc-list 枚举结果的精确字体族名匹配/u);
+  assert.match(instructions, /不得用 fc-match fallback 返回了替代字体就认定请求字体已安装/u);
+  assert.match(instructions, /字体候选匹配不等于 PDF 字体嵌入，也不等于 CJK 字形可读/u);
+  assert.match(instructions, /PNG\/PDF\/SVG 必须分别核验实际产物，未核验项保持 unverified/u);
+  assert.match(repositorySkill, /exact, case-insensitive matching against `listfonts` or `fc-list` enumeration/u);
+  assert.match(repositorySkill, /`fc-match` fallback does not prove the requested font is installed/u);
+  assert.match(repositorySkill, /neither PDF font embedding nor readable CJK glyphs/u);
+});
+
+test('scopes the WenQuanYi preference to the tested native vector font evidence', () => {
+  for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions()]) {
+    assert.match(instructions, /用户未指定 FontName 且精确安装检查通过时，默认优先 WenQuanYi Zen Hei/u);
+    assert.match(instructions, /保持主题、导出器和交互字体一致；不覆盖用户显式字体选择/u);
+    assert.match(instructions, /33985570222 在 R2021a\/R2024b\/R2026a/u);
+    assert.match(instructions, /WenQuanYi Zen Hei \+ exportgraphics\(\.\.\., "ContentType", "vector"\)/u);
+    assert.match(instructions, /所测中英文\/数字可读、精确文本提取和字体嵌入/u);
+    assert.match(instructions, /原生 PDF 是内容裁剪而非精确页/u);
+    assert.match(instructions, /R2021a\/R2024b 的 print PDF 仍未嵌入/u);
+    assert.match(instructions, /不能声称已解决旧版嵌入或精确页合同，也不能据此更换严格导出策略/u);
+    assert.match(instructions, /整图布局、最终尺寸、粗体、中文旋转轴及 PNG\/SVG 仍须分别验证/u);
+    assert.match(instructions, /两旧版 Noto 原生标题为 ######，Droid 原生 Latin\/数字为方框/u);
+  }
+  assert.match(repositorySkill, /without an explicit user `FontName`, prefer `WenQuanYi Zen Hei` after exact installation checks/u);
+  assert.match(repositorySkill, /Font probe 33985570222/u);
+  assert.match(repositorySkill, /content-cropped, not exact-page exports/u);
+  assert.match(repositorySkill, /R2021a\/R2024b `print` PDFs still lacked embedded fonts/u);
+  assert.match(repositorySkill, /does not authorize changing the strict export strategy/u);
+  assert.match(repositorySkill, /Validate whole-figure layout, final size, bold text, rotated Chinese labels, and PNG\/SVG independently/u);
+});
+
+test('keeps tiledlayout title coverage unresolved until every requested artifact is checked', () => {
+  const instructions = matlabPlottingInstructions();
+  assert.match(instructions, /tiledlayout 标题也必须在每个请求格式中核验文本、字形、占位和裁切/u);
+  assert.match(instructions, /几何漏项目前仍在诊断，不得声称已修复/u);
+  assert.match(instructions, /不得仅凭现有 bounds 门禁通过认定标题完整/u);
+  assert.match(repositorySkill, /`tiledlayout` titles in every requested format/u);
+  assert.match(repositorySkill, /geometry coverage gap is still under diagnosis, not a confirmed fix/u);
+  assert.match(repositorySkill, /Passing the current bounds gate alone does not prove/u);
+});
+
+test('binds ocean reports to runtime input bytes and keeps synthetic conclusions explicit', () => {
+  const instructions = matlabPlottingInstructions();
+  assert.match(instructions, /实际参与该次 MATLAB 运行的输入快照/u);
+  assert.match(instructions, /相对路径、bytes、SHA-256 与运行记录一致，fixture 包核对 runtime\.input_fixtures/u);
+  assert.match(instructions, /同名\/同 shape 源文件不能替代运行输入/u);
+  assert.match(instructions, /缺少运行时哈希标记 unverified，哈希不一致必须拒绝/u);
+  assert.match(instructions, /合成 fixture 必须明确标注 synthetic_benchmark\/合成数据/u);
+  assert.match(instructions, /不能将其描述为真实海况、实测趋势或海区机制证据/u);
+  assert.match(repositorySkill, /actual input snapshots consumed by that MATLAB run/u);
+  assert.match(repositorySkill, /relative paths, bytes, and SHA-256 against runtime records/u);
+  assert.match(repositorySkill, /Missing runtime hashes leave the binding `unverified`; mismatched hashes must be rejected/u);
+  assert.match(repositorySkill, /synthetic_benchmark/u);
+  assert.match(repositorySkill, /not evidence of real ocean conditions, observed trends, or regional mechanisms/u);
 });
 
 test('injects a ready plot request through task route, plot route and generator', () => {
@@ -172,6 +279,9 @@ test('injects a ready plot request through task route, plot route and generator'
   assert.match(instructions, /出版尺寸：4 in × 2\.25 in，300 DPI/u);
   assert.match(instructions, /产物级验收：not-run-by-router/u);
   assert.match(instructions, /不得据此声称字形、裁剪、灰度或色觉检查通过/u);
+  const geometryAdviceIndex = instructions.indexOf('figureHandle.Position(3:4) = [widthPixels heightPixels] / dpi');
+  assert.ok(geometryAdviceIndex >= 0);
+  assert.ok(geometryAdviceIndex < instructions.indexOf('function result = make_ocean_figure'));
 });
 
 test('injects unresolved and runtime-routed states without orphan code generation', () => {
@@ -200,3 +310,9 @@ test('instruction injection is closed-world and cannot change MATLAB authority f
   assert.throws(() => matlabPlottingInstructions({ runtime: 'matlab', manifestPath: '../figures.json' }), /traversal/u);
   assert.throws(() => matlabPlottingInstructions({ runtime: 'MATLAB/Octave' }), /must be "matlab" or "octave"/u);
 });
+
+function repositoryExportTable(instructions) {
+  return instructions.split('\n')
+    .filter((line) => /^\| R\d/u.test(line))
+    .map((line) => line.split('|').slice(1, -1).map((cell) => cell.trim()));
+}

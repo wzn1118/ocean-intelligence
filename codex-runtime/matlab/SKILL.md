@@ -25,7 +25,16 @@ Resolve and report:
 - Required products and toolbox license/function checks.
 - Requested output formats and release-compatible export APIs.
 
-For unattended execution, `matlab -batch` is native only from R2019a. Older releases use an explicit `matlab -r` command with tested `try/catch/exit` behavior and preserved failure status. Resolve export strategy per format: SVG uses `print -dsvg` before R2025a, while PNG/PDF may use a different API in the same request. Record a per-format API map whenever one command path cannot describe all requested formats.
+For unattended execution, `matlab -batch` is native only from R2019a. Older releases use an explicit `matlab -r` command with tested `try/catch/exit` behavior and preserved failure status.
+
+General `exportgraphics` is available from R2020a. This API availability does not establish exact sizing support. For this repository's strict fixed-size `oi_export_figure` + `oi_write_manifest` workflow, choose each requested format's API before execution:
+
+| Release | PNG | PDF | SVG |
+| --- | --- | --- | --- |
+| R2019b-R2024b | print -dpng | print -dpdf | print -dsvg |
+| R2025a+ | exact exportgraphics | exact exportgraphics | exact exportgraphics |
+
+Legacy `print` is an explicit preselected strategy, not a retry after failure. Exact `exportgraphics` uses `Units="inches"`, `Width`, `Height`, `Padding="figure"`, and `PreserveAspectRatio="on"`. Preserve export errors and stop; never silently retry with `print`. Record the actual per-figure, per-format `export_api` consistently with runtime evidence; a selected strategy is not proof of execution. These repository constraints take precedence over generic API recommendations in the capability matrix.
 
 Use these terminal states exactly:
 
@@ -62,13 +71,18 @@ For publication, export, accessibility, Chinese text, or interactive delivery, s
 
 - `target`: final medium, physical width/height in cm or inches, output formats, and at least 150 DPI for raster output; publication raster output normally uses 300 DPI or the venue requirement.
 - `layout`: `single-axes`, `tiledlayout`, or explicit axes; declare rows/columns when tiled, spacing, padding, row-major reading order, explicit handle ownership, and outside/none placement for legends and colorbars.
-- `typography`: selected font and fallbacks, final-size tick/label/title sizes, line width, and interpreter. Chinese delivery uses UTF-8, a verified CJK-capable font fallback, `Interpreter="none"` for ordinary labels, and per-format glyph checks.
+- `typography`: selected font and fallbacks, final-size tick/label/title sizes, line width, and interpreter. Verify installed font family names by exact, case-insensitive matching against `listfonts` or `fc-list` enumeration. A substitute returned by `fc-match` fallback does not prove the requested font is installed. A matching font candidate proves neither PDF font embedding nor readable CJK glyphs. Chinese delivery uses UTF-8, `Interpreter="none"` for ordinary labels, and separate PNG/PDF/SVG artifact checks; leave unverified embedding and glyph claims unverified.
 - `color`: palette class and source, white or declared background, distinct missing-data appearance, minimum contrast ratio, grayscale and color-vision checks, and redundant line/marker/label encoding instead of color alone.
 - `clipping` and `accessibility`: require `drawnow` before bounds/overlap inspection, check titles/ticks/legends/colorbars/annotations, preserve reading order, and require accessible title/description evidence in formats that support it.
+- Check `tiledlayout` titles in every requested format for text, glyphs, allocated space, and clipping. Their geometry coverage gap is still under diagnosis, not a confirmed fix. Passing the current bounds gate alone does not prove that layout titles are complete; retain unverified status without artifact evidence.
 - `interaction`: interactive tasks use `mode="dual"`, stable observation IDs, callbacks scoped through `event.Target`/`DataIndex`, cleanup registration, and a deterministic static fallback.
 - `headless`: declare MATLAB `-batch`, invisible traditional figures, an explicit `exportgraphics` or documented `print` path, and no dependency on clicks, hover state, pinned tips, desktop tools, or callbacks for the exported scientific result.
 
 Expose the normalized contract as `publicationContract` in route responses and `publication_contract` in delivery metadata. Expose `outputContract` at the task and runtime composition layers with the release-specific export strategy for every requested format. After rendering, apply every criterion named by `qualityGate.requiredCriteria`; only artifact evidence and `inspectMatlabPlotQuality` can mark the checks as passed.
+
+For MATLAB CJK+Latin output without an explicit user `FontName`, prefer `WenQuanYi Zen Hei` after exact installation checks, keeping the theme, exporter, and interaction font consistent. Do not override an explicit user font. Font probe 33985570222 verified readable tested Chinese/Latin/numerals, exact text extraction, and embedding for WenQuanYi with `exportgraphics(..., "ContentType", "vector")` PDF on R2021a/R2024b/R2026a. This is limited probe evidence, not a guarantee for every glyph or backend.
+
+Those native PDFs were content-cropped, not exact-page exports. R2021a/R2024b `print` PDFs still lacked embedded fonts; changing the default to WenQuanYi does not resolve legacy embedding or the exact-page contract, and does not authorize changing the strict export strategy. Validate whole-figure layout, final size, bold text, rotated Chinese labels, and PNG/SVG independently. In the two older releases, native Noto titles were `######` and native Droid Latin/numerals were boxes; neither is an equivalently verified fallback. Do not misreport backend failures as fonts being uninstalled.
 
 ## Implementation Workflow
 
@@ -79,6 +93,16 @@ Expose the normalized contract as `publicationContract` in route responses and `
 5. Use native MATLAB data types and APIs when supported. Apply only documented MATLAB fallbacks for older releases.
 6. Run MATLAB when available, validate artifacts, and record command, release, products, output paths, dimensions, bytes, hashes, text/glyph evidence, and visual-inspection status.
 
+For repository exports, `oi_figure` takes screen pixels, not the final physical size at the requested output DPI. Set the final inches before creating axes, a `tiledlayout`, or any plot content, using the requested `widthPixels`, `heightPixels`, and `dpi`:
+
+```matlab
+figureHandle = oi_figure(widthPixels, heightPixels, "off");
+figureHandle.Units = "inches";
+figureHandle.Position(3:4) = [widthPixels heightPixels] / dpi;
+```
+
+For example, 1200 x 675 output pixels at 300 DPI means 4 x 2.25 inches. Waiting for `oi_export_figure` to shrink the figure changes the space available to point-sized fonts and labels. At the final size, allocate real page margins using axes `OuterPosition` with an outer-position constraint, or let `tiledlayout` allocate space through `Padding` and `TileSpacing`; do not fill the canvas with a fixed inner axes rectangle. Use release-supported properties, run `drawnow`, and check both layout and exported artifacts. Fix the layout rather than relaxing clipping/overlap gates, omitting objects, or rewriting manifest evidence.
+
 For static time-series figures, use `assets/oi_plot_time_series.m` with explicit `ValueVariables`, units, timezone semantics, gap threshold, QC policy, and uncertainty definition. It is a registered plot asset exercised directly by `tests/run_plot_regression.m`, `tests/test_asset_contracts.m`, and `tests/test_asset_adversarial_contracts.m`. Do not describe it as server-router generated until `matlab-plot-router.mjs` actually calls the helper.
 
 ## Output Contract
@@ -88,6 +112,8 @@ Return runnable `.m` source plus requested PNG/PDF/SVG outputs when supported. W
 For PNG record file, width, height, DPI, bytes, and SHA-256. For PDF/SVG record file, dimensions, bytes, SHA-256, and text or glyph evidence. Include `scientific_data_contract`, `publication_contract`, `runtime_status`, `execution_verified`, `artifact_validation`, `visual_inspection`, `warnings`, and structured `errors`.
 
 Only verified artifacts enter the manifest or report. Never expose temporary paths, `file://` URIs, or tenant host paths.
+
+For ocean-region reports, bind figure provenance and computed statistics to the actual input snapshots consumed by that MATLAB run. Check their relative paths, bytes, and SHA-256 against runtime records (`runtime.input_fixtures` for the fixture bundle). Reading a same-name or same-shape source file later is not runtime input evidence. Missing runtime hashes leave the binding `unverified`; mismatched hashes must be rejected, never refreshed into passing evidence. Keep synthetic fixtures labeled `synthetic_benchmark` or synthetic data even when execution and hashes are verified; they are not evidence of real ocean conditions, observed trends, or regional mechanisms.
 
 ## Failure Rules
 

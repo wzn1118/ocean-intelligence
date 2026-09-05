@@ -19,6 +19,8 @@ addpath(assetDirectory);
 
 figureHandle = oi_figure(1200, 675, "off");
 cleanupFigure = onCleanup(@() close_if_valid(figureHandle));
+figureHandle.Units = "inches";
+figureHandle.Position(3:4) = [1200 / 300 675 / 300];
 axesHandle = axes("Parent", figureHandle);
 plot(axesHandle, 1:5, [1 2 1.5 3 2.5], "-o", ...
     "LineWidth", 1.5, "MarkerSize", 5, "DisplayName", "Observed");
@@ -27,6 +29,9 @@ xlabel(axesHandle, "Sample", "Interpreter", "none");
 ylabel(axesHandle, "Value (1)", "Interpreter", "none");
 grid(axesHandle, "on");
 oi_apply_axes(axesHandle, oi_ocean_theme());
+set(axesHandle, "Units", "normalized", "PositionConstraint", "outerposition", ...
+    "OuterPosition", [0.04 0.04 0.92 0.92]);
+drawnow;
 
 entry = oi_export_figure(figureHandle, outputDirectory, "evidence", ...
     1200, 675, 300, "Title", "Manifest evidence integrity", ...

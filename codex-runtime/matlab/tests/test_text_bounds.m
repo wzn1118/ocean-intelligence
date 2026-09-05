@@ -7,6 +7,7 @@ pathCleanup = onCleanup(@() path(originalPath));
 addpath(assetDirectory);
 fontName = publication_font();
 
+test_native_layout_text_diagnostics();
 test_original_nested_geometry("Courier", "nested-courier");
 test_original_nested_geometry(fontName, "nested-publication-original");
 test_axes_text_and_rotation(fontName);
@@ -17,6 +18,68 @@ test_invalid_inputs(fontName);
 
 clear pathCleanup;
 fprintf("MATLAB_TEXT_BOUNDS=passed\n");
+end
+
+function test_native_layout_text_diagnostics()
+figureHandle = make_pixel_figure([800 480]);
+figureCleanup = onCleanup(@() close_if_valid(figureHandle));
+layoutHandle = tiledlayout(figureHandle, 1, 1);
+axesHandle = nexttile(layoutHandle);
+plot(axesHandle, 0:4, [1 3 2 4 3]);
+titleHandle = title(layoutHandle, "Native layout title");
+xlabelHandle = xlabel(layoutHandle, "Time (UTC)");
+ylabelHandle = ylabel(layoutHandle, "Sea temperature (degC)");
+drawnow;
+
+evidence = struct("release", version('-release'), ...
+    "geometry_reference", "raw public API results in reported units; no bounds inferred");
+evidence.figure_pixels = probe_public_api(@() getpixelposition(figureHandle));
+evidence.layout_class = probe_public_api(@() class(layoutHandle));
+evidence.layout_pixels_in_figure = probe_public_api(@() getpixelposition(layoutHandle, true));
+evidence.Title = native_layout_text_record(titleHandle, figureHandle);
+evidence.XLabel = native_layout_text_record(xlabelHandle, figureHandle);
+evidence.YLabel = native_layout_text_record(ylabelHandle, figureHandle);
+fprintf("MATLAB_NATIVE_LAYOUT_TEXT_DIAGNOSTIC=%s\n", jsonencode(evidence));
+outputRoot = string(getenv("MATLAB_FULL100_OUTPUT"));
+if strlength(outputRoot) > 0
+    outputDirectory = fullfile(outputRoot, "text-bounds");
+    if ~isfolder(outputDirectory)
+        mkdir(outputDirectory);
+    end
+    write_evidence_json(fullfile(outputDirectory, "native-layout-text.json"), evidence);
+end
+
+clear figureCleanup;
+close_if_valid(figureHandle);
+end
+
+function record = native_layout_text_record(textHandle, figureHandle)
+record = struct();
+record.class = probe_public_api(@() class(textHandle));
+record.properties = probe_public_api(@() properties(textHandle));
+for propertyName = ["Type" "String" "FontName" "FontSize" "Units" "Extent" "Position"]
+    record.(char(propertyName)) = probe_public_api(@() get(textHandle, char(propertyName)));
+end
+record.getpixelposition = probe_public_api(@() getpixelposition(textHandle));
+record.getpixelposition_recursive = probe_public_api(@() getpixelposition(textHandle, true));
+record.isgraphics_text = probe_public_api(@() isgraphics(textHandle, "text"));
+record.found_by_findall_type_text = probe_public_api(@() any(arrayfun( ...
+    @(candidate) isequal(candidate, textHandle), findall(figureHandle, "Type", "text"))));
+end
+
+function result = probe_public_api(callback)
+result = struct("succeeded", false, "value", [], "value_class", "", ...
+    "value_size", [], "error_identifier", "", "error_message", "");
+try
+    value = callback();
+    result.value = value;
+    result.value_class = class(value);
+    result.value_size = size(value);
+    result.succeeded = true;
+catch errorDetails
+    result.error_identifier = errorDetails.identifier;
+    result.error_message = errorDetails.message;
+end
 end
 
 function test_axes_text_and_rotation(fontName)
@@ -168,17 +231,69 @@ colorbarHandle.Label.Interpreter = "none";
 colorbarHandle.Label.Rotation = 90;
 labelUnits = string(colorbarHandle.Label.Units);
 
+[evidencePath, renderSucceeded] = render_colorbar_evidence(figureHandle, axesHandle, colorbarHandle);
 [labelBounds, labelDetails] = measure_bounds(colorbarHandle.Label, figureHandle, "colorbar label");
 assert(string(colorbarHandle.Label.Units) == labelUnits, ...
     "test_text_bounds:ColorbarUnits", ...
-    "Colorbar label Units were not restored");
+    "Colorbar label Units were not restored; geometry=%s; evidence=%s", labelDetails, evidencePath);
 assert_inside(labelBounds, "colorbar label", labelDetails);
 assert(labelBounds(1) > 0.75 && labelBounds(4) > labelBounds(3), ...
     "test_text_bounds:ColorbarGeometry", ...
-    "Colorbar label bounds were not measured in the colorbar parent frame");
+    "Colorbar label geometry failed after native export; bounds=%s; geometry=%s; evidence=%s", ...
+    mat2str(labelBounds, 17), labelDetails, evidencePath);
+assert(renderSucceeded, "test_text_bounds:DiagnosticExport", ...
+    "No colorbar diagnostic PNG was exported; see %s", evidencePath);
 
 clear figureCleanup;
 close_if_valid(figureHandle);
+end
+
+function [jsonPath, renderSucceeded] = render_colorbar_evidence(figureHandle, axesHandle, colorbarHandle)
+outputRoot = string(getenv("MATLAB_FULL100_OUTPUT"));
+if strlength(outputRoot) == 0
+    outputRoot = string(tempname);
+end
+outputDirectory = fullfile(outputRoot, "text-bounds");
+if ~isfolder(outputDirectory)
+    mkdir(outputDirectory);
+end
+jsonPath = fullfile(outputDirectory, "colorbar-label.json");
+evidence = struct("release", version('-release'), ...
+    "bounds_reference", "helper bounds use the figure drawable canvas; PNGs are content crops");
+drawnow;
+evidence.before_export = colorbar_native_state(figureHandle, axesHandle, colorbarHandle, "colorbar before export");
+write_evidence_json(jsonPath, evidence);
+evidence.exports = export_diagnostic_crop(axesHandle, "axes-with-colorbar", ...
+    fullfile(outputDirectory, "colorbar-axes.png"));
+drawnow;
+evidence.after_axes_export = colorbar_native_state(figureHandle, axesHandle, colorbarHandle, "colorbar after axes export");
+write_evidence_json(jsonPath, evidence);
+evidence.exports(2) = export_diagnostic_crop(figureHandle, "figure-content", ...
+    fullfile(outputDirectory, "colorbar-figure-content.png"));
+drawnow;
+evidence.after_figure_export = colorbar_native_state(figureHandle, axesHandle, colorbarHandle, "colorbar after figure export");
+evidence.pixel_sizes = [evidence.before_export.measurement.pixel_extent(3:4); ...
+    evidence.after_axes_export.measurement.pixel_extent(3:4); ...
+    evidence.after_figure_export.measurement.pixel_extent(3:4)];
+evidence.pixel_size_phases = ["before_export" "after_axes_export" "after_figure_export"];
+write_evidence_json(jsonPath, evidence);
+renderSucceeded = any([evidence.exports.succeeded]);
+fprintf("MATLAB_COLORBAR_RENDER_EVIDENCE=%s\n", jsonencode(evidence));
+end
+
+function state = colorbar_native_state(figureHandle, axesHandle, colorbarHandle, role)
+state = struct();
+state.figure_pixels = probe_public_api(@() getpixelposition(figureHandle));
+state.axes_pixels_in_figure = probe_public_api(@() getpixelposition(axesHandle, true));
+state.colorbar_class = probe_public_api(@() class(colorbarHandle));
+state.colorbar_properties = probe_public_api(@() properties(colorbarHandle));
+state.colorbar_pixels_in_figure = probe_public_api(@() getpixelposition(colorbarHandle, true));
+for propertyName = ["Type" "Units" "Position" "Limits" "Location" "AxisLocation" "Direction"]
+    state.(char(propertyName)) = probe_public_api(@() get(colorbarHandle, char(propertyName)));
+end
+state.native_label = native_layout_text_record(colorbarHandle.Label, figureHandle);
+[~, details] = measure_bounds(colorbarHandle.Label, figureHandle, role);
+state.measurement = jsondecode(details);
 end
 
 function test_font_refresh(fontName)
@@ -312,10 +427,16 @@ function record = export_diagnostic_crop(targetHandle, targetName, pngPath)
 record = struct("target", targetName, "api", "exportgraphics", ...
     "file", pngPath, "canvas_reference", ...
     "content crop of named target; not a full figure canvas or figure-clipping verdict", ...
-    "target_pixels_in_figure", double(getpixelposition(targetHandle, true)), ...
+    "target_pixels_in_figure", [], "target_pixels_on_screen", [], ...
     "succeeded", false, "image_size_pixels", [], ...
     "error_identifier", "", "error_message", "");
 try
+    targetPixels = double(getpixelposition(targetHandle, true));
+    if isgraphics(targetHandle, "figure")
+        record.target_pixels_on_screen = targetPixels;
+    else
+        record.target_pixels_in_figure = targetPixels;
+    end
     exportgraphics(targetHandle, char(pngPath), 'Resolution', 150, 'BackgroundColor', 'white');
     imageInfo = imfinfo(pngPath);
     assert(imageInfo.Width > 0 && imageInfo.Height > 0, ...

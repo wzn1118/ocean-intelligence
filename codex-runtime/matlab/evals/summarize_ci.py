@@ -22,9 +22,12 @@ CORE_STAGES = (
     "evaluator-runtime",
 )
 STATUSES = ("passed", "failed", "pending", "running")
+POSTPROCESSING_FILES = ("rendered-artifact-evidence.json", "ci-validation-summary.json")
 NOTICE = (
-    "仅汇总本地产物，不重新验真。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
+    "CI 状态为本地证据推断，未提供 GitHub 状态、未查询远端，不重新验真。"
+    "已知后处理失败优先于缺少视觉审核的 pending。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
     "分数与视觉审核仅转述评分器，缺少证据为 pending。"
+    "自动产物检查 passed 也不代表人工视觉审核通过。"
 )
 
 
@@ -225,6 +228,96 @@ def summarize_evaluator(payload: dict | None, issues: list) -> dict:
     return result
 
 
+def postprocessing_status(record: dict, source: str, identifier: str, issues: list,
+                          children: list[str], rendered: bool) -> str:
+    before = len(issues)
+    collect_errors(record, source, issues)
+    status = record.get("status")
+    if rendered and status == "not_verified":
+        status = "pending"
+    if not isinstance(status, str) or status not in STATUSES:
+        issue(issues, source, "ci_summary:InvalidStatus", f"{identifier}: 无效状态 {status!r}")
+        status = "failed"
+    elif status == "failed" and len(issues) == before and "failed" not in children:
+        issue(issues, source, identifier,
+              record.get("reason") or record.get("detail") or "状态为 failed，未提供错误消息")
+    return combined_status([status, *children, *[item["status"] for item in issues[before:]]])
+
+
+def postprocessing_checks(record: dict, source: str, issues: list, rendered: bool) -> list[str]:
+    checks = record.get("checks")
+    if not isinstance(checks, list):
+        issue(issues, source, "ci_summary:InvalidChecks", "后处理 checks 必须为数组")
+        return ["failed"]
+    statuses = []
+    key = "name" if rendered else "id"
+    for index, check in enumerate(checks):
+        if (not isinstance(check, dict) or not isinstance(check.get(key), str)
+                or not check[key].strip()):
+            issue(issues, source, "ci_summary:InvalidCheck", f"checks[{index}] 缺少有效 {key}")
+            statuses.append("failed")
+            collect_errors(check, source, issues)
+            continue
+        statuses.append(postprocessing_status(check, source, check[key], issues, [], rendered))
+    return statuses
+
+
+def summarize_postprocessing(directory: Path, release: str, issues: list) -> dict:
+    sources = []
+    for source in POSTPROCESSING_FILES:
+        before = len(issues)
+        payload = read_json(directory / source, issues, optional=True)
+        if payload is None:
+            if len(issues) > before:
+                sources.append({"source": source, "status": "failed", "reported_status": None})
+            continue
+        rendered = source == "rendered-artifact-evidence.json"
+        if type(payload.get("schema_version")) is not int or payload["schema_version"] != 1:
+            issue(issues, source, "ci_summary:InvalidSchema", "不支持的后处理 schema_version")
+        if not rendered and payload.get("expected_release") != release:
+            issue(issues, source, "ci_summary:ReleaseMismatch", "expected_release 与目录版本不符或缺失")
+        statuses = postprocessing_checks(payload, source, issues, rendered)
+        if rendered:
+            artifacts = payload.get("artifacts")
+            if not isinstance(artifacts, list):
+                issue(issues, source, "ci_summary:InvalidArtifacts", "artifacts 必须为数组")
+                artifacts = []
+            elif not artifacts:
+                issue(issues, source, "ci_summary:MissingArtifacts",
+                      "缺少逐产物检查记录，不能仅凭顶层检查认定产物通过", "pending")
+            for index, artifact in enumerate(artifacts):
+                if (not isinstance(artifact, dict) or not isinstance(artifact.get("file"), str)
+                        or not artifact["file"].strip()):
+                    issue(issues, source, "ci_summary:InvalidArtifact", f"artifacts[{index}] 缺少有效 file")
+                    collect_errors(artifact, source, issues)
+                    continue
+                artifact_source = source + ":" + artifact["file"]
+                children = postprocessing_checks(artifact, artifact_source, issues, rendered)
+                statuses.append(postprocessing_status(
+                    artifact, artifact_source, artifact["file"], issues,
+                    [combined_status(children)], rendered))
+        else:
+            failures = payload.get("failures", [])
+            if not isinstance(failures, list):
+                issue(issues, source, "ci_summary:InvalidFailures", "failures 必须为数组")
+                failures = []
+            for failure in failures:
+                if not isinstance(failure, str) or not failure.strip():
+                    issue(issues, source, "ci_summary:InvalidFailure", "failure 必须为非空字符串")
+                    continue
+                identifier, separator, message = first_line(failure).partition(": ")
+                if not separator:
+                    identifier, message = "(无 identifier)", first_line(failure)
+                if not any(item["source"] == source and item["identifier"] == identifier
+                           and item["message"] == message for item in issues):
+                    issue(issues, source, identifier, message)
+        status = postprocessing_status(payload, source, "(无 identifier)", issues,
+                                       [combined_status(statuses), *[
+                                           item["status"] for item in issues[before:]]], rendered)
+        sources.append({"source": source, "status": status, "reported_status": payload.get("status")})
+    return {"status": combined_status([item["status"] for item in sources]), "sources": sources}
+
+
 def summarize(input_root: Path) -> dict:
     root = Path(input_root).resolve()
     if not root.is_dir():
@@ -242,9 +335,11 @@ def summarize(input_root: Path) -> dict:
         stages = read_stages(read_json(directory / "ci-stage-status.json", issues), release, issues)
         probe = summarize_probe(read_json(directory / "matlab-runtime-probe.json", issues), release, issues)
         evaluator = summarize_evaluator(read_json(directory / "evaluator-result.json", issues, optional=True), issues)
+        postprocessing = summarize_postprocessing(directory, release, issues)
         expected_stages.extend(identifier for identifier in stages if identifier not in expected_stages)
         results.append({"release": release, "artifact_present": release in directories,
-                        "stages": stages, "probe": probe, "evaluator": evaluator, "issues": issues})
+                        "stages": stages, "probe": probe, "evaluator": evaluator,
+                        "postprocessing": postprocessing, "issues": issues})
     for result in results:
         stages = result["stages"]
         for identifier in expected_stages:
@@ -255,14 +350,16 @@ def summarize(input_root: Path) -> dict:
         statuses = [stage["status"] for stage in result["stages"]]
         result["stage_counts"] = counts(statuses)
         runtime_issues = [item["status"] for item in result["issues"]
-                          if not item["source"].startswith("evaluator-result.json")]
+                          if not item["source"].startswith(("evaluator-result.json", *POSTPROCESSING_FILES))]
         result["runtime_status"] = combined_status([*statuses, result["probe"]["status"], *runtime_issues])
         result["status"] = combined_status([
             result["runtime_status"], result["evaluator"]["status"],
+            *([result["postprocessing"]["status"]] if result["postprocessing"]["sources"] else []),
             result["evaluator"]["visual_status"], *[item["status"] for item in result["issues"]],
         ])
     statuses = [result["status"] for result in results]
     return {"schema_version": 1, "input_root": str(root), "status": combined_status(statuses),
+            "status_source": "local_artifact_evidence", "github_status": None,
             "expected_releases": list(RELEASES), "expected_stages": expected_stages,
             "stage_policy": "历史必需阶段与本次产物阶段 ID 的并集；缺失记 pending，不使用固定分母。",
             "release_counts": counts(statuses),
@@ -277,18 +374,19 @@ def markdown(summary: dict) -> str:
     def count_text(values: dict) -> str:
         return "，".join(f"{status} {values[status]}" for status in STATUSES)
 
-    lines = ["# MATLAB 三版本 CI 进度", "", f"总状态：{summary['status']}。",
+    lines = ["# MATLAB 三版本 CI 进度", "", f"总状态（本地证据推断）：{summary['status']}。",
              "版本：" + count_text(summary["release_counts"]) + "。",
              f"阶段（共 {summary['stage_counts']['total']}）：" + count_text(summary["stage_counts"]) + "。",
              "", summary["notice"], "", summary["stage_policy"], "",
-             "| 版本 | CI 状态 | 运行阶段/环境 | 探针 | passed | failed | pending | running | 评分器（原始分数） | 视觉审核记录 |",
-             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |"]
+             "| 版本 | CI 状态（本地推断） | 运行阶段/环境 | 探针 | passed | failed | pending | running | 后处理 | 评分器（原始分数） | 视觉审核记录 |",
+             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |"]
     for result in summary["releases"]:
         evaluator = result["evaluator"]
         score = (f"{evaluator['reported_score']}/{evaluator['maximum_score']}"
                  if evaluator["reported_score"] is not None else "未提供")
         row = [result["release"], result["status"], result["runtime_status"], result["probe"]["status"],
                *[result["stage_counts"][status] for status in STATUSES],
+               result["postprocessing"]["status"] if result["postprocessing"]["sources"] else "未提供",
                f"{evaluator['status']} ({score})", evaluator["visual_status"]]
         lines.append("| " + " | ".join(escaped(value) for value in row) + " |")
     lines.extend(["", "## 阶段明细", "", "| 阶段 | " + " | ".join(

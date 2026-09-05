@@ -220,7 +220,10 @@ end
 function entry = export_one(output_directory, figure_id, title_text, theme, science_contract, plotter)
 figure_handle = oi_figure(2400, 1500, "off");
 cleanup = onCleanup(@() close_if_valid(figure_handle));
-axes_handle = axes("Parent", figure_handle);
+figure_handle.Units = "inches";
+figure_handle.Position(3:4) = [2400 / 300 1500 / 300];
+axes_handle = axes("Parent", figure_handle, "Units", "normalized", ...
+    "PositionConstraint", "outerposition", "OuterPosition", [0.04 0.04 0.92 0.92]);
 result = plotter(axes_handle);
 assert(isstruct(result) && isfield(result, "Axes"), ...
     "Plot helper did not return an Axes field");

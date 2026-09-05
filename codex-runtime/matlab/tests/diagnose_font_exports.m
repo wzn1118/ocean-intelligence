@@ -139,15 +139,24 @@ template = struct("id", "", "font_name", fontName, "release", release, ...
     "api_invoked", false, "export_call_succeeded", false, ...
     "file_exists", false, "bytes", 0, "sha256", "", ...
     "graphics_font_names", strings(0, 1), ...
+    "figure_inches", [], "paper_size_inches", [], "paper_position_inches", [], ...
+    "paper_position_mode", "", "figure_renderer_before_export", "", ...
+    "figure_renderer_mode_before_export", "", ...
     "font_embedding_verified", false, "cjk_visual_verified", false, ...
     "font_rendering_verified", false, "layout_verified", false, ...
     "error_identifier", "", "error_message", "");
-records = repmat(template, 3, 1);
 ids = ["print-painters-pdf", "exportgraphics-vector-pdf", "print-png"];
 apis = ["print", "exportgraphics", "print"];
 devices = ["-dpdf -painters", "", "-dpng -r150"];
 extensions = [".pdf", ".pdf", ".png"];
-for exportIndex = 1:3
+if fontName == "WenQuanYi Zen Hei"
+    ids(end + 1) = "print-default-pdf";
+    apis(end + 1) = "print";
+    devices(end + 1) = "-dpdf";
+    extensions(end + 1) = ".pdf";
+end
+records = repmat(template, numel(ids), 1);
+for exportIndex = 1:numel(ids)
     records(exportIndex).id = ids(exportIndex);
     records(exportIndex).requested_api = apis(exportIndex);
     records(exportIndex).requested_device = devices(exportIndex);
@@ -162,12 +171,19 @@ try
         "Units", "inches", "Position", [1 1 6 4], ...
         "PaperUnits", "inches", "PaperSize", [6 4], ...
         "PaperPosition", [0 0 6 4], "PaperPositionMode", "manual", ...
-        "InvertHardcopy", "off", ...
+        "InvertHardcopy", "off", "RendererMode", "auto", ...
         "DefaultAxesFontName", record.font_name, ...
         "DefaultTextFontName", record.font_name, "DefaultTextInterpreter", "none");
     cleanupFigure = onCleanup(@() close_if_valid(figureHandle));
     populate_figure(figureHandle, record.font_name, titleText);
     drawnow;
+    figurePosition = get(figureHandle, "Position");
+    record.figure_inches = figurePosition(3:4);
+    record.paper_size_inches = get(figureHandle, "PaperSize");
+    record.paper_position_inches = get(figureHandle, "PaperPosition");
+    record.paper_position_mode = string(get(figureHandle, "PaperPositionMode"));
+    record.figure_renderer_before_export = string(get(figureHandle, "Renderer"));
+    record.figure_renderer_mode_before_export = string(get(figureHandle, "RendererMode"));
     fontObjects = findall(figureHandle, "-property", "FontName");
     record.graphics_font_names = sort(unique(string(get(fontObjects, "FontName"))));
     assert(all(strcmpi(record.graphics_font_names, record.font_name)), ...
@@ -178,6 +194,8 @@ try
     switch record.id
         case "print-painters-pdf"
             print(figureHandle, char(filePath), "-dpdf", "-painters");
+        case "print-default-pdf"
+            print(figureHandle, char(filePath), "-dpdf");
         case "exportgraphics-vector-pdf"
             record.content_type = "vector";
             exportgraphics(figureHandle, filePath, ...
