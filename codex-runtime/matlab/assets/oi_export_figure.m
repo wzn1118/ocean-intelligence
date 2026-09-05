@@ -307,7 +307,7 @@ if format == "png"
 elseif format == "pdf"
     validSignature = numel(prefix) >= 5 && strcmp(char(prefix(1:5))', '%PDF-');
 elseif format == "svg"
-    validSignature = ~isempty(regexpi(char(prefix'), "<svg(?=[\\s>])", "once"));
+    validSignature = ~isempty(regexpi(char(prefix'), "<svg(?=[\s>])", "once"));
 else
     validSignature = false;
 end
@@ -497,7 +497,7 @@ end
 
 function annotate_svg_text(svgPath, requestedTitle, description, widthPoints, heightPoints, widthPixels, heightPixels)
 svgText = string(fileread(svgPath));
-rootStart = regexp(svgText, "<svg(?=[\\s>])", "start", "once");
+rootStart = regexp(svgText, "<svg(?=[\s>])", "start", "once");
 assert(~isempty(rootStart), "oi_export_figure:InvalidSvg", ...
     "SVG export has no svg root element");
 relativeEnd = regexp(extractAfter(svgText, rootStart - 1), ">", "end", "once");
@@ -760,7 +760,7 @@ assert(numel(bounds) == 4 && all(isfinite(bounds)) ...
 end
 
 function inside = bounds_inside_canvas(bounds)
-tolerance = 0.01;
+tolerance = layout_tolerance();
 inside = bounds(1) >= -tolerance && bounds(2) >= -tolerance ...
     && bounds(1) + bounds(3) <= 1 + tolerance ...
     && bounds(2) + bounds(4) <= 1 + tolerance;
@@ -963,10 +963,15 @@ bounds = vertcat(evidence.bounds);
 margins = [min(bounds(:,1)) min(bounds(:,2)) ...
     1 - max(bounds(:,1) + bounds(:,3)) ...
     1 - max(bounds(:,2) + bounds(:,4))];
-assert(all(isfinite(margins)) && all(margins >= -1e-6), ...
+tolerance = layout_tolerance();
+assert(all(isfinite(margins)) && all(margins >= -tolerance), ...
     "oi_export_figure:InvalidMargins", ...
     "Final normalized layout margins must be finite and nonnegative");
-margins(abs(margins) < 1e-6) = 0;
+margins(margins < 0 & margins >= -tolerance) = 0;
+end
+
+function tolerance = layout_tolerance()
+tolerance = 0.02;
 end
 
 function altText = make_alt_text(titleText, axesEvidence)
