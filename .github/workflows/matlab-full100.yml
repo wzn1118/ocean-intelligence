@@ -68,9 +68,9 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-zenhei
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-zenhei fonts-droid-fallback
           fc-cache -f
-          fc-list | grep -Ei 'Noto Sans CJK|WenQuanYi Zen Hei' | head -n 10
+          fc-list | grep -Ei 'Noto Sans CJK|WenQuanYi Zen Hei|Droid Sans Fallback' | head -n 12
       - name: Install and license MathWorks MATLAB
         uses: matlab-actions/setup-matlab@v3
         with:
