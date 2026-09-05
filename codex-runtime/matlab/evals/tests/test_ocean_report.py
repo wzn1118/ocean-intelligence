@@ -212,11 +212,231 @@ class RuntimeBundle:
         self.runtime["input_fixtures"] = inputs
         self.write_metadata()
 
+    def record_layout_measurement(self, identifier: str, unmeasured: list[dict] | dict) -> None:
+        figure = next(item for item in self.manifest["figures"] if item["id"] == identifier)
+        count = 1 if isinstance(unmeasured, dict) else len(unmeasured)
+        figure["text_objects"] = {
+            "role": "title", "string": figure["title"], "bounds": [0.2, 0.8, 0.6, 0.1],
+            "bounds_units": "normalized", "clipped": False,
+        }
+        figure["axes_objects"] = {"bounds": [0.1, 0.1, 0.8, 0.7], "bounds_units": "normalized"}
+        figure["unmeasured_text_objects"] = unmeasured
+        figure["rendering_evidence"] = {
+            "bounds_audited": True, "bounds_audit_scope": "measured_objects_only",
+            "bounds_audit_complete": count == 0, "unmeasured_count": count,
+            "clipped_count": 0, "text_overlap_count": 0,
+            "font_selection_verified": True, "visual_inspection_verified": False,
+            "cjk_font_evidence": {"candidate_verified": True, "glyph_rendering_verified": False},
+        }
+        figure["publication"] = {"layout": {"stable": count == 0}}
+
 
 class OceanReportTests(unittest.TestCase):
     def fixture_payload(self, identifier: str) -> dict[str, object]:
         path = ocean_report.DEFAULT_FIXTURE_DIRECTORY / ocean_report.EXPECTED_FIXTURES[identifier]
         return json.loads(path.read_bytes())
+
+    def unmeasured_layout_text(self, role: str = "layout.title", text: str = "合成基准总标题") -> dict:
+        return {
+            "role": role, "string": text, "font_name": "Noto Sans CJK SC", "font_size": 12,
+            "class": "matlab.graphics.layout.Text", "geometry_status": "unverified",
+        }
+
+    def test_reports_each_figures_layout_coverage_without_visual_promotion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            single = self.unmeasured_layout_text()
+            multiple = [self.unmeasured_layout_text(), self.unmeasured_layout_text("layout.xlabel", "时间 UTC")]
+            bundle.record_layout_measurement("crossed-time-depth-temperature", [])
+            bundle.record_layout_measurement("paired-interactive", single)
+            bundle.record_layout_measurement("paired-observation-model", multiple)
+            bundle.write_metadata()
+
+            ocean_report.build_ocean_report(root)
+
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            figures = {figure["id"]: figure for figure in evidence["runtime_evidence"]["figures"]}
+            self.assertEqual(evidence["runtime_fixture_binding"]["status"], "verified")
+            complete = figures["crossed-time-depth-temperature"]["layout_measurement"]
+            self.assertEqual(complete["status"], "available")
+            self.assertTrue(complete["bounds_audit_complete"])
+            self.assertEqual(complete["unmeasured_count"], 0)
+            self.assertEqual(complete["unmeasured_text_objects"], [])
+            self.assertEqual(complete["measured_text_count"], 1)
+            self.assertEqual(complete["measured_axes_count"], 1)
+            for identifier, expected in (("paired-interactive", [single]), ("paired-observation-model", multiple)):
+                coverage = figures[identifier]["layout_measurement"]
+                self.assertEqual(coverage["bounds_audit_scope"], "measured_objects_only")
+                self.assertFalse(coverage["bounds_audit_complete"])
+                self.assertFalse(coverage["layout_stable_declared"])
+                self.assertEqual(coverage["unmeasured_count"], len(expected))
+                self.assertEqual(coverage["unmeasured_text_objects"], expected)
+                self.assertNotIn("bounds", coverage["unmeasured_text_objects"][0])
+            missing = figures["repeat-cast-salinity-profiles"]["layout_measurement"]
+            self.assertEqual(missing["status"], "not_available")
+            self.assertIsNone(missing["unmeasured_count"])
+            self.assertIsNone(missing["unmeasured_text_objects"])
+            for figure in figures.values():
+                self.assertEqual(figure["verification"], {
+                    "file_hashes_and_dimensions": "passed", "visual_inspection": "not_verified",
+                    "glyph_rendering": "not_verified", "layout_visual": "not_verified",
+                })
+                self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "not_verified")
+            report = (root / "report.md").read_text(encoding="utf-8")
+            table = report.split("### 布局测量覆盖")[1].split("## 8.")[0]
+            self.assertEqual(report.count("### 布局测量覆盖"), 1)
+            for identifier in figures:
+                self.assertEqual(table.count(f"`{identifier}`"), 1)
+            self.assertIn("仅已测对象；清单完整；未测 0", table)
+            self.assertIn("仅已测对象；清单不完整；未测 1", table)
+            self.assertIn("仅已测对象；清单不完整；未测 2", table)
+            self.assertIn("layout.title: 合成基准总标题", table)
+            self.assertIn("layout.xlabel: 时间 UTC", table)
+            self.assertIn("未提供（not_available）", table)
+            self.assertIn("无公开 Extent", table)
+            self.assertIn("均不等于视觉、字形或布局外观通过", table)
+            self.assertIn("数据来源=合成基准非实测海况", report)
+
+    def test_legacy_layout_flags_do_not_supply_missing_measurement_coverage(self) -> None:
+        for flags in ({}, {"bounds_audited": True}):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                for figure in bundle.manifest["figures"]:
+                    figure["rendering_evidence"] = flags
+                    figure["publication"] = {"layout": {"stable": True}}
+                bundle.write_metadata()
+                ocean_report.build_ocean_report(root)
+                evidence = json.loads((root / "report-evidence.json").read_bytes())
+                self.assertEqual(evidence["runtime_fixture_binding"]["status"], "unverified")
+                for figure in evidence["runtime_evidence"]["figures"]:
+                    coverage = figure["layout_measurement"]
+                    self.assertEqual(coverage["status"], "not_available")
+                    self.assertEqual(coverage["bounds_audit_scope"], "not_available")
+                    for field in ("bounds_audit_complete", "unmeasured_count", "unmeasured_text_objects"):
+                        self.assertIsNone(coverage[field])
+                    self.assertEqual(figure["verification"]["layout_visual"], "not_verified")
+                report = (root / "report.md").read_text(encoding="utf-8")
+                self.assertEqual(report.count("未提供（not_available）"), 4)
+                self.assertNotIn("无未测记录", report)
+
+    def test_incomplete_new_layout_field_groups_fail_without_outputs(self) -> None:
+        for field in ("unmeasured_text_objects", "bounds_audit_scope", "bounds_audit_complete", "unmeasured_count"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.record_layout_measurement("paired-interactive", self.unmeasured_layout_text())
+                figure = next(item for item in bundle.manifest["figures"] if item["id"] == "paired-interactive")
+                if field == "unmeasured_text_objects":
+                    del figure[field]
+                else:
+                    del figure["rendering_evidence"][field]
+                bundle.write_metadata()
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, "layout measurement fields are incomplete"):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_layout_completeness_count_and_stable_contradictions_fail(self) -> None:
+        changes = (
+            lambda figure: figure["rendering_evidence"].update(bounds_audit_complete=True),
+            lambda figure: figure["rendering_evidence"].update(unmeasured_count=0),
+            lambda figure: figure["rendering_evidence"].update(unmeasured_count=2),
+            lambda figure: figure.update(unmeasured_text_objects=[]),
+            lambda figure: figure["publication"]["layout"].update(stable=True),
+            lambda figure: figure["rendering_evidence"].update(bounds_audited=False),
+        )
+        for index, change in enumerate(changes):
+            with self.subTest(change=index), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.record_layout_measurement("paired-interactive", self.unmeasured_layout_text())
+                figure = next(item for item in bundle.manifest["figures"] if item["id"] == "paired-interactive")
+                change(figure)
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_layout_flags_counts_and_container_shapes_are_strict(self) -> None:
+        changes = [
+            lambda figure: figure.update(rendering_evidence=[]),
+            lambda figure: figure.update(publication=[]),
+            lambda figure: figure["publication"].update(layout=[]),
+            lambda figure: figure["publication"]["layout"].update(stable="false"),
+            lambda figure: figure.update(text_objects=[[]]),
+            lambda figure: figure.update(axes_objects="axes"),
+        ]
+        for field, invalid in (
+            ("bounds_audit_scope", "whole_canvas"), ("bounds_audit_scope", ["measured_objects_only"]),
+            ("bounds_audit_complete", 1), ("bounds_audit_complete", "false"),
+            ("bounds_audited", 1), ("unmeasured_count", -1), ("unmeasured_count", True),
+            ("unmeasured_count", 1.0), ("unmeasured_count", "1"), ("unmeasured_count", None),
+            ("clipped_count", -1), ("text_overlap_count", True),
+        ):
+            changes.append(lambda figure, field=field, invalid=invalid: figure["rendering_evidence"].update({field: invalid}))
+        for index, change in enumerate(changes):
+            with self.subTest(change=index), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.record_layout_measurement("paired-interactive", self.unmeasured_layout_text())
+                figure = next(item for item in bundle.manifest["figures"] if item["id"] == "paired-interactive")
+                change(figure)
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+
+    def test_unmeasured_text_rejects_fake_geometry_and_invalid_identity(self) -> None:
+        mutations = (
+            ("geometry_status", "verified"), ("bounds", [0, 0, 1, 1]), ("geometry_verified", True),
+            ("class", "matlab.graphics.primitive.Text"), ("role", "title"),
+            ("string", " "), ("string", ["title"]), ("font_name", None),
+            ("font_size", 0), ("font_size", -1), ("font_size", True), ("font_size", "12"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                record = self.unmeasured_layout_text()
+                record[field] = value
+                bundle.record_layout_measurement("paired-interactive", record)
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+
+    def test_unmeasured_text_list_must_be_flat_and_complete(self) -> None:
+        missing_font = self.unmeasured_layout_text()
+        del missing_font["font_name"]
+        for invalid in (None, {}, "title", [None], [[]], [[self.unmeasured_layout_text()]], missing_font):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.record_layout_measurement("paired-interactive", self.unmeasured_layout_text())
+                figure = next(item for item in bundle.manifest["figures"] if item["id"] == "paired-interactive")
+                figure["unmeasured_text_objects"] = invalid
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+
+    def test_unmeasured_titles_cannot_break_markdown_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            title = "合成 | 标题\n[visual passed](fake) <b>字形</b>"
+            bundle.record_layout_measurement("paired-interactive", self.unmeasured_layout_text(text=title))
+            bundle.write_metadata()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            figure = next(item for item in evidence["runtime_evidence"]["figures"] if item["id"] == "paired-interactive")
+            self.assertEqual(figure["layout_measurement"]["unmeasured_text_objects"][0]["string"], title)
+            report = (root / "report.md").read_text(encoding="utf-8")
+            self.assertIn("合成 \\| 标题 \\[visual passed\\](fake) &lt;b&gt;字形&lt;/b&gt;", report)
+            self.assertNotIn("[visual passed](fake)", report)
+            self.assertEqual(figure["verification"]["visual_inspection"], "not_verified")
 
     def test_fixture_statistics_match_known_values_and_sampling_scope(self) -> None:
         fixtures, contexts = ocean_report.load_fixture_statistics(ocean_report.DEFAULT_FIXTURE_DIRECTORY)

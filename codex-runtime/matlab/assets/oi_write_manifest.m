@@ -778,14 +778,13 @@ safe = all(strlength(segments) > 0) ...
 end
 
 function pathValue = canonical_path(pathValue)
+[status, attributes] = fileattrib(char(pathValue));
+assert(status, "oi_write_manifest:PathResolutionFailed", ...
+    "Cannot resolve an existing path relative to the MATLAB working directory: %s", pathValue);
+pathValue = string(attributes.Name);
 if usejava("jvm")
     pathValue = string(char(java.io.File(char(pathValue)).getCanonicalPath()));
-    return;
 end
-[status, attributes] = fileattrib(char(pathValue));
-assert(status, "oi_write_manifest:JVMRequired", ...
-    "Canonical path resolution failed without the MATLAB JVM: %s", pathValue);
-pathValue = string(attributes.Name);
 end
 
 function inside = is_within_directory(candidatePath, directoryPath)

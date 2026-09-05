@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import math
 import os
@@ -415,6 +416,74 @@ def validate_input_fixtures(
     return verified
 
 
+def manifest_object_list(value: Any, field: str) -> list[dict[str, Any]]:
+    records = [value] if isinstance(value, dict) else value
+    if not isinstance(records, list) or any(not isinstance(record, dict) or not record for record in records):
+        raise ReportBuildError(f"{field} must be an object or a flat list of objects")
+    return records
+
+
+def validate_layout_measurement(figure: dict[str, Any]) -> dict[str, Any]:
+    figure_id = figure["id"]
+    rendering = figure.get("rendering_evidence", {})
+    publication = figure.get("publication", {})
+    if not isinstance(rendering, dict) or not isinstance(publication, dict):
+        raise ReportBuildError(f"figure {figure_id} rendering_evidence/publication must be objects")
+    layout = publication.get("layout", {})
+    if not isinstance(layout, dict):
+        raise ReportBuildError(f"figure {figure_id} publication.layout must be an object")
+    result = {
+        "status": "not_available",
+        "evidence_source": "figures.json declarations; not independently remeasured",
+        "bounds_audit_scope": "not_available",
+        "bounds_audit_complete": None,
+        "unmeasured_count": None,
+        "unmeasured_text_objects": None,
+        "bounds_audited": None,
+        "layout_stable_declared": None,
+    }
+    for field, output in (("text_objects", "measured_text_count"), ("axes_objects", "measured_axes_count")):
+        result[output] = len(manifest_object_list(figure[field], f"{figure_id}.{field}")) if field in figure else None
+    for field in ("clipped_count", "text_overlap_count"):
+        result[field] = require_nonnegative_integer(rendering[field], f"{figure_id}.{field}") if field in rendering else None
+    if "bounds_audited" in rendering:
+        result["bounds_audited"] = require_bool(rendering["bounds_audited"], f"{figure_id}.bounds_audited")
+    if "stable" in layout:
+        result["layout_stable_declared"] = require_bool(layout["stable"], f"{figure_id}.publication.layout.stable")
+    new_fields = ("bounds_audit_scope", "bounds_audit_complete", "unmeasured_count")
+    provided = ["unmeasured_text_objects" in figure, *(field in rendering for field in new_fields)]
+    if not any(provided):
+        return result
+    if not all(provided):
+        raise ReportBuildError(f"figure {figure_id} layout measurement fields are incomplete")
+    if rendering["bounds_audit_scope"] != "measured_objects_only":
+        raise ReportBuildError(f"figure {figure_id} bounds_audit_scope must be measured_objects_only")
+    complete = require_bool(rendering["bounds_audit_complete"], f"{figure_id}.bounds_audit_complete")
+    count = require_nonnegative_integer(rendering["unmeasured_count"], f"{figure_id}.unmeasured_count")
+    unmeasured = manifest_object_list(figure["unmeasured_text_objects"], f"{figure_id}.unmeasured_text_objects")
+    if count != len(unmeasured) or complete != (count == 0):
+        raise ReportBuildError(f"figure {figure_id} bounds completeness/count contradict the unmeasured text list")
+    if result["bounds_audited"] is not True:
+        raise ReportBuildError(f"figure {figure_id} layout measurement requires bounds_audited=true")
+    if result["layout_stable_declared"] is not None and result["layout_stable_declared"] != complete:
+        raise ReportBuildError(f"figure {figure_id} layout.stable contradicts bounds_audit_complete")
+    for record in unmeasured:
+        if set(record) != {"role", "string", "font_name", "font_size", "class", "geometry_status"}:
+            raise ReportBuildError(f"figure {figure_id} unmeasured text must contain only public text/font identity and geometry_status")
+        for field in ("role", "string", "font_name", "class", "geometry_status"):
+            require_text(record[field], f"{figure_id}.unmeasured_text.{field}")
+        if (record["role"] not in {"layout.title", "layout.subtitle", "layout.xlabel", "layout.ylabel"}
+                or record["class"] != "matlab.graphics.layout.Text" or record["geometry_status"] != "unverified"):
+            raise ReportBuildError(f"figure {figure_id} unmeasured layout text must retain unverified geometry")
+        require_positive_number(record["font_size"], f"{figure_id}.unmeasured_text.font_size")
+    result.update({
+        "status": "available", "bounds_audit_scope": rendering["bounds_audit_scope"],
+        "bounds_audit_complete": complete, "unmeasured_count": count,
+        "unmeasured_text_objects": unmeasured,
+    })
+    return result
+
+
 def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[str, Any]]) -> dict[str, Any]:
     if runtime_root.is_symlink() or not runtime_root.is_dir():
         raise ReportBuildError(f"runtime output directory is missing or unsafe: {runtime_root}")
@@ -497,6 +566,7 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
         ) != runtime_release:
             raise ReportBuildError(f"figure {figure_id} MATLAB release does not match runtime record")
         scientific = verify_scientific_contract(figure, figure_contexts[figure_id])
+        layout_measurement = validate_layout_measurement(figure)
         exports = figure.get("exports")
         if not isinstance(exports, dict) or set(exports) != set(REQUIRED_FORMATS):
             raise ReportBuildError(f"figure {figure_id} must contain exactly PNG, PDF, and SVG exports")
@@ -520,6 +590,11 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
                 "title": title,
                 "source": source,
                 "scientific_data": scientific,
+                "layout_measurement": layout_measurement,
+                "verification": {
+                    "file_hashes_and_dimensions": "passed", "visual_inspection": "not_verified",
+                    "glyph_rendering": "not_verified", "layout_visual": "not_verified",
+                },
                 "fixture_binding": {
                     "fixture_id": context["fixture_id"],
                     "fixture_file": fixture_file,
@@ -923,6 +998,13 @@ def dimension_label(artifact: dict[str, Any]) -> str:
     return value
 
 
+def markdown_table_text(value: str) -> str:
+    escaped = html.escape(" ".join(value.splitlines()), quote=False)
+    for character in "\\|`*_[]":
+        escaped = escaped.replace(character, "\\" + character)
+    return escaped
+
+
 def render_report(evidence: dict[str, Any]) -> str:
     fixtures = {item["id"]: item for item in evidence["fixtures"]}
     paired = fixtures["paired-observation-model"]
@@ -1047,6 +1129,28 @@ def render_report(evidence: dict[str, Any]) -> str:
             f"| `{artifact['figure_id']}` | {artifact['format'].upper()} | `{artifact['file']}` | "
             f"{dimension_label(artifact)} | {artifact['bytes']} | `{artifact['sha256']}` |"
         )
+    lines.extend([
+        "", "### 布局测量覆盖", "",
+        "以下为清单记录，未独立重测。完整标志仅指边界审计覆盖；文件哈希/尺寸通过、`bounds_audited` 或 `layout.stable` 均不等于视觉、字形或布局外观通过。`layout.Text` 无公开 Extent 的标题/标签保持未验证。",
+        "",
+        "| 图 ID | 文件哈希/尺寸 | 已测文本/坐标轴记录数 | 边界审计覆盖 | 未测标题/标签 |",
+        "|---|---|---:|---|---|",
+    ])
+    for figure in runtime["figures"]:
+        measurement = figure["layout_measurement"]
+        counts = "/".join(str(measurement[field]) if measurement[field] is not None else "未提供"
+                          for field in ("measured_text_count", "measured_axes_count"))
+        if measurement["status"] == "not_available":
+            coverage = "未提供（not_available）"
+            unmeasured_text = "未提供"
+        else:
+            completeness = "清单完整" if measurement["bounds_audit_complete"] else "清单不完整"
+            coverage = f"仅已测对象；{completeness}；未测 {measurement['unmeasured_count']}"
+            unmeasured_text = "<br>".join(
+                f"{record['role']}: {markdown_table_text(record['string'])}"
+                for record in measurement["unmeasured_text_objects"]
+            ) or "无未测记录"
+        lines.append(f"| `{figure['id']}` | 通过 | {counts} | {coverage} | {unmeasured_text} |")
     lines.extend(
         [
             "",

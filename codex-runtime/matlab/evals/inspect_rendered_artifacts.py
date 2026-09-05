@@ -10,6 +10,10 @@ width and height; PDF dimensions are points, PNG/SVG dimensions are pixels.
 Every supported file under the root is inspected; unlisted files fail coverage.
 Missing Pillow or PDF tools never satisfies the corresponding check. No tools,
 packages, fonts or images are downloaded. Output files must not already exist.
+PDF text uses bounded pdftotext -bbox-layout output from the same byte snapshot.
+Full normalized title/axis strings are text evidence, not a visibility verdict.
+Missing Latin strings with mapped partial-text evidence fail; unavailable,
+outlined, unmapped or otherwise ambiguous extraction remains not_verified.
 
 Exit codes: 0 = automated checks passed, 1 = failed, 2 = not_verified (or CLI
 usage error). Neither exit 0 nor this evidence replaces a human visual audit,
@@ -26,12 +30,15 @@ import json
 import math
 import os
 import re
+import selectors
 import shutil
 import stat
 import struct
 import subprocess
 import sys
 import tempfile
+import time
+import unicodedata
 import warnings
 import xml.etree.ElementTree as ElementTree
 import zlib
@@ -51,6 +58,13 @@ SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 MAX_FILE_BYTES = 128 * 1024 * 1024
 MAX_PNG_PIXELS = 40_000_000
 MAX_PDF_PAGES = 1000
+MAX_PDF_TEXT_BYTES = 1024 * 1024
+MAX_EXPECTED_PDF_TEXTS = 128
+MAX_EXPECTED_PDF_TEXT_LENGTH = 4096
+PDF_TEXT_DOCTYPE = (b'<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" '
+                    b'"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">')
+XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml"
+CJK_CHARACTER = r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]"
 WHITE_THRESHOLD = 250
 MIN_FOREGROUND_FRACTION = 0.001
 ASPECT_RATIO_TOLERANCE = 0.005
@@ -240,8 +254,192 @@ def parse_pdffonts(output: str, checks: list[dict[str, Any]]) -> None:
               "embedding flags only; does not verify glyph appearance, CJK coverage or visual correctness")
 
 
+def normalize_pdf_text(value: str) -> str:
+    value = " ".join(unicodedata.normalize("NFKC", value).split())
+    return re.sub(rf"(?<={CJK_CHARACTER})\s+(?={CJK_CHARACTER})", "", value)
+
+
+def expected_pdf_texts(figure: dict[str, Any] | None) -> list[dict[str, Any]]:
+    expected: dict[str, dict[str, Any]] = {}
+
+    def collect(source: str, value: Any) -> None:
+        if isinstance(value, list) and all(isinstance(part, str) for part in value):
+            value = " ".join(value)
+        require(isinstance(value, str), f"expected PDF text must be a string: {source}")
+        require(len(value) <= MAX_EXPECTED_PDF_TEXT_LENGTH, "expected PDF text exceeds length limit")
+        normalized = normalize_pdf_text(value)
+        if normalized:
+            item = expected.setdefault(normalized, {"expected": value, "normalized": normalized, "sources": []})
+            item["sources"].append(source)
+            require(len(item["sources"]) <= MAX_EXPECTED_PDF_TEXTS, "too many sources for expected PDF text")
+        require(len(expected) <= MAX_EXPECTED_PDF_TEXTS, "too many expected PDF text strings")
+
+    if figure is not None:
+        collect("title", figure.get("title", ""))
+        for field in ("axes", "axes_objects", "text_objects", "unmeasured_text_objects"):
+            records = figure.get(field, [])
+            if isinstance(records, dict):
+                records = [records]
+            require(isinstance(records, list), f"invalid PDF text metadata: {field}")
+            require(len(records) <= MAX_EXPECTED_PDF_TEXTS, f"too many PDF text metadata records: {field}")
+            for index, record in enumerate(records):
+                require(isinstance(record, dict), f"invalid PDF text metadata: {field}[{index}]")
+                if field in {"axes", "axes_objects"}:
+                    for role in ("xlabel", "ylabel"):
+                        collect(f"{field}[{index}].{role}", record.get(role, ""))
+                elif record.get("role") in {"title", "xlabel", "ylabel", "layout.title", "layout.subtitle",
+                                            "layout.xlabel", "layout.ylabel"}:
+                    collect(f"{field}[{index}].string", record.get("string", ""))
+    return list(expected.values())
+
+
+def run_pdftotext(snapshot: Path, executable: str | None, timeout: float,
+                  checks: list[dict[str, Any]], snapshot_hash: str) -> bytes | None:
+    details: dict[str, Any] = {"snapshot_sha256": snapshot_hash}
+    if executable is None:
+        add_check(checks, "pdf_text_extractability", "not_verified", "system pdftotext is unavailable", **details)
+        return None
+    command = [executable, "-bbox-layout", "-enc", "UTF-8", "-f", "1", "-l", str(MAX_PDF_PAGES), str(snapshot), "-"]
+    details["command"] = command
+    streams = {"stdout": bytearray(), "stderr": bytearray()}
+    problem = None
+    try:
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env={**os.environ, "LC_ALL": "C", "LANG": "C"}) as process:
+            try:
+                deadline = time.monotonic() + timeout
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+                    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+                    while selector.get_map():
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(command, timeout)
+                        for key, _ in selector.select(remaining):
+                            total = sum(len(stream) for stream in streams.values())
+                            chunk = os.read(key.fd, min(65536, MAX_PDF_TEXT_BYTES + 1 - total))
+                            if not chunk:
+                                selector.unregister(key.fileobj)
+                                continue
+                            streams[key.data].extend(chunk)
+                            require(total + len(chunk) <= MAX_PDF_TEXT_BYTES, "pdftotext output limit exceeded")
+                process.wait(timeout=max(0.001, deadline - time.monotonic()))
+            except (InspectionError, subprocess.TimeoutExpired) as error:
+                problem = "pdftotext timed out" if isinstance(error, subprocess.TimeoutExpired) else str(error)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+            details["returncode"] = process.returncode
+    except OSError as error:
+        problem = f"pdftotext could not complete: {error}"
+    details.update(stdout_bytes=len(streams["stdout"]), stderr_bytes=len(streams["stderr"]),
+                   stderr=bytes(streams["stderr"][:4096]).decode("utf-8", errors="replace"),
+                   stderr_truncated=len(streams["stderr"]) > 4096)
+    if problem or details.get("returncode") != 0 or streams["stderr"].strip():
+        add_check(checks, "pdf_text_extractability", "not_verified",
+                  problem or "pdftotext reported errors; extraction is not reliable", **details)
+        return None
+    output = bytes(streams["stdout"])
+    details["bbox_output_sha256"] = sha256(output)
+    add_check(checks, "pdftotext", "passed", "bounded extraction from the same PDF byte snapshot", **details)
+    return output
+
+
+class SafePDFTextBuilder(ElementTree.TreeBuilder):
+    def doctype(self, name: str, public_id: str | None, system_id: str | None) -> None:
+        raise InspectionError("PDF text XML DTD/entity declarations are not allowed")
+
+    def pi(self, target: str, text: str | None = None) -> None:
+        raise InspectionError("PDF text XML processing instructions are not allowed")
+
+
+def parse_pdf_text(output: bytes) -> list[dict[str, Any]]:
+    require(len(output) <= MAX_PDF_TEXT_BYTES, "pdftotext output limit exceeded")
+    text = output.decode("utf-8")
+    if output.startswith(PDF_TEXT_DOCTYPE):
+        text = output[len(PDF_TEXT_DOCTYPE):].decode("utf-8")
+    root = ElementTree.fromstring(text, parser=ElementTree.XMLParser(target=SafePDFTextBuilder()))
+    namespace = "{" + XHTML_NAMESPACE + "}"
+    require(root.tag == namespace + "html", "invalid PDF text XML root")
+    children = {"html": {"head", "body"}, "head": {"title", "meta"}, "title": set(), "meta": set(),
+                "body": {"doc"}, "doc": {"page"}, "page": {"flow"}, "flow": {"block"},
+                "block": {"line"}, "line": {"word"}, "word": set()}
+    for element in root.iter():
+        tag = element.tag.removeprefix(namespace)
+        require(element.tag.startswith(namespace) and tag in children, "unexpected PDF text XML element")
+        require(all(child.tag in {namespace + name for name in children[tag]} for child in element),
+                "invalid PDF text XML hierarchy")
+        require(not any(local_name(name).lower() in {"href", "src", "base"} for name in element.attrib),
+                "references in PDF text XML are not allowed")
+    pages = root.findall(f"{namespace}body/{namespace}doc/{namespace}page")
+    require(0 < len(pages) <= MAX_PDF_PAGES, "PDF text XML page count outside inspection limit")
+    result = []
+    for index, page in enumerate(pages, 1):
+        require(all(positive_number(float(page.get(name, "nan"))) for name in ("width", "height")),
+                "invalid PDF text page dimensions")
+        words = list(page.iter(namespace + "word"))
+        for word in words:
+            bounds = [float(word.get(name, "nan")) for name in ("xMin", "yMin", "xMax", "yMax")]
+            require(all(math.isfinite(value) for value in bounds) and bounds[2] >= bounds[0] and bounds[3] >= bounds[1],
+                    "invalid PDF text word bounds")
+        result.append({"page": index, "word_count": len(words),
+                       "text": normalize_pdf_text(" ".join(word.text or "" for word in words))})
+    return result
+
+
+def pdf_text_contains(text: str, expected: str) -> bool:
+    prefix = r"(?<!\w)" if expected[0].isascii() and expected[0].isalnum() else ""
+    suffix = r"(?!\w)" if expected[-1].isascii() and expected[-1].isalnum() else ""
+    return re.search(prefix + re.escape(expected) + suffix, text) is not None
+
+
+def inspect_pdf_text(snapshot: Path, data: bytes, figure: dict[str, Any] | None,
+                     checks: list[dict[str, Any]], executable: str | None, timeout: float) -> None:
+    binding = {"snapshot_sha256": sha256(data)}
+    output = run_pdftotext(snapshot, executable, timeout, checks, binding["snapshot_sha256"])
+    pages = []
+    try:
+        expected = expected_pdf_texts(figure)
+        if output is not None:
+            pages = parse_pdf_text(output)
+            binding["bbox_output_sha256"] = sha256(output)
+            add_check(checks, "pdf_text_extractability", "passed" if any(page["text"] for page in pages) else "not_verified",
+                      "PDF word text extracted; this does not verify visible glyphs or clipping", **binding,
+                      pages=[{"page": page["page"], "word_count": page["word_count"],
+                              "text_excerpt": page["text"][:4096], "excerpt_truncated": len(page["text"]) > 4096,
+                              "normalized_text_sha256": sha256(page["text"].encode("utf-8"))} for page in pages])
+    except (InspectionError, ElementTree.ParseError, UnicodeError, ValueError) as error:
+        add_check(checks, "pdf_text_integrity", "failed", f"text evidence rejected: {error}", **binding)
+        return
+    fonts = next((check["fonts"] for check in checks
+                  if check["name"] == "pdf_font_inventory" and check["status"] == "passed"), [])
+    mapped = bool(fonts) and all(font["unicode_map"] == "yes" for font in fonts)
+    reliable = mapped and not any(unicodedata.category(character) in {"Co", "Cc"} or character == "\ufffd"
+                                  for page in pages for character in page["text"])
+    labels = []
+    for item in expected:
+        normalized = item["normalized"]
+        matches = [page["page"] for page in pages if pdf_text_contains(page["text"], normalized)]
+        words = normalized.split()
+        fragments = [" ".join(words[:2]), " ".join(words[-2:])] if len(words) > 2 else []
+        partial = [{"page": page["page"], "fragment": fragment} for page in pages for fragment in fragments
+                   if len(fragment) >= 8 and pdf_text_contains(page["text"], fragment)] if not matches else []
+        status = "passed" if matches else ("failed" if normalized.isascii() and reliable and partial else "not_verified")
+        labels.append({**item, "status": status, "matching_pages": matches, "partial_matches": partial,
+                       "reason": "complete normalized text is extractable" if matches else
+                       "mapped Latin text is only partially extractable; full expected string is absent" if status == "failed" else
+                       "complete text not verified; outlining, mapping or extraction limitations cannot be excluded"})
+    add_check(checks, "pdf_text_integrity", combined_status(labels) if labels else "not_verified",
+              "expected title/axis text compared with extracted words; no visual or clipping-cause conclusion",
+              **binding, normalization="NFKC; whitespace collapsed; CJK-to-CJK extraction gaps joined",
+              word_order="pdftotext bbox-layout XML order, not coordinate sorting",
+              all_fonts_have_unicode_maps=mapped, expected_count=len(labels), labels=labels)
+
+
 def inspect_pdf(data: bytes, record: dict[str, Any] | None,
-                checks: list[dict[str, Any]], dependencies: dict[str, Any], timeout: float) -> None:
+                checks: list[dict[str, Any]], dependencies: dict[str, Any], timeout: float,
+                figure: dict[str, Any] | None = None) -> None:
     require(data.startswith(b"%PDF-"), "invalid PDF signature")
     with tempfile.TemporaryDirectory(prefix="inspect-pdf-") as directory:
         snapshot = Path(directory) / "artifact.pdf"
@@ -259,6 +457,8 @@ def inspect_pdf(data: bytes, record: dict[str, Any] | None,
                         parser(output, checks)
                 except InspectionError as error:
                     add_check(checks, name, "failed", str(error))
+        inspect_pdf_text(snapshot, data, figure, checks, dependencies.get("pdftotext", {}).get("path"), timeout)
+        require(read_regular_file(snapshot) == data, "PDF tool snapshot changed during inspection")
 
 
 class SafeSVGBuilder(ElementTree.TreeBuilder):
@@ -456,7 +656,7 @@ def finite_json_float(value: str) -> float:
     return result
 
 
-def manifest_exports(manifest: Any, checks: list[dict[str, Any]]) -> list[tuple[str, str, dict[str, Any]]]:
+def manifest_exports(manifest: Any, checks: list[dict[str, Any]]) -> list[tuple[str, str, dict[str, Any], dict[str, Any]]]:
     require(isinstance(manifest, dict) and type(manifest.get("schema_version")) is int
             and manifest["schema_version"] in {1, 2}, "manifest schema_version must be 1 or 2")
     figures = manifest.get("figures")
@@ -478,7 +678,7 @@ def manifest_exports(manifest: Any, checks: list[dict[str, Any]]) -> list[tuple[
                 if format_name not in FORMATS or not isinstance(record, dict):
                     add_check(checks, "manifest_exports", "failed", f"unsupported export: {identifier}/{format_name}")
                     continue
-                records.append((identifier, format_name, record))
+                records.append((identifier, format_name, record, figure))
         except InspectionError as error:
             add_check(checks, "manifest_figures", "failed", str(error))
     require(bool(records), "manifest contains no supported exports")
@@ -487,7 +687,7 @@ def manifest_exports(manifest: Any, checks: list[dict[str, Any]]) -> list[tuple[
 
 def inspect_artifact(root: Path, relative: str, format_name: str, figure_id: str | None,
                      record: dict[str, Any] | None, dependencies: dict[str, Any],
-                     timeout: float) -> dict[str, Any]:
+                     timeout: float, figure: dict[str, Any] | None = None) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     result = {"file": relative, "format": format_name, "figure_id": figure_id, "checks": checks}
     try:
@@ -507,7 +707,7 @@ def inspect_artifact(root: Path, relative: str, format_name: str, figure_id: str
         if format_name == "png":
             inspect_png(data, record, checks)
         elif format_name == "pdf":
-            inspect_pdf(data, record, checks, dependencies, timeout)
+            inspect_pdf(data, record, checks, dependencies, timeout, figure)
         else:
             inspect_svg(data, record, checks)
     except (InspectionError, OSError, ElementTree.ParseError) as error:
@@ -518,7 +718,7 @@ def inspect_artifact(root: Path, relative: str, format_name: str, figure_id: str
 
 def dependency_inventory() -> dict[str, Any]:
     dependencies = {"pillow": {"status": "available" if Image is not None else "not_verified", "version": PILLOW_VERSION}}
-    for name in ("pdfinfo", "pdffonts"):
+    for name in ("pdfinfo", "pdffonts", "pdftotext"):
         executable = shutil.which(name)
         dependencies[name] = {"status": "available" if executable else "not_verified", "path": executable}
     return dependencies
@@ -535,7 +735,7 @@ def inspect_rendered_artifacts(manifest_path: Path, artifact_root: Path,
         "schema_version": 1, "evidence_type": "automated_rendered_artifact_inspection",
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "scope": "automated_artifact_checks_only",
-        "limitations": "Automated artifact checks are NOT a human visual pass. No score, MATLAB execution/freshness, desktop interaction, CJK glyph correctness or SVG/PDF visual-rendering approval is inferred.",
+        "limitations": "Automated artifact checks are NOT a human visual pass. PDF text evidence concerns extractability/integrity, not visibility or clipping cause. No score, MATLAB execution/freshness, desktop interaction, CJK glyph correctness or SVG/PDF visual-rendering approval is inferred.",
         "human_visual_inspection": "not_verified", "desktop_interaction": "not_verified",
         "cjk_glyph_rendering": "not_verified", "matlab_execution": "not_verified",
         "manifest": str(manifest_path), "artifact_root": str(root),
@@ -545,6 +745,9 @@ def inspect_rendered_artifacts(manifest_path: Path, artifact_root: Path,
                    "png_white_threshold": WHITE_THRESHOLD, "png_min_foreground_fraction": MIN_FOREGROUND_FRACTION,
                    "svg_ratio_relative_tolerance": ASPECT_RATIO_TOLERANCE,
                    "pdf_dimension_tolerance_pt": 1.0, "pdf_max_pages": MAX_PDF_PAGES,
+                   "pdf_text_max_output_bytes": MAX_PDF_TEXT_BYTES,
+                   "pdf_text_max_expected_strings": MAX_EXPECTED_PDF_TEXTS,
+                   "pdf_text_max_expected_length": MAX_EXPECTED_PDF_TEXT_LENGTH,
                    "pdf_timeout_seconds": pdf_timeout},
         "checks": checks, "artifacts": artifacts,
     }
@@ -557,7 +760,7 @@ def inspect_rendered_artifacts(manifest_path: Path, artifact_root: Path,
                               parse_constant=reject_json_constant, parse_float=finite_json_float)
         records = manifest_exports(manifest, checks)
         declared = set()
-        for figure_id, format_name, record in records:
+        for figure_id, format_name, record, figure in records:
             relative = record.get("file")
             if not isinstance(relative, str):
                 add_check(checks, "manifest_paths", "failed", f"non-text artifact file for {figure_id}/{format_name}")
@@ -566,7 +769,7 @@ def inspect_rendered_artifacts(manifest_path: Path, artifact_root: Path,
                 add_check(checks, "manifest_paths", "failed", f"duplicate export file: {relative}")
                 continue
             declared.add(relative)
-            artifacts.append(inspect_artifact(root, relative, format_name, figure_id, record, dependencies, pdf_timeout))
+            artifacts.append(inspect_artifact(root, relative, format_name, figure_id, record, dependencies, pdf_timeout, figure))
 
         def walk_error(error: OSError) -> None:
             raise error

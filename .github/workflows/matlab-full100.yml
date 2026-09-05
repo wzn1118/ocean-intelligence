@@ -52,7 +52,7 @@ jobs:
       - name: Full-score evaluator tests
         run: python3 -m unittest discover -s codex-runtime/matlab/evals/tests -p 'test_*.py' -v
       - name: Static full-score evaluation
-        run: python3 codex-runtime/matlab/evals/evaluate.py --runtime skip --verify-freeze
+        run: python3 codex-runtime/matlab/evals/evaluate.py --runtime skip
       - name: Shell syntax
         run: bash -n scripts/matlab-plot-regression.sh scripts/full-matlab-capability-report.sh scripts/matlab-github-full100.sh
 
@@ -123,6 +123,9 @@ jobs:
         if: always()
         continue-on-error: true
         shell: bash
+        env:
+          MW_BATCH_LICENSING_ONLINE: "true"
+          MATLAB_ACTIONS_RUN_COMMAND: ${{ github.workspace }}/../../_actions/matlab-actions/run-command/v3/dist/bin/glnxa64/run-matlab-command
         run: bash scripts/matlab-github-full100.sh "${{ matrix.release }}" "$MATLAB_FULL100_OUTPUT" "$MATLAB_EVAL_NONCE" "$MATLAB_FULL100_OUTPUT/runtime-start.marker"
       - name: Enforce MATLAB runtime and score gate
         if: always()

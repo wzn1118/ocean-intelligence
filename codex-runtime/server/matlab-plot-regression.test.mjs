@@ -1378,6 +1378,56 @@ test('unit-only help diagnostics preserve existing batch and legacy mode selecti
   }
 });
 
+test('unit-only MathWorks action launcher receives the unchanged MATLAB assertion without CLI flags', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const responses = [
+    { status: 0, stdout: '/unit-only/run-matlab-command\n', stderr: '' },
+    { status: 0, stdout: 'OI_MATLAB_RUNTIME=2024b\n', stderr: '' },
+  ];
+  const result = withUnitProbeProcesses(context, responses, (simulated) => {
+    const inspected = inspect(fixture, {
+      requireMatlab: true, requireRuntimeContract: true,
+      matlabCommand: '/unit-only/run-matlab-command', matlabCommandMode: 'matlab-actions',
+    });
+    assert.equal(simulated.mock.calls.length, 2);
+    const [executable, args] = simulated.mock.calls[1].arguments;
+    assert.equal(executable, '/unit-only/run-matlab-command');
+    assert.equal(args.length, 1);
+    assert.match(args[0], /assert\(exist\('OCTAVE_VERSION','builtin'\) == 0/u);
+    assert.match(args[0], /fprintf\('OI_MATLAB_RUNTIME=%s\\n', version\('-release'\)\)/u);
+    return inspected;
+  });
+  assert.equal(result.matlabProbeMode, 'matlab-actions');
+  assert.equal(result.matlabVerified, true);
+  assert.equal(result.matlabRelease, 'R2024b');
+  assert.deepEqual(Object.keys(result.matlabProbeDiagnostics.stages), ['lookup', 'probe']);
+  assert.equal(result.visualInspectionVerified, false);
+  assert.equal(result.runtimeMetadataOk, false);
+  assert.equal(result.status, 'failed');
+});
+
+test('unit-only action launcher still rejects missing markers, failure exits and timeouts', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  for (const probe of [
+    { status: 0, stdout: '' },
+    { status: 1, stdout: 'OI_MATLAB_RUNTIME=2024b\n' },
+    { status: null, error: { code: 'ETIMEDOUT' } },
+  ]) {
+    const result = withUnitProbeProcesses(context, [
+      { status: 0, stdout: '/unit-only/run-matlab-command\n' }, probe,
+    ], () => inspect(fixture, { requireMatlab: true, matlabCommandMode: 'matlab-actions' }));
+    assert.equal(result.matlabVerified, false);
+    assert.equal(result.regressionOk, false);
+    assert.equal(result.status, 'skipped');
+    assert.equal(result.skipReason, probe.error ? 'matlab_probe_timeout' : 'matlab_probe_failed');
+  }
+  assert.throws(() => inspect(fixture, {
+    requireMatlab: true, matlabCommandMode: 'unsupported',
+  }), /matlabCommandMode must be standard or matlab-actions/u);
+});
+
 test('unit-only diagnostic text is redacted before truncation in every process phase', (context) => {
   const fixture = createFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));

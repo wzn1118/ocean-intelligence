@@ -96,8 +96,11 @@ if require_file regression-manifest "$output_root/regression/run/figures.json"; 
   run_check regression-contract node --input-type=module - "$output_root/regression/run/figures.json" "$output_root/regression/run" <<'NODE'
 import { inspectMatlabPlotRegression } from './codex-runtime/server/matlab-plot-regression.mjs';
 const [manifestPath, outputDirectory] = process.argv.slice(2);
+const actionLauncher = process.env.MATLAB_ACTIONS_RUN_COMMAND;
 const result = inspectMatlabPlotRegression({
   manifestPath, outputDirectory, baselineDirectory: '',
+  matlabCommand: actionLauncher || 'matlab',
+  matlabCommandMode: actionLauncher ? 'matlab-actions' : 'standard',
   requireMatlab: true, requireSvg: true, requireRuntimeContract: true,
   requireScienceContract: true, requirePublicationContract: true,
   requireInteractionContract: true, expectHeadless: true,

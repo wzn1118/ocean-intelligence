@@ -4,6 +4,7 @@ function result = oi_plot_hovmoller(axesHandle, timeValues, depthValues, fieldVa
 % Time is strictly increasing, uniformly spaced UTC datetime. Depth is
 % uniformly spaced positive-down. Field dimensions are depth-by-time. NaN
 % cells remain transparent; missing classes, QC, and uncertainty are kept.
+% TimeDisplayFormat defaults to native automatic ticks and date context.
 arguments
     axesHandle (1,1) matlab.graphics.axis.Axes
     timeValues (:,1) datetime
@@ -78,20 +79,31 @@ end
 titleText = require_scalar_text(oi_get_option(options, "Title", "Time-depth evolution"), ...
     "oi_plot_hovmoller:Title", "Title must be explicit nonblank text");
 timeDisplayFormat = require_scalar_text(oi_get_option(options, "TimeDisplayFormat", ...
-    "yyyy-MM-dd HH:mm"), "oi_plot_hovmoller:TimeDisplayFormat", ...
+    "auto"), "oi_plot_hovmoller:TimeDisplayFormat", ...
     "TimeDisplayFormat must be explicit nonblank text");
 
 % MATLAB R2023b (version 23.2) accepts datetime imagesc coordinates.
 useNumericTime = verLessThan("matlab", "23.2");
 if useNumericTime
-    imageHandle = imagesc(axesHandle, datenum(timeValues), depthValues, fieldValues, ...
-        "AlphaData", isfinite(fieldValues));
-    datetick(axesHandle, "x", "yyyy-mm-dd HH:MM", "keeplimits");
+    axisSeed = plot(axesHandle, timeValues([1 end]), [NaN; NaN], ...
+        "Visible", "off", "HandleVisibility", "off");
+    seedCleanup = onCleanup(@() delete(axisSeed));
+    imageHandle = image("Parent", axesHandle, ...
+        "XData", ruler2num(timeValues([1 end]), axesHandle.XAxis), ...
+        "YData", depthValues([1 end]), "CData", fieldValues, ...
+        "CDataMapping", "scaled", "AlphaData", isfinite(fieldValues));
+    timePadding = (timeValues(2) - timeValues(1))/2;
+    depthPadding = (depthValues(2) - depthValues(1))/2;
+    xlim(axesHandle, [timeValues(1)-timePadding timeValues(end)+timePadding]);
+    ylim(axesHandle, [depthValues(1)-depthPadding depthValues(end)+depthPadding]);
+    clear seedCleanup;
 else
     imageHandle = imagesc(axesHandle, timeValues, depthValues, fieldValues, ...
         "AlphaData", isfinite(fieldValues));
-    axesHandle.XAxis.TickLabelFormat = char(timeDisplayFormat);
 end
+xticks(axesHandle, "auto");
+xticklabels(axesHandle, "auto");
+xtickformat(axesHandle, timeDisplayFormat);
 axesHandle.YDir = "reverse";
 xlabel(axesHandle, "Time (UTC)", "Interpreter", "none");
 ylabel(axesHandle, "Depth (" + depthUnit + ", positive down)", "Interpreter", "none");

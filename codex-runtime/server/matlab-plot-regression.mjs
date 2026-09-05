@@ -1956,6 +1956,11 @@ function probeProcessDiagnostics(result, redact, timeoutMs = null) {
 }
 
 function detectMatlab(command, options) {
+  const commandMode = options.matlabCommandMode || 'standard';
+  if (!['standard', 'matlab-actions'].includes(commandMode)) {
+    throw new TypeError('matlabCommandMode must be standard or matlab-actions');
+  }
+  const usesActionLauncher = commandMode === 'matlab-actions';
   const redact = probeDiagnosticRedactor();
   const diagnostics = {
     schemaVersion: 1,
@@ -1974,17 +1979,20 @@ function detectMatlab(command, options) {
   const resolvedCommand = lookup.stdout.trim();
   const marker = 'OI_MATLAB_RUNTIME=';
   const timeout = positiveInteger(options.matlabProbeTimeoutMs, 120_000);
-  const help = spawnSync(resolvedCommand, ['-help'], { encoding: 'utf8', timeout });
-  diagnostics.stages.help = probeProcessDiagnostics(help, redact, timeout);
-  const helpOutput = `${help.stdout || ''}\n${help.stderr || ''}`;
+  let helpOutput = '';
+  if (!usesActionLauncher) {
+    const help = spawnSync(resolvedCommand, ['-help'], { encoding: 'utf8', timeout });
+    diagnostics.stages.help = probeProcessDiagnostics(help, redact, timeout);
+    helpOutput = `${help.stdout || ''}\n${help.stderr || ''}`;
+  }
   const helpDescribesOptions = helpOutput.trim().length > 0;
   const supportsBatch = /(?:^|\s)-batch(?:\s|$)/imu.test(helpOutput);
   const useLegacyRun = helpDescribesOptions && !supportsBatch;
-  const probeMode = useLegacyRun ? 'legacy-r' : 'batch';
+  const probeMode = usesActionLauncher ? 'matlab-actions' : (useLegacyRun ? 'legacy-r' : 'batch');
   diagnostics.modeSelection = { helpDescribesOptions, supportsBatch, probeMode };
   const probeCommand = "assert(exist('OCTAVE_VERSION','builtin') == 0, 'oi:MatlabRequired', 'GNU Octave is not MATLAB'); fprintf('OI_MATLAB_RUNTIME=%s\\n', version('-release'));";
   const legacyCommand = `try, ${probeCommand} catch exception, disp(getReport(exception,'extended')); exit(1); end; exit(0);`;
-  const probeArguments = useLegacyRun
+  const probeArguments = usesActionLauncher ? [probeCommand] : useLegacyRun
     ? ['-nodesktop', '-nodisplay', '-r', legacyCommand]
     : ['-batch', probeCommand];
   const probe = spawnSync(resolvedCommand, probeArguments, {
@@ -2015,6 +2023,7 @@ function parseCliArguments(argumentsList) {
     ['--output', ['outputDirectory', String]],
     ['--baseline', ['baselineDirectory', String]],
     ['--matlab-command', ['matlabCommand', String]],
+    ['--matlab-command-mode', ['matlabCommandMode', String]],
     ['--target-matlab-release', ['targetMatlabRelease', String]],
     ['--minimum-png-bytes', ['minimumPngBytes', Number]],
     ['--minimum-pdf-bytes', ['minimumPdfBytes', Number]],

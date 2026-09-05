@@ -85,8 +85,13 @@ for caseIndex = 1:2
         result = generated_router_interactive(fixtureTable.Time, fixtureTable.Value, ...
             fixtureTable.ObservationID, fixtureTable.Station, fixtureTable.QCFlag);
     end
-    caseEvidence(caseIndex) = audit_result(generatedRoot, caseInfo, result, ...
+    caseRecord = audit_result(generatedRoot, caseInfo, result, ...
         actualRelease, fixtureTable, expectedValid, expectedMissing);
+    if caseIndex == 1
+        caseEvidence = caseRecord;
+    else
+        caseEvidence(caseIndex) = caseRecord;
+    end
 end
 verify_file(generatedRoot, catalogRecord, "catalog.json");
 verify_file(generatedRoot, catalog.inputs, "source/inputs.json");
@@ -330,14 +335,13 @@ record = struct("file", relativeFile, "bytes", fileInfo.bytes, "sha256", oi_sha2
 end
 
 function value = canonical_path(value)
-if usejava("jvm")
-    value = string(char(java.io.File(char(value)).getCanonicalPath()));
-    return;
-end
 [status, attributes] = fileattrib(char(value));
 assert(status, "test_generated_plot_router:PathResolutionFailed", ...
-    "Canonical path resolution failed without the MATLAB JVM: %s", value);
+    "Cannot resolve an existing path relative to the MATLAB working directory: %s", value);
 value = string(attributes.Name);
+if usejava("jvm")
+    value = string(char(java.io.File(char(value)).getCanonicalPath()));
+end
 end
 
 function value = release_name(value)

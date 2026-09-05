@@ -39,6 +39,23 @@ not just to same-named files. Snapshot bytes and SHA-256 must match runtime
 records and report inputs. Synthetic benchmark results must not be described
 as observed conditions in a real ocean region.
 
+Reports also distinguish file hashes/dimensions from the declared coverage of
+graphics bounds. Native layout text without public geometry remains unmeasured;
+old manifests without coverage fields are reported as unavailable, not complete.
+
+The GitHub postprocessing probe uses the same MathWorks `run-matlab-command`
+launcher as `matlab-actions/run-command@v3`, with online batch licensing enabled.
+It still runs the MATLAB vendor assertion and parses the actual release marker;
+it does not reuse an old probe or bypass the runtime and visual gates. Local
+inspection defaults to the ordinary `matlab` launcher. The action's packaged
+launcher path is explicit in the workflow and must be checked on action upgrades.
+Observed direct-launch failures in run 33987455982 are retained in its sanitized
+`regression-contract.log`; no license credentials are copied or installed.
+
+Native page and vector-text probes preserve experimental files separately from
+promoted publication artifacts. An export call completing is not a finding that
+the experimental PDF has exact dimensions, embedded fonts, or correct layout.
+
 ## Commands
 
 ```bash
@@ -51,6 +68,9 @@ python3 codex-runtime/matlab/evals/evaluate.py --runtime require \
 python3 codex-runtime/matlab/evals/evaluate.py --write-freeze
 python3 codex-runtime/matlab/evals/evaluate.py --verify-freeze
 ```
+
+`--write-freeze` and `--verify-freeze` are inventory-only modes. Do not combine
+them with `--runtime skip` to claim that the full static evaluation was run.
 
 The runtime output directory must not exist before a real run. Remove only that
 generated directory between CI attempts; never reuse artifacts. Full CI inputs,

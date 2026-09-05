@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ElementTree
 import zlib
 from pathlib import Path
 from unittest import mock
@@ -108,7 +109,7 @@ class ArtifactTestCase(unittest.TestCase):
                 "width": width, "height": height, **metadata}
 
     def write_manifest(self, exports: dict, *, singleton: bool = False) -> dict:
-        figure = {"id": "synthetic", "exports": exports}
+        figure = {"id": "synthetic", "title": "A", "exports": exports}
         payload = {"schema_version": 2, "figures": figure if singleton else [figure]}
         self.manifest.write_text(json.dumps(payload), encoding="utf-8")
         return payload
@@ -469,13 +470,17 @@ class PDFTests(ArtifactTestCase):
         with self.assertRaises(inspector.InspectionError):
             inspector.parse_pdffonts("looks like fonts", [])
 
-    @unittest.skipUnless(shutil.which("pdfinfo") and shutil.which("pdffonts"), "system Poppler tools unavailable")
+    @unittest.skipUnless(all(shutil.which(name) for name in ("pdfinfo", "pdffonts", "pdftotext")), "system Poppler tools unavailable")
     def test_system_tools_inspect_valid_embedded_font_pdf(self) -> None:
         self.write_manifest({"pdf": self.artifact("figure.pdf", pdf_bytes())})
         evidence = self.inspect()
         self.assertEqual(evidence["status"], "passed", json.dumps(evidence, indent=2))
         self.assertEqual(self.find_check(evidence, "pdf_structure")["page_count"], 1)
         self.assertEqual(self.find_check(evidence, "pdf_font_embedding")["status"], "passed")
+        text = self.find_check(evidence, "pdf_text_integrity")
+        self.assertEqual(text["status"], "passed")
+        self.assertEqual(text["snapshot_sha256"], evidence["artifacts"][0]["sha256"])
+        self.assertEqual(text["bbox_output_sha256"], self.find_check(evidence, "pdftotext")["bbox_output_sha256"])
 
     @unittest.skipUnless(shutil.which("pdfinfo") and shutil.which("pdffonts"), "system Poppler tools unavailable")
     def test_system_tools_reject_fake_and_damaged_pdf(self) -> None:
@@ -491,7 +496,7 @@ class PDFTests(ArtifactTestCase):
             self.assertEqual(self.find_check(evidence, "pdf_font_embedding")["status"], status)
             self.assertEqual(evidence["status"], status)
 
-    @unittest.skipUnless(shutil.which("pdfinfo") and shutil.which("pdffonts"), "system Poppler tools unavailable")
+    @unittest.skipUnless(all(shutil.which(name) for name in ("pdfinfo", "pdffonts", "pdftotext")), "system Poppler tools unavailable")
     def test_every_pdf_page_geometry_and_count_checked(self) -> None:
         cases = (((120, 60), (120, 60)), ((120, 60), (120, 80)))
         for sizes in cases:
@@ -501,6 +506,213 @@ class PDFTests(ArtifactTestCase):
             self.assertEqual(evidence["status"], "passed" if sizes[0] == sizes[1] else "failed")
         self.write_manifest({"pdf": {**record, "pages": 1}})
         self.assertEqual(self.inspect()["status"], "failed")
+
+
+def bbox_bytes(pages: list[list[str]], *, rotated: bool = False, metadata_title: str = "") -> bytes:
+    root = ElementTree.Element("html", xmlns=inspector.XHTML_NAMESPACE)
+    head = ElementTree.SubElement(root, "head")
+    ElementTree.SubElement(head, "title").text = metadata_title
+    document = ElementTree.SubElement(ElementTree.SubElement(root, "body"), "doc")
+    for words in pages:
+        page = ElementTree.SubElement(document, "page", width="600", height="400")
+        block = ElementTree.SubElement(ElementTree.SubElement(page, "flow"), "block")
+        line = ElementTree.SubElement(block, "line")
+        for index, word in enumerate(words):
+            horizontal = 20 if rotated else 20 + index * 15
+            vertical = 300 - index * 15 if rotated else 20
+            ElementTree.SubElement(line, "word", xMin=str(horizontal), xMax=str(horizontal + 10),
+                                   yMin=str(vertical), yMax=str(vertical + 10)).text = word
+    return inspector.PDF_TEXT_DOCTYPE + ElementTree.tostring(root, encoding="utf-8")
+
+
+class PDFTextTests(ArtifactTestCase):
+    def inspect_text(self, output: bytes | None, figure: dict, *, fonts: list | None = None) -> dict:
+        data = pdf_bytes()
+        snapshot = self.root / "snapshot.pdf"
+        snapshot.write_bytes(data)
+        checks = [{"name": "pdf_font_inventory", "status": "passed",
+                   "fonts": [{"unicode_map": "yes"}] if fonts is None else fonts}]
+        with mock.patch.object(inspector, "run_pdftotext", return_value=output):
+            inspector.inspect_pdf_text(snapshot, data, figure, checks, "/unit-only/pdftotext", 1)
+        return {check["name"]: check for check in checks}
+
+    def test_collects_title_axes_and_unmeasured_layout_strings_without_geometry_claims(self) -> None:
+        figure = {"title": "Ocean profile", "axes_objects": {"xlabel": "Temperature (degC)", "ylabel": "Depth (m)"},
+                  "axes": [{"xlabel": "Station distance"}],
+                  "text_objects": {"role": "title", "string": "Ocean profile"},
+                  "unmeasured_text_objects": {"role": "layout.title", "string": "Readable layout title",
+                                              "geometry_status": "unverified"}}
+        checks = self.inspect_text(bbox_bytes([["Ocean profile", "Temperature (degC)", "Depth (m)",
+                                               "Station distance", "Readable layout title"]]), figure)
+        integrity = checks["pdf_text_integrity"]
+        self.assertEqual(integrity["status"], "passed")
+        self.assertEqual(integrity["expected_count"], 5)
+        self.assertEqual(integrity["labels"][0]["sources"], ["title", "text_objects[0].string"])
+        self.assertEqual(integrity["labels"][-1]["sources"], ["unmeasured_text_objects[0].string"])
+        self.assertNotIn("clipped", json.dumps(checks))
+        self.assertNotIn("visual_inspection_verified", checks)
+
+    def test_rotated_bbox_preserves_emitted_word_order_not_y_sort(self) -> None:
+        label = "Depth (m, positive down; reference: mean sea level)"
+        checks = self.inspect_text(bbox_bytes([label.split()], rotated=True),
+                                   {"axes_objects": [{"ylabel": label}]})
+        self.assertEqual(checks["pdf_text_integrity"]["status"], "passed")
+        self.assertEqual(checks["pdf_text_extractability"]["pages"][0]["text_excerpt"], label)
+
+    def test_unicode_normalization_whitespace_and_chinese_line_breaks(self) -> None:
+        figure = {"title": "\u5357\u6d77\u6d77\u8868\u6e29\u5ea6", "axes_objects": {
+            "xlabel": ["Caf\u00e9", "office"], "ylabel": "Sea\u00a0temperature"}}
+        output = bbox_bytes([["\u5357\u6d77\n\u6d77\u8868", "\u6e29\u5ea6", "Cafe\u0301", "o\ufb03ce", "Sea\n temperature"]])
+        self.assertEqual(self.inspect_text(output, figure)["pdf_text_integrity"]["status"], "passed")
+
+    def test_partial_mapped_latin_label_exposes_missing_complete_text(self) -> None:
+        label = "Depth (m, positive down; reference: mean sea level)"
+        figure = {"title": "Ocean profile", "axes_objects": {"ylabel": label}}
+        output = bbox_bytes([["Depth", "(m,", "positive", "down;", "reference:", "m", "Ocean", "profile"]], rotated=True)
+        checks = self.inspect_text(output, figure)
+        self.assertEqual(checks["pdf_text_extractability"]["status"], "passed")
+        integrity = checks["pdf_text_integrity"]
+        self.assertEqual(integrity["status"], "failed")
+        self.assertEqual(integrity["labels"][0]["status"], "passed")
+        self.assertEqual(integrity["labels"][1]["matching_pages"], [])
+        self.assertEqual(integrity["labels"][1]["partial_matches"], [{"page": 1, "fragment": "Depth (m,"}])
+        self.assertIn("no visual or clipping-cause conclusion", integrity["reason"])
+
+    def test_outlined_missing_mappings_and_unextractable_cjk_are_not_verified(self) -> None:
+        label = "Depth (m, positive down; reference: mean sea level)"
+        partial = bbox_bytes([["Depth", "(m,"]])
+        for output, fonts, figure in (
+                (bbox_bytes([[]]), [], {"title": label}),
+                (partial, [], {"title": label}),
+                (partial, [{"unicode_map": "no"}], {"title": label}),
+                (bbox_bytes([["Depth", "(m,", "\ufffd"]]), None, {"title": label}),
+                (bbox_bytes([["Depth", "(m,", "\ue000"]]), None, {"title": label}),
+                (bbox_bytes([["Ocean", "profile"]]), None, {"title": "\u5357\u6d77\u6d77\u8868\u6e29\u5ea6"}),
+                (partial, None, {"title": "Entirely unavailable title"}),
+                (None, None, {"title": label})):
+            with self.subTest(output=output, fonts=fonts):
+                checks = self.inspect_text(output, figure, fonts=fonts)
+                self.assertEqual(checks["pdf_text_integrity"]["status"], "not_verified")
+                self.assertNotIn("invisible", json.dumps(checks))
+
+    def test_missing_expectations_metadata_titles_and_cross_page_fragments_cannot_pass(self) -> None:
+        for output, figure in ((bbox_bytes([["A"]]), {}),
+                               (bbox_bytes([["Unrelated"]], metadata_title="Ocean profile"), {"title": "Ocean profile"}),
+                               (bbox_bytes([["Ocean"], ["profile"]]), {"title": "Ocean profile"}),
+                               (bbox_bytes([["Stations"]]), {"title": "Station"})):
+            self.assertEqual(self.inspect_text(output, figure)["pdf_text_integrity"]["status"], "not_verified")
+
+    def test_untrusted_bbox_xml_is_rejected_without_entity_expansion(self) -> None:
+        valid = bbox_bytes([["A"]])
+        body = valid[len(inspector.PDF_TEXT_DOCTYPE):]
+        malicious = [b'<!DOCTYPE html [<!ENTITY leak SYSTEM "file:///etc/passwd">]>' + body.replace(b">A<", b">&leak;<"),
+                     b'<!DOCTYPE html SYSTEM "https://example.invalid/external.dtd">' + body,
+                     inspector.PDF_TEXT_DOCTYPE[:-1] + b' [<!ENTITY leak "expanded">]>' + body,
+                     inspector.PDF_TEXT_DOCTYPE + b'<!DOCTYPE html [<!ENTITY leak "expanded">]>' + body,
+                     b'<?xml-stylesheet href="https://example.invalid/x"?>' + body,
+                     valid.replace(b'<word ', b'<word href="file:///etc/passwd" '),
+                     valid.replace(b'xMin="20"', b'xMin="20" xMin="20"'),
+                     valid.replace(b'xMax="30"', b'xMax="NaN"'),
+                     valid.replace(b"</html>", b"<script>A</script></html>"),
+                     valid[:100], valid.decode().encode("utf-16")]
+        for output in malicious:
+            with self.subTest(output=output[:100]):
+                self.assertEqual(self.inspect_text(output, {"title": "A"})["pdf_text_integrity"]["status"], "failed")
+        with mock.patch.object(inspector, "MAX_PDF_TEXT_BYTES", 64):
+            self.assertEqual(self.inspect_text(valid, {"title": "A"})["pdf_text_integrity"]["status"], "failed")
+
+    def test_expected_text_limits_are_not_silent_truncation(self) -> None:
+        for figure in ({"title": "x" * (inspector.MAX_EXPECTED_PDF_TEXT_LENGTH + 1)},
+                       {"title": 123}, {"axes_objects": "invalid"},
+                       {"text_objects": [{"role": "title", "string": "A"}]
+                                         * (inspector.MAX_EXPECTED_PDF_TEXTS + 1)},
+                       {"text_objects": [{"role": "title", "string": f"Title {index}"}
+                                         for index in range(inspector.MAX_EXPECTED_PDF_TEXTS + 1)]}):
+            self.assertEqual(self.inspect_text(bbox_bytes([["A"]]), figure)["pdf_text_integrity"]["status"], "failed")
+
+    def test_missing_tool_is_explicit_and_does_not_launch_another_tool(self) -> None:
+        checks = []
+        snapshot = self.root / "snapshot.pdf"
+        snapshot.write_bytes(pdf_bytes())
+        with mock.patch.object(inspector.subprocess, "Popen") as launch:
+            inspector.inspect_pdf_text(snapshot, pdf_bytes(), {"title": "A"}, checks, None, 1)
+        launch.assert_not_called()
+        self.assertEqual({check["name"]: check["status"] for check in checks},
+                         {"pdf_text_extractability": "not_verified", "pdf_text_integrity": "not_verified"})
+
+    @unittest.skipUnless(shutil.which("pdfinfo") and shutil.which("pdffonts"), "system PDF structural tools unavailable")
+    def test_missing_pdftotext_keeps_structure_and_font_checks_but_cannot_pass(self) -> None:
+        self.write_manifest({"pdf": self.artifact("figure.pdf", pdf_bytes())})
+        inventory = inspector.dependency_inventory()
+        inventory["pdftotext"] = {"path": None, "status": "not_verified"}
+        with mock.patch.object(inspector, "dependency_inventory", return_value=inventory):
+            evidence = self.inspect()
+        self.assertEqual(evidence["status"], "not_verified")
+        self.assertEqual(self.find_check(evidence, "pdf_structure")["status"], "passed")
+        self.assertEqual(self.find_check(evidence, "pdf_font_embedding")["status"], "passed")
+        self.assertEqual(self.find_check(evidence, "pdf_text_integrity")["status"], "not_verified")
+
+    def test_bounded_unit_process_failure_warning_timeout_and_output_limits(self) -> None:
+        executable = self.directory / "unit-only-text-tool"
+        snapshot = self.root / "snapshot.pdf"
+        snapshot.write_bytes(pdf_bytes())
+        for program, timeout, limit in (("raise SystemExit(7)", 1, 1024),
+                                        ("import sys; sys.stderr.write('font mapping warning')", 1, 1024),
+                                        ("import time; time.sleep(5)", 0.05, 1024),
+                                        ("import sys; sys.stdout.write('x' * 10000)", 1, 128),
+                                        ("import sys; sys.stderr.write('x' * 10000)", 1, 128)):
+            executable.write_text(f"#!{sys.executable}\n{program}\n", encoding="utf-8")
+            executable.chmod(0o755)
+            checks = []
+            with self.subTest(program=program), mock.patch.object(inspector, "MAX_PDF_TEXT_BYTES", limit):
+                output = inspector.run_pdftotext(snapshot, str(executable), timeout, checks, inspector.sha256(pdf_bytes()))
+            self.assertIsNone(output)
+            self.assertEqual(checks[0]["status"], "not_verified")
+            self.assertLessEqual(checks[0]["stdout_bytes"] + checks[0]["stderr_bytes"], limit + 1)
+        checks = []
+        self.assertIsNone(inspector.run_pdftotext(snapshot, str(self.directory / "missing-tool"), 1, checks, "hash"))
+        self.assertEqual(checks[0]["status"], "not_verified")
+
+    @unittest.skipUnless(shutil.which("pdftotext"), "system pdftotext unavailable")
+    def test_system_text_tool_snapshot_arguments_hash_and_locale(self) -> None:
+        data = pdf_bytes()
+        snapshot = self.root / "snapshot.pdf"
+        snapshot.write_bytes(data)
+        checks = []
+        original = inspector.subprocess.Popen
+
+        def launch(command: list[str], **options: object) -> subprocess.Popen:
+            self.assertEqual(Path(command[-2]).read_bytes(), data)
+            self.assertEqual(command[-1], "-")
+            self.assertIn("-bbox-layout", command)
+            self.assertEqual(options["env"]["LC_ALL"], "C")
+            self.assertNotIn("shell", options)
+            return original(command, **options)
+
+        with mock.patch.object(inspector.subprocess, "Popen", side_effect=launch):
+            output = inspector.run_pdftotext(snapshot, shutil.which("pdftotext"), 3, checks, inspector.sha256(data))
+        self.assertIsNotNone(output)
+        self.assertEqual(checks[0]["bbox_output_sha256"], inspector.sha256(output))
+        self.assertEqual(checks[0]["snapshot_sha256"], inspector.sha256(data))
+        self.assertEqual(inspector.parse_pdf_text(output)[0]["text"], "A")
+
+    @unittest.skipUnless(all(shutil.which(name) for name in ("pdfinfo", "pdffonts", "pdftotext")), "system Poppler tools unavailable")
+    def test_pdf_text_snapshot_or_original_mutation_invalidates_binding(self) -> None:
+        data = pdf_bytes()
+        original = inspector.run_pdftotext
+        for mutate_snapshot in (True, False):
+            self.write_manifest({"pdf": self.artifact("figure.pdf", data)})
+
+            def mutate(snapshot: Path, *arguments: object) -> bytes | None:
+                output = original(snapshot, *arguments)
+                target = snapshot if mutate_snapshot else self.root / "figure.pdf"
+                target.write_bytes(target.read_bytes() + b"\n")
+                return output
+
+            with self.subTest(snapshot=mutate_snapshot), mock.patch.object(inspector, "run_pdftotext", side_effect=mutate):
+                evidence = self.inspect()
+            self.assertEqual(evidence["status"], "failed")
+            self.assertIn("changed during inspection", json.dumps(evidence))
 
 
 class CLITests(ArtifactTestCase):
