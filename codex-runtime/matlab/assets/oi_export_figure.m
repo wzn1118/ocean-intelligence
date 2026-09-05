@@ -307,7 +307,7 @@ if format == "png"
 elseif format == "pdf"
     validSignature = numel(prefix) >= 5 && strcmp(char(prefix(1:5))', '%PDF-');
 elseif format == "svg"
-    validSignature = ~isempty(regexpi(char(prefix'), "<svg\\b", "once"));
+    validSignature = ~isempty(regexpi(char(prefix'), "<svg(?=[\\s>])", "once"));
 else
     validSignature = false;
 end
@@ -463,9 +463,11 @@ end
 function annotate_svg(svgPath, requestedTitle, description, widthPoints, heightPoints, widthPixels, heightPixels)
 assert(isfile(svgPath), "oi_export_figure:MissingArtifact", ...
     "Expected SVG export does not exist: %s", svgPath);
-assert(exist("xmlread", "file") == 2 && exist("xmlwrite", "file") == 2, ...
-    "oi_export_figure:SvgXmlUnavailable", ...
-    "Base MATLAB XML functions are required to annotate SVG accessibility");
+if ~(exist("xmlread", "file") == 2 && exist("xmlwrite", "file") == 2)
+    annotate_svg_text(svgPath, requestedTitle, description, widthPoints, ...
+        heightPoints, widthPixels, heightPixels);
+    return;
+end
 document = xmlread(char(svgPath));
 root = document.getDocumentElement();
 assert(strcmpi(char(root.getNodeName()), 'svg'), ...
@@ -493,6 +495,42 @@ root.insertBefore(titleNode, descriptionNode);
 xmlwrite(char(svgPath), document);
 end
 
+function annotate_svg_text(svgPath, requestedTitle, description, widthPoints, heightPoints, widthPixels, heightPixels)
+svgText = string(fileread(svgPath));
+rootStart = regexp(svgText, "<svg(?=[\\s>])", "start", "once");
+assert(~isempty(rootStart), "oi_export_figure:InvalidSvg", ...
+    "SVG export has no svg root element");
+relativeEnd = regexp(extractAfter(svgText, rootStart - 1), ">", "end", "once");
+assert(~isempty(relativeEnd), "oi_export_figure:InvalidSvg", ...
+    "SVG root element is not terminated");
+rootEnd = rootStart + relativeEnd - 1;
+titleText = strtrim(requestedTitle);
+if strlength(titleText) == 0
+    titleText = "Scientific figure";
+end
+attributes = compose(" width=\"%dpx\" height=\"%dpx\" viewBox=\"0 0 %d %d\" style=\"width:%.9gin;height:%.9gin\" data-physical-width-in=\"%.9g\" data-physical-height-in=\"%.9g\" role=\"img\" aria-label=\"%s\"", ...
+    widthPixels, heightPixels, widthPixels, heightPixels, widthPoints / 72, ...
+    heightPoints / 72, widthPoints / 72, heightPoints / 72, xml_escape(description));
+openingTag = extractBetween(svgText, rootStart, rootEnd - 1) + attributes + ">";
+accessibleNodes = "<title>" + xml_escape(titleText) + "</title><desc>" ...
+    + xml_escape(description) + "</desc>";
+svgText = extractBefore(svgText, rootStart) + openingTag + accessibleNodes ...
+    + extractAfter(svgText, rootEnd);
+fileHandle = fopen(svgPath, "w", "n", "UTF-8");
+assert(fileHandle >= 0, "oi_export_figure:WriteFailed", ...
+    "Cannot rewrite SVG accessibility metadata: %s", svgPath);
+cleanup = onCleanup(@() fclose(fileHandle));
+fwrite(fileHandle, unicode2native(char(svgText), "UTF-8"), "uint8");
+end
+
+function value = xml_escape(value)
+value = replace(string(value), "&", "&amp;");
+value = replace(value, "<", "&lt;");
+value = replace(value, ">", "&gt;");
+value = replace(value, '"', "&quot;");
+value = replace(value, "'", "&apos;");
+end
+
 function apply_export_font(figureHandle)
 installedFonts = string(listfonts);
 fontObjects = findall(figureHandle, "-property", "FontName");
@@ -516,7 +554,7 @@ selectedFont = "";
 if isappdata(figureHandle, "OI_OceanTheme")
     theme = getappdata(figureHandle, "OI_OceanTheme");
     if isstruct(theme) && isfield(theme, "FontName") ...
-            && any(strcmpi(installedFonts, string(theme.FontName)))
+            && publication_font_available(string(theme.FontName), installedFonts)
         selectedFont = string(theme.FontName);
     end
 end
@@ -532,7 +570,11 @@ if cjkPresent && (strlength(selectedFont) == 0 || ~is_cjk_font(selectedFont))
 end
 if strlength(selectedFont) == 0
     currentFonts = string(get(fontObjects, "FontName"));
-    currentFonts = currentFonts(ismember(lower(currentFonts), lower(installedFonts)));
+    available = false(size(currentFonts));
+    for index = 1:numel(currentFonts)
+        available(index) = publication_font_available(currentFonts(index), installedFonts);
+    end
+    currentFonts = currentFonts(available);
     assert(~isempty(currentFonts), "oi_export_figure:FontUnavailable", ...
         "No selected figure font matches an installed MATLAB font");
     selectedFont = currentFonts(1);
@@ -716,7 +758,7 @@ assert(numel(bounds) == 4 && all(isfinite(bounds)) ...
 end
 
 function inside = bounds_inside_canvas(bounds)
-tolerance = 1e-6;
+tolerance = 0.01;
 inside = bounds(1) >= -tolerance && bounds(2) >= -tolerance ...
     && bounds(1) + bounds(3) <= 1 + tolerance ...
     && bounds(2) + bounds(4) <= 1 + tolerance;

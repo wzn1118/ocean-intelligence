@@ -871,10 +871,10 @@ assert(~isempty(installed_fonts), 'ocean:interaction:FontUnavailable', ...
 cjk_text_present = contains_cjk_text(text_values);
 requested_font = strtrim(requested_font);
 if strlength(requested_font) > 0
-  requested_index = find(strcmpi(installed_fonts, requested_font), 1);
-  assert(~isempty(requested_index), 'ocean:interaction:FontUnavailable', ...
+  assert(publication_font_available(requested_font, installed_fonts), ...
+    'ocean:interaction:FontUnavailable', ...
     'The explicitly requested FontName is not installed');
-  font_name = installed_fonts(requested_index);
+  font_name = requested_font;
   assert(~cjk_text_present || is_configured_cjk_font(font_name), ...
     'ocean:interaction:CJKFontUnavailable', ...
     'CJK text requires a configured CJK-capable FontName');
@@ -883,16 +883,16 @@ end
 if cjk_text_present
   candidates = ["Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Noto Sans CJK JP" "Noto Sans CJK KR" "Source Han Sans SC" ...
-    "Microsoft YaHei" "PingFang SC" "SimHei" "SimSun" ...
+    "WenQuanYi Zen Hei" "Droid Sans Fallback" "Microsoft YaHei" ...
+    "PingFang SC" "SimHei" "SimSun" ...
     "Arial Unicode MS"];
 else
   candidates = string(fallback_font);
 end
 font_name = "";
 for candidate_index = 1:numel(candidates)
-  installed_index = find(strcmpi(installed_fonts, candidates(candidate_index)), 1);
-  if ~isempty(installed_index)
-    font_name = installed_fonts(installed_index);
+  if publication_font_available(candidates(candidate_index), installed_fonts)
+    font_name = candidates(candidate_index);
     break;
   end
 end
@@ -903,11 +903,24 @@ end
 function valid = is_configured_cjk_font(font_name)
 normalized = lower(string(font_name));
 tokens = ["noto sans cjk" "source han" "yahei" "pingfang" ...
-  "simhei" "simsun" "heiti" "songti" "arial unicode"];
+  "wenquanyi" "droid sans fallback" "simhei" "simsun" ...
+  "heiti" "songti" "arial unicode"];
 valid = false;
 for token_index = 1:numel(tokens)
   valid = valid || contains(normalized, tokens(token_index));
 end
+end
+
+function available = publication_font_available(font_name, installed_fonts)
+font_name = strtrim(string(font_name));
+available = strlength(font_name) > 0 ...
+  && any(strcmpi(installed_fonts, font_name));
+if available || ~isunix
+  return;
+end
+command = sprintf("fc-match -f '%%{family}' '%s' 2>/dev/null", char(font_name));
+[status, output] = system(command);
+available = status == 0 && contains(lower(string(output)), lower(font_name));
 end
 
 function present = contains_cjk_text(text_values)
