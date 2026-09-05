@@ -49,7 +49,6 @@ if ~isa(axesHandle, "matlab.graphics.axis.PolarAxes") && isprop(axesHandle, "YCo
     axesHandle.YColor = theme.TextColor;
 end
 style_axis_text(axesHandle, theme);
-apply_redundant_series_encoding(axesHandle, theme);
 setappdata(axesHandle, "OI_PublicationTheme", theme.Name);
 end
 
@@ -60,25 +59,6 @@ for index = 1:numel(requiredFields)
     fieldName = requiredFields{index};
     if ~isfield(theme, fieldName) || isempty(theme.(fieldName))
         theme.(fieldName) = defaults.(fieldName);
-    end
-end
-end
-
-function apply_redundant_series_encoding(axesHandle, theme)
-series = findall(axesHandle, "Type", "line", "-or", "Type", "scatter");
-series = flipud(series(:));
-if numel(series) < 2
-    return;
-end
-for index = 1:numel(series)
-    styleIndex = mod(index - 1, numel(theme.LineStyles)) + 1;
-    markerIndex = mod(index - 1, numel(theme.Markers)) + 1;
-    if isprop(series(index), "LineStyle") ...
-            && string(series(index).LineStyle) ~= "none"
-        series(index).LineStyle = theme.LineStyles(styleIndex);
-    end
-    if isprop(series(index), "Marker")
-        series(index).Marker = theme.Markers(markerIndex);
     end
 end
 end

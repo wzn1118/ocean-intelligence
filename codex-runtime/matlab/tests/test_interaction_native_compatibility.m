@@ -186,8 +186,8 @@ station = repmat("STATION-A", 4, 1);
 qcFlag = ["good"; "suspect"; "good"; "good"];
 sourceRow = [9; 3; 14; 6];
 data = table(time, value, observationID, station, qcFlag, sourceRow, ...
-    "VariableNames", ...
-    {"Time", "Value", "ObservationID", "Station", "QCFlag", "SourceRow"});
+    'VariableNames', ...
+    {'Time', 'Value', 'ObservationID', 'Station', 'QCFlag', 'SourceRow'});
 data.Properties.VariableUnits = {'', 'degC', '', '', '', ''};
 end
 

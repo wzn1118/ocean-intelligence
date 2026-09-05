@@ -190,9 +190,14 @@ entry.text_objects = textEvidence;
 entry.axes_objects = axesEvidence;
 [measuredContrast, foregroundColor, backgroundColor] = figure_contrast(figureHandle);
 [colorblindSafe, redundantEncoding, colorAudit] = oi_color_accessibility_audit(figureHandle);
-assert(redundantEncoding, ...
-    "oi_export_figure:ColorAccessibility", ...
-    "Final series require non-color redundant encoding");
+if ~redundantEncoding
+    reasons = strings(0, 1);
+    for axesIndex = 1:numel(colorAudit.axes)
+        reasons = [reasons; string(colorAudit.axes(axesIndex).reasons(:))]; %#ok<AGROW>
+    end
+    error("oi_export_figure:ColorAccessibility", ...
+        "Final series require non-color redundant encoding: %s", strjoin(reasons, "; "));
+end
 contrastRatio = measuredContrast;
 if ~isnan(options.ContrastRatio)
     assert(abs(options.ContrastRatio - measuredContrast) <= 0.15, ...

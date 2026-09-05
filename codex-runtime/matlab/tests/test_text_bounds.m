@@ -37,24 +37,24 @@ textHandle = text(axesHandle, 0.32, 0.55, "Rotated geometry probe", ...
     "Interpreter", "none");
 
 originalUnits = string(textHandle.Units);
-titleBounds = oi_text_bounds(titleHandle, figureHandle);
-xlabelBounds = oi_text_bounds(xlabelHandle, figureHandle);
-ylabelBounds = oi_text_bounds(ylabelHandle, figureHandle);
-horizontalBounds = oi_text_bounds(textHandle, figureHandle);
+[titleBounds, titleDetails] = measure_bounds(titleHandle, figureHandle, "axes title");
+[xlabelBounds, xlabelDetails] = measure_bounds(xlabelHandle, figureHandle, "x label");
+[ylabelBounds, ylabelDetails] = measure_bounds(ylabelHandle, figureHandle, "rotated y label");
+[horizontalBounds, horizontalDetails] = measure_bounds(textHandle, figureHandle, "axes text");
 assert(string(textHandle.Units) == originalUnits, ...
     "test_text_bounds:Units", "oi_text_bounds did not restore text Units");
-assert_inside(titleBounds, "axes title");
-assert_inside(xlabelBounds, "x label");
-assert_inside(ylabelBounds, "rotated y label");
-assert_inside(horizontalBounds, "axes text");
+assert_inside(titleBounds, "axes title", titleDetails);
+assert_inside(xlabelBounds, "x label", xlabelDetails);
+assert_inside(ylabelBounds, "rotated y label", ylabelDetails);
+assert_inside(horizontalBounds, "axes text", horizontalDetails);
 assert_centered_in_parent(horizontalBounds, axesHandle, figureHandle, [0.32 0.55]);
 assert(horizontalBounds(3) > horizontalBounds(4), ...
     "test_text_bounds:HorizontalExtent", ...
     "Horizontal text must be wider than it is tall");
 
 textHandle.Rotation = 90;
-verticalBounds = oi_text_bounds(textHandle, figureHandle);
-assert_inside(verticalBounds, "90-degree axes text");
+[verticalBounds, verticalDetails] = measure_bounds(textHandle, figureHandle, "90-degree axes text");
+assert_inside(verticalBounds, "90-degree axes text", verticalDetails);
 assert(verticalBounds(4) > verticalBounds(3), ...
     "test_text_bounds:RotatedExtent", ...
     "A 90-degree text extent must reflect its rendered rotation");
@@ -80,11 +80,11 @@ colorbarHandle.Label.Interpreter = "none";
 colorbarHandle.Label.Rotation = 90;
 labelUnits = string(colorbarHandle.Label.Units);
 
-labelBounds = oi_text_bounds(colorbarHandle.Label, figureHandle);
+[labelBounds, labelDetails] = measure_bounds(colorbarHandle.Label, figureHandle, "colorbar label");
 assert(string(colorbarHandle.Label.Units) == labelUnits, ...
     "test_text_bounds:ColorbarUnits", ...
     "Colorbar label Units were not restored");
-assert_inside(labelBounds, "colorbar label");
+assert_inside(labelBounds, "colorbar label", labelDetails);
 assert(labelBounds(1) > 0.75 && labelBounds(4) > labelBounds(3), ...
     "test_text_bounds:ColorbarGeometry", ...
     "Colorbar label bounds were not measured in the colorbar parent frame");
@@ -103,22 +103,24 @@ textHandle = text(axesHandle, 0.5, 0.5, "MMMMMMMM geometry", ...
     "HorizontalAlignment", "center", "VerticalAlignment", "middle", ...
     "Interpreter", "none");
 
-smallBounds = oi_text_bounds(textHandle, figureHandle);
+[smallBounds, smallDetails] = measure_bounds(textHandle, figureHandle, "small font");
 textHandle.FontSize = 22;
-largeBounds = oi_text_bounds(textHandle, figureHandle);
+[largeBounds, largeDetails] = measure_bounds(textHandle, figureHandle, "large font");
 assert(largeBounds(3) > smallBounds(3) && largeBounds(4) > smallBounds(4), ...
     "test_text_bounds:FontRefresh", ...
-    "Text bounds must be re-rendered after final typography changes");
+    "Text bounds must be re-rendered after final typography changes; before=%s; after=%s", ...
+    smallDetails, largeDetails);
 
 fontNames = unique(string(listfonts), "stable");
 alternate = fontNames(fontNames ~= string(fontName));
 if ~isempty(alternate)
     textHandle.FontName = alternate(1);
-    switchedBounds = oi_text_bounds(textHandle, figureHandle);
+    [switchedBounds, switchedDetails] = measure_bounds(textHandle, figureHandle, "switched font");
     assert(all(isfinite(switchedBounds)) && all(switchedBounds(3:4) > 0) ...
         && string(textHandle.FontName) == alternate(1), ...
         "test_text_bounds:FontNameRefresh", ...
-        "Final FontName geometry was not measured after renderer refresh");
+        "Final FontName geometry was not measured after renderer refresh; geometry=%s", ...
+        switchedDetails);
 end
 
 clear figureCleanup;
@@ -134,10 +136,10 @@ axesHandle = axes("Parent", figureHandle, "Units", "normalized", ...
 titleHandle = title(axesHandle, repmat('W', 1, 80), ...
     "FontName", fontName, "FontSize", 14, "Interpreter", "none");
 
-bounds = oi_text_bounds(titleHandle, figureHandle);
+[bounds, details] = measure_bounds(titleHandle, figureHandle, "true clipping title");
 assert(bounds(1) < 0 && bounds(1) + bounds(3) > 1 && bounds(3) > 1, ...
     "test_text_bounds:TrueClipping", ...
-    "A genuinely oversized title must remain outside the figure bounds");
+    "A genuinely oversized title must remain outside the figure bounds; geometry=%s", details);
 
 clear figureCleanup;
 close_if_valid(figureHandle);
@@ -170,13 +172,21 @@ assert(~isempty(fontNames), "test_text_bounds:Fonts", ...
 fontName = fontNames(1);
 end
 
-function assert_inside(bounds, role)
+function [bounds, details] = measure_bounds(textHandle, figureHandle, role)
+[bounds, diagnostics] = oi_text_bounds(textHandle, figureHandle);
+diagnostics.role = char(role);
+details = jsonencode(diagnostics);
+fprintf("MATLAB_TEXT_BOUNDS_DIAGNOSTIC=%s\n", details);
+end
+
+function assert_inside(bounds, role, details)
 assert(all(isfinite(bounds)) && all(bounds(3:4) > 0) ...
     && bounds(1) >= 0 && bounds(2) >= 0 ...
     && bounds(1) + bounds(3) <= 1 ...
     && bounds(2) + bounds(4) <= 1, ...
     "test_text_bounds:UnexpectedClipping", ...
-    "%s should fit inside the figure canvas", role);
+    "%s should fit inside the figure canvas; bounds=%s; geometry=%s", ...
+    role, mat2str(bounds, 17), details);
 end
 
 function assert_rotated_dimensions(horizontalBounds, verticalBounds, figureHandle)

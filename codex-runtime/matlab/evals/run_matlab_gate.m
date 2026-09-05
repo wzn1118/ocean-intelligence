@@ -78,7 +78,8 @@ temperature_uncertainty = double(temperature_fixture.variables.temperature_stand
 uncertainty = temperature_uncertainty(3, :)';
 interactive_ids = "temp-050m-" + compose("%03d", (1:numel(observation_time))');
 station = "Synthetic mooring" + strings(numel(observation_time), 1);
-temperature_qc = string(temperature_fixture.variables.qc.values);
+temperature_qc = string_grid(temperature_fixture.variables.qc.values, ...
+    size(temperature_values));
 qc = temperature_qc(3, :)';
 observation_table = table(observation_time, observation_values, uncertainty, ...
     interactive_ids, station, qc, 'VariableNames', ...
@@ -168,6 +169,23 @@ for index = 1:numel(records)
         values(index) = double(value);
     end
 end
+end
+
+function values = string_grid(raw, expected_shape)
+if iscell(raw) && numel(raw) == expected_shape(1) ...
+        && all(cellfun(@iscell, raw(:)))
+    values = strings(expected_shape);
+    for row_index = 1:expected_shape(1)
+        row_values = string(raw{row_index});
+        assert(numel(row_values) == expected_shape(2), ...
+            "run_matlab_gate:StringGridShape", "String grid row width does not match the data");
+        values(row_index, :) = reshape(row_values, 1, []);
+    end
+else
+    values = string(raw);
+end
+assert(isequal(size(values), expected_shape) && all(~ismissing(values), "all"), ...
+    "run_matlab_gate:StringGridShape", "String grid must match the data shape without missing labels");
 end
 
 function entry = export_plot(output_directory, identifier, title_text, theme, plotter, contract)
