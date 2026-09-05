@@ -1,0 +1,2 @@
+MATLAB_ASSET_STATIC_FAIL asset lacks static contract: oi_plot_time_series.m
+MATLAB_ASSET_STATIC_FAIL full100_export_contracts.m: MATLAB test source must remain ASCII

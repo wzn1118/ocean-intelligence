@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "paired-observation-model",
+  "title": "Synthetic observation-model comparison with stable identities",
+  "kind": "paired_records",
+  "synthetic": true,
+  "provenance": {
+    "method": "deterministic_formula",
+    "formula": "observation = 17.5 - 0.055*depth + 0.4*sin(time_index); model = observation + depth_bias + phase_bias",
+    "seed": null,
+    "purpose": "Evaluation fixture only; not an observed ocean dataset"
+  },
+  "records": [
+    {"id":"pair-001","time":"2026-08-20T00:00:00Z","depth_m":10,"observation_degC":17.02,"model_degC":17.10,"uncertainty_degC":0.10,"qc":"good"},
+    {"id":"pair-002","time":"2026-08-20T00:00:00Z","depth_m":40,"observation_degC":15.37,"model_degC":15.51,"uncertainty_degC":0.12,"qc":"good"},
+    {"id":"pair-003","time":"2026-08-20T00:00:00Z","depth_m":70,"observation_degC":13.72,"model_degC":13.93,"uncertainty_degC":0.15,"qc":"good"},
+    {"id":"pair-004","time":"2026-08-20T06:00:00Z","depth_m":10,"observation_degC":17.31,"model_degC":17.35,"uncertainty_degC":0.10,"qc":"good"},
+    {"id":"pair-005","time":"2026-08-20T06:00:00Z","depth_m":40,"observation_degC":15.66,"model_degC":15.76,"uncertainty_degC":0.12,"qc":"good"},
+    {"id":"pair-006","time":"2026-08-20T06:00:00Z","depth_m":70,"observation_degC":14.01,"model_degC":14.18,"uncertainty_degC":0.15,"qc":"suspect"},
+    {"id":"pair-007","time":"2026-08-20T12:00:00Z","depth_m":10,"observation_degC":17.38,"model_degC":17.39,"uncertainty_degC":0.10,"qc":"good"},
+    {"id":"pair-008","time":"2026-08-20T12:00:00Z","depth_m":40,"observation_degC":15.73,"model_degC":15.80,"uncertainty_degC":0.12,"qc":"good"},
+    {"id":"pair-009","time":"2026-08-20T12:00:00Z","depth_m":70,"observation_degC":14.08,"model_degC":14.22,"uncertainty_degC":0.15,"qc":"good"},
+    {"id":"pair-010","time":"2026-08-20T18:00:00Z","depth_m":10,"observation_degC":17.16,"model_degC":17.13,"uncertainty_degC":0.10,"qc":"good"},
+    {"id":"pair-011","time":"2026-08-20T18:00:00Z","depth_m":40,"observation_degC":15.51,"model_degC":15.54,"uncertainty_degC":0.12,"qc":"good"},
+    {"id":"pair-012","time":"2026-08-20T18:00:00Z","depth_m":70,"observation_degC":null,"model_degC":13.96,"uncertainty_degC":null,"qc":"missing"}
+  ],
+  "contract": {
+    "time_zone": "UTC",
+    "depth_direction": "positive_down",
+    "observation_unit": "degC",
+    "model_unit": "degC",
+    "uncertainty_type": "standard_uncertainty",
+    "uncertainty_unit": "degC",
+    "missing_policy": "preserve",
+    "qc_policy": "preserve",
+    "stable_id_field": "id"
+  },
+  "design": {
+    "time_depth_relationship": "fully_crossed",
+    "expected_pair_count": 12,
+    "scientific_question": "What paired model error remains after preserving time, depth, QC, uncertainty, and stable IDs?"
+  }
+}

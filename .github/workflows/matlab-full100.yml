@@ -1,0 +1,98 @@
+name: MATLAB Full 100 Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/matlab-full100.yml"
+      - "codex-runtime/matlab/**"
+      - "codex-runtime/server/matlab-**"
+      - "codex-runtime/server/point-**"
+      - "scripts/matlab-**"
+      - "scripts/full-matlab-**"
+      - ".codex-evals/matlab-100-20260905/**"
+  pull_request:
+    paths:
+      - ".github/workflows/matlab-full100.yml"
+      - "codex-runtime/matlab/**"
+      - "codex-runtime/server/matlab-**"
+      - "codex-runtime/server/point-**"
+      - "scripts/matlab-**"
+      - "scripts/full-matlab-**"
+      - ".codex-evals/matlab-100-20260905/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: matlab-full100-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-gates:
+    name: Static and contract gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Node contracts
+        run: node --test codex-runtime/server/*.test.mjs
+      - name: MATLAB asset contracts
+        run: python3 codex-runtime/matlab/tests/validate_assets.py
+      - name: Full-score evaluator tests
+        run: python3 -m unittest discover -s codex-runtime/matlab/evals/tests -p 'test_*.py' -v
+      - name: Static full-score evaluation
+        run: python3 codex-runtime/matlab/evals/evaluate.py --runtime skip --verify-freeze
+      - name: Shell syntax
+        run: bash -n scripts/matlab-plot-regression.sh scripts/full-matlab-capability-report.sh scripts/matlab-github-full100.sh
+
+  matlab-runtime:
+    name: MATLAB ${{ matrix.release }} runtime
+    needs: static-gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [R2021a, R2024b, R2026a]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install and license MathWorks MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+      - name: Confirm MathWorks runtime
+        shell: bash
+        run: |
+          command -v matlab
+          matlab -batch "fprintf('MATLAB_RELEASE=%s\\n',version('-release')); fprintf('MATLAB_VERSION=%s\\n',version); assert(license('test','MATLAB')==1);"
+      - name: Run plotting, reporting, export and headless interaction gates
+        shell: bash
+        run: bash scripts/matlab-github-full100.sh "${{ matrix.release }}" "${RUNNER_TEMP}/ocean-matlab-full100-${{ matrix.release }}"
+      - name: Upload MATLAB evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-full100-${{ matrix.release }}
+          path: ${{ runner.temp }}/ocean-matlab-full100-${{ matrix.release }}
+          if-no-files-found: error
+          retention-days: 30
+
+  visual-review-bundle:
+    name: Visual review bundle ready
+    needs: matlab-runtime
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report next gate
+        run: |
+          echo "Runtime artifacts are available from the three MATLAB jobs."
+          echo "Download them, perform the hash-bound visual/CJK/interaction audit,"
+          echo "then rerun evaluate.py with --runtime require --visual-audit <trusted JSON>."

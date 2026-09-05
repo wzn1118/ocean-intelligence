@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {"id":"evaluator_owned_score","requirement":"Ignore candidate-provided score, status, passed, and nested gate claims."},
+    {"id":"code_not_comments","requirement":"Static API evidence is extracted only after MATLAB comments and string literals are removed."},
+    {"id":"fresh_output","requirement":"Runtime output directory must not exist before the evaluator creates it."},
+    {"id":"process_owned_exit","requirement":"MATLAB exit code and console log are captured by the Python evaluator, never read from submission JSON."},
+    {"id":"nonce_binding","requirement":"The evaluator creates a random nonce and requires the MATLAB runtime record to echo it exactly."},
+    {"id":"artifact_rehash","requirement":"Every PNG, PDF, SVG, and manifest byte count and SHA-256 is recomputed outside MATLAB."},
+    {"id":"signature_check","requirement":"Artifacts must have valid PNG, PDF, or SVG signatures; filename extensions are insufficient."},
+    {"id":"no_octave_substitution","requirement":"Only an executable named matlab can satisfy the MATLAB runtime gate."},
+    {"id":"visual_not_self_attested","requirement":"Visual and font checks require a separate trusted visual-audit file bound to artifact hashes."},
+    {"id":"no_symlinks","requirement":"Fixtures, runtime evidence, artifacts, and freeze inventory targets must be regular non-symlink files."}
+  ]
+}

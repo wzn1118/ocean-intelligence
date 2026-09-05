@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trusted MATLAB artifact visual audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_sha256", "artifact_sha256", "reviewer", "reviewed_at", "checks"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_sha256": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "artifact_sha256": {"type":"object","additionalProperties":{"type":"string","pattern":"^[0-9a-f]{64}$"}},
+    "reviewer": {"type":"string","minLength":1},
+    "reviewed_at": {"type":"string","format":"date-time"},
+    "checks": {
+      "type":"object",
+      "additionalProperties": false,
+      "required":["png_layout","pdf_fonts","svg_fonts","cjk_glyphs","clipping","color_accessibility","interactive_datatip","interactive_brush","headless_fallback"],
+      "properties": {
+        "png_layout":{"const":true},
+        "pdf_fonts":{"const":true},
+        "svg_fonts":{"const":true},
+        "cjk_glyphs":{"const":true},
+        "clipping":{"const":true},
+        "color_accessibility":{"const":true},
+        "interactive_datatip":{"const":true},
+        "interactive_brush":{"const":true},
+        "headless_fallback":{"const":true}
+      }
+    }
+  }
+}

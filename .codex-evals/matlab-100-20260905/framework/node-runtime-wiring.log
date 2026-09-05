@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: registers the MATLAB task route in the runtime API
+ok 1 - registers the MATLAB task route in the runtime API
+  ---
+  duration_ms: 2.135861
+  ...
+# Subtest: runtime composition exposes release-aware exports and manifest without a plot generator
+ok 2 - runtime composition exposes release-aware exports and manifest without a plot generator
+  ---
+  duration_ms: 7.762476
+  ...
+# Subtest: production wiring keeps MATLAB evidence external and rejects Octave relabeling
+ok 3 - production wiring keeps MATLAB evidence external and rejects Octave relabeling
+  ---
+  duration_ms: 0.754769
+  ...
+# Subtest: runtime composition returns stable contracts for malformed JSON shapes
+ok 4 - runtime composition returns stable contracts for malformed JSON shapes
+  ---
+  duration_ms: 52.841074
+  ...
+# Subtest: end-to-end contract reaches template, release matrix and quality gate
+ok 5 - end-to-end contract reaches template, release matrix and quality gate
+  ---
+  duration_ms: 40.696487
+  ...
+# Subtest: runtime composition canonicalizes Chinese and normalized coordinate contracts once
+ok 6 - runtime composition canonicalizes Chinese and normalized coordinate contracts once
+  ---
+  duration_ms: 8.346784
+  ...
+# Subtest: runtime composition forwards interactive tasks into the native data-tip template
+ok 7 - runtime composition forwards interactive tasks into the native data-tip template
+  ---
+  duration_ms: 5.905125
+  ...
+# Subtest: runtime composition preserves interactive confidence-bound metadata
+ok 8 - runtime composition preserves interactive confidence-bound metadata
+  ---
+  duration_ms: 5.131552
+  ...
+# Subtest: runtime composition blocks incomplete scientific semantics before plot generation
+ok 9 - runtime composition blocks incomplete scientific semantics before plot generation
+  ---
+  duration_ms: 2.222974
+  ...
+# Subtest: runtime composition blocks incomplete publication and headless semantics before generation
+ok 10 - runtime composition blocks incomplete publication and headless semantics before generation
+  ---
+  duration_ms: 2.038709
+  ...
+# Subtest: serves the composed MATLAB route through the signed runtime HTTP endpoint
+ok 11 - serves the composed MATLAB route through the signed runtime HTTP endpoint
+  ---
+  duration_ms: 1413.040209
+  ...
+# Subtest: keeps legacy release fallbacks visible while blocking unsupported arguments-based generation
+ok 12 - keeps legacy release fallbacks visible while blocking unsupported arguments-based generation
+  ---
+  duration_ms: 3.22592
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1835.295966

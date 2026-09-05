@@ -9,6 +9,11 @@ import { createCodexBrowserService } from './codex-browser-service.mjs';
 import { createCodexHostCommandService } from './codex-host-command-service.mjs';
 import { createCodexRuntimeCompatibility } from './codex-runtime-compatibility.mjs';
 import { createIllustratedReportContract, illustratedReportInstructions } from './illustrated-report-contract.mjs';
+import { inspectMatlabPlotQuality } from './matlab-plot-quality.mjs';
+import { matlabPlottingInstructions } from './matlab-plotting-instructions.mjs';
+import { routeMatlabRuntimeRequest } from './matlab-runtime-route-service.mjs';
+import { inspectPointInteractionQuality } from './point-interaction-quality.mjs';
+import { pointTemperatureInteractionInstructions } from './point-temperature-interaction-spec.mjs';
 import { OCEAN_REPORT_SPEC } from './ocean-report-spec.mjs';
 import { inspectReportQuality } from './report-quality.mjs';
 import { inspectThreadRecovery } from './thread-recovery.mjs';
@@ -99,6 +104,11 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'POST' && url.pathname === '/api/codex-runtime/probe') {
       return json(response, 200, await probeRuntime(tenant));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/codex-runtime/matlab/route') {
+      const body = await readJson(request);
+      assertPermittedContent(JSON.stringify(body));
+      return json(response, 200, routeMatlabRuntimeRequest(body));
     }
     if (request.method === 'GET' && url.pathname === '/api/codex-runtime/harness') {
       return json(response, 200, await harnessSnapshot(tenant));
@@ -194,6 +204,40 @@ const server = http.createServer(async (request, response) => {
         missingPaths.push(`${report.visualPrefix}${String(visualArtifacts.length + index + 1).padStart(2, '0')}.(svg|png|jpg|webp)`);
       }
       const quality = inspectReportQuality(report.absolutePaths[0], report.absolutePaths[1], report.minimumHeadings, report.minimumMarkdownBytes, report.minimumHtmlBytes, report.minimumHtmlFigures, report.minimumAnalyticalClaims, report.minimumComparisons, report.minimumEvidenceMarkers, report.requiredZoneCount, report.minimumChartTypes);
+      const matlabManifestPath = path.join(tenant.generatedRoot, 'figures.json');
+      const matlabSourcePaths = existsSync(tenant.generatedRoot)
+        ? walkFiles(tenant.generatedRoot, 2).filter((candidate) => /\.(?:m)$/iu.test(candidate))
+        : [];
+      const hasMatlabPlotBundle = existsSync(matlabManifestPath) || matlabSourcePaths.length > 0;
+      const matlabPlotQuality = hasMatlabPlotBundle
+        ? inspectMatlabPlotQuality({
+            sourcePaths: matlabSourcePaths,
+            manifestPath: matlabManifestPath,
+            outputDirectory: tenant.generatedRoot,
+          })
+        : null;
+      if (matlabPlotQuality && !matlabPlotQuality.matlabPlotQualityOk) {
+        missingPaths.push('Octave/MATLAB图件必须通过统一主题、PNG/PDF双格式、尺寸、字体、manifest和跨格式溯源检查');
+      }
+      const reportHtmlPath = report.absolutePaths[0];
+      const pointInteractionHtmlPaths = existsSync(tenant.generatedRoot)
+        ? walkFiles(tenant.generatedRoot, 2).filter((candidate) => {
+            if (!/\.html$/iu.test(candidate)) return false;
+            const fileName = path.basename(candidate);
+            if (candidate === reportHtmlPath) {
+              try {
+                return /data-point-index|data-temperature-point|temperature-point/u.test(readFileSync(candidate, 'utf8'));
+              } catch {
+                return false;
+              }
+            }
+            return fileName.startsWith(`${report.id}-`) && /interactive|temperature|point/iu.test(fileName);
+          })
+        : [];
+      const pointInteractionQualities = pointInteractionHtmlPaths.map((htmlPath) => inspectPointInteractionQuality({ htmlPath }));
+      if (pointInteractionQualities.some((candidate) => !candidate.pointInteractionQualityOk)) {
+        missingPaths.push('温度点交互HTML必须让每个点均可hover/focus查看点位、温度与单位、时间、经纬度和QC，并提供完整图例且完全离线可用');
+      }
       if (!quality.markdownBytesOk) missingPaths.push(`Markdown 至少 ${report.minimumMarkdownBytes} bytes（当前 ${quality.markdownBytes}）`);
       if (!quality.htmlBytesOk) missingPaths.push(`HTML 至少 ${report.minimumHtmlBytes} bytes（当前 ${quality.htmlBytes}）`);
       if (!quality.headingCountOk) missingPaths.push(`至少 ${report.minimumHeadings} 个正文标题（当前 ${quality.headingCount}）`);
@@ -257,6 +301,8 @@ const server = http.createServer(async (request, response) => {
         minimumVisuals: report.minimumVisuals,
         minimumChartTypes: report.minimumChartTypes,
         quality,
+        matlabPlotQuality,
+        pointInteractionQualities,
       });
     }
     if (request.method === 'GET' && url.pathname === '/api/codex-runtime/artifacts') {
@@ -710,6 +756,14 @@ function oceanDeveloperInstructions(regionId, tenant) {
     'For averages, extrema, trends, comparisons, coverage audits and scientific summaries, return actual computed values from ocean_copernicus_dataset_analyze rather than only explaining how they could be calculated.',
     'When a requested quantity is vector magnitude, such as wind speed or current speed, request both vector components and use derived_vectors so magnitude is calculated per grid value before averaging. Never approximate speed as the magnitude of separately averaged components.',
     `For report requests, gather the required bounded datasets and write both a Markdown report and a self-contained HTML report under ${tenant.generatedRoot}. Include product_id, dataset_id, variables and units, spatial/time/depth coverage, statistics, sampling scope, latest_valid_time, fetched_at, data latency and scientific limitations.`,
+    matlabPlottingInstructions({
+      repositoryRoot: workspaceRoot,
+      outputDirectory: tenant.generatedRoot,
+      manifestPath: path.join(tenant.generatedRoot, 'figures.json'),
+      referencePrefix: 'generated',
+      runtime: 'matlab',
+    }),
+    pointTemperatureInteractionInstructions(),
     `The product specification for an excellent ocean report is injected into one-click report tasks. Follow this specification exactly:\n${OCEAN_REPORT_SPEC}`,
     'Use the optimized wave or wind point tools for single coordinates, and the optimized region tools only for existing preset product regions. For custom bounding boxes, area averages, multi-variable statistics, trends or report evidence, ocean_copernicus_dataset_analyze takes precedence.',
     'For historical trend, coverage or export tasks, use ocean_copernicus_history with a bounded page; synchronize only when the user explicitly needs the complete point history. For source, cache, candidate or joint wind-wave risk audits, use ocean_copernicus_audit.',

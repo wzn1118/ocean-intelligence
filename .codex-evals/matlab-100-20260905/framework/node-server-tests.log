@@ -1,0 +1,1495 @@
+TAP version 13
+# Subtest: rejects an extreme-value list without linkage methods or validation
+ok 1 - rejects an extreme-value list without linkage methods or validation
+  ---
+  duration_ms: 15.77195
+  ...
+# Subtest: accepts ranked nine-zone candidates with collocation and falsification paths
+ok 2 - accepts ranked nine-zone candidates with collocation and falsification paths
+  ---
+  duration_ms: 7.805962
+  ...
+# Subtest: normalizes tenant absolute report paths into generated virtual paths
+ok 3 - normalizes tenant absolute report paths into generated virtual paths
+  ---
+  duration_ms: 2.647677
+  ...
+# Subtest: extracts report links and plain workspace paths from final messages
+ok 4 - extracts report links and plain workspace paths from final messages
+  ---
+  duration_ms: 3.290303
+  ...
+# Subtest: accepts seconds, milliseconds and ISO thread timestamps
+ok 5 - accepts seconds, milliseconds and ISO thread timestamps
+  ---
+  duration_ms: 0.442915
+  ...
+# Subtest: blocks political and territorial dispute requests
+ok 6 - blocks political and territorial dispute requests
+  ---
+  duration_ms: 10.912156
+  ...
+# Subtest: allows ordinary ocean science questions
+ok 7 - allows ordinary ocean science questions
+  ---
+  duration_ms: 1.876076
+  ...
+# Subtest: keeps political uses of regime and coup restricted
+ok 8 - keeps political uses of regime and coup restricted
+  ---
+  duration_ms: 3.148275
+  ...
+# Subtest: enforces constructive tone and approved geographic naming
+ok 9 - enforces constructive tone and approved geographic naming
+  ---
+  duration_ms: 3.618541
+  ...
+# Subtest: replaces restricted model output recursively
+ok 10 - replaces restricted model output recursively
+  ---
+  duration_ms: 0.747383
+  ...
+# Subtest: removes all live text while preserving routing identifiers
+ok 11 - removes all live text while preserving routing identifiers
+  ---
+  duration_ms: 0.545874
+  ...
+# Subtest: rejects defensive AI-style constructions and canned transitions
+ok 12 - rejects defensive AI-style constructions and canned transitions
+  ---
+  duration_ms: 17.186829
+  ...
+# Subtest: rejects colloquial single-character verbs that drive sentences
+ok 13 - rejects colloquial single-character verbs that drive sentences
+  ---
+  duration_ms: 4.721803
+  ...
+# Subtest: accepts direct professional scientific prose and academic verbs
+ok 14 - accepts direct professional scientific prose and academic verbs
+  ---
+  duration_ms: 2.159882
+  ...
+# Subtest: creates an adaptive illustrated report contract
+ok 15 - creates an adaptive illustrated report contract
+  ---
+  duration_ms: 5.109148
+  ...
+# Subtest: injects the complete universal 15-module report profile for every report topic
+ok 16 - injects the complete universal 15-module report profile for every report topic
+  ---
+  duration_ms: 1.253901
+  ...
+# Subtest: audits conclusion evidence, limitations, figure links, hashes, and manifest freshness
+ok 17 - audits conclusion evidence, limitations, figure links, hashes, and manifest freshness
+  ---
+  duration_ms: 8.92627
+  ...
+# Subtest: rejects comment-forged claims, fake hashes, and stale regenerated manifests
+ok 18 - rejects comment-forged claims, fake hashes, and stale regenerated manifests
+  ---
+  duration_ms: 4.84348
+  ...
+# Subtest: interactive MATLAB asset preserves stable point identity
+ok 19 - interactive MATLAB asset preserves stable point identity
+  ---
+  duration_ms: 2.957337
+  ...
+# Subtest: interactive MATLAB asset preserves scientific point semantics
+ok 20 - interactive MATLAB asset preserves scientific point semantics
+  ---
+  duration_ms: 30.047242
+  ...
+# Subtest: interactive MATLAB asset owns callback lifecycle
+ok 21 - interactive MATLAB asset owns callback lifecycle
+  ---
+  duration_ms: 1.120132
+  ...
+# Subtest: interactive MATLAB asset separates desktop and headless exports
+ok 22 - interactive MATLAB asset separates desktop and headless exports
+  ---
+  duration_ms: 0.745715
+  ...
+# Subtest: interactive MATLAB asset keeps publication and CJK styling explicit
+ok 23 - interactive MATLAB asset keeps publication and CJK styling explicit
+  ---
+  duration_ms: 0.597318
+  ...
+# Subtest: interaction reference constrains linkdata and static delivery
+ok 24 - interaction reference constrains linkdata and static delivery
+  ---
+  duration_ms: 0.496648
+  ...
+# Subtest: real MATLAB acceptance covers identity, callbacks, cleanup and headless fallback
+ok 25 - real MATLAB acceptance covers identity, callbacks, cleanup and headless fallback
+  ---
+  duration_ms: 0.479864
+  ...
+# Subtest: evidence validator verifies real files, bytes and hashes
+ok 26 - evidence validator verifies real files, bytes and hashes
+  ---
+  duration_ms: 0.324754
+  ...
+# Subtest: defines complete, unique, machine-readable MATLAB plotting evaluation cases
+ok 27 - defines complete, unique, machine-readable MATLAB plotting evaluation cases
+  ---
+  duration_ms: 15.062807
+  ...
+# Subtest: covers every round-7 publication dimension with real-request and adversarial contracts
+ok 28 - covers every round-7 publication dimension with real-request and adversarial contracts
+  ---
+  duration_ms: 0.722217
+  ...
+# Subtest: covers every round-8 runtime and export dimension with routed contracts
+ok 29 - covers every round-8 runtime and export dimension with routed contracts
+  ---
+  duration_ms: 246.277556
+  ...
+# Subtest: covers every round-9 adversarial dimension with real routed outcomes
+ok 30 - covers every round-9 adversarial dimension with real routed outcomes
+  ---
+  duration_ms: 89.744033
+  ...
+# Subtest: covers every round-6 scientific semantic with executable accepted and rejected contracts
+ok 31 - covers every round-6 scientific semantic with executable accepted and rejected contracts
+  ---
+  duration_ms: 0.676261
+  ...
+# Subtest: accepts candidates satisfying every declared feature without forbidden behavior
+ok 32 - accepts candidates satisfying every declared feature without forbidden behavior
+  ---
+  duration_ms: 500.220778
+  ...
+# Subtest: rejects every case when required features are absent
+ok 33 - rejects every case when required features are absent
+  ---
+  duration_ms: 340.609652
+  ...
+# Subtest: rejects every declared forbidden behavior and runtime misroute
+ok 34 - rejects every declared forbidden behavior and runtime misroute
+  ---
+  duration_ms: 270.646391
+  ...
+# Subtest: uses the existing router for accepted and rejected input contracts
+ok 35 - uses the existing router for accepted and rejected input contracts
+  ---
+  duration_ms: 219.929124
+  ...
+# Subtest: round-6 cases stay synchronized with plot and scientific task routers
+ok 36 - round-6 cases stay synchronized with plot and scientific task routers
+  ---
+  duration_ms: 21.493586
+  ...
+# Subtest: round-7 cases feed complete publication contracts to plot and task routers
+ok 37 - round-7 cases feed complete publication contracts to plot and task routers
+  ---
+  duration_ms: 61.30632
+  ...
+# Subtest: scientific semantic scoring fails partial compliance independently by dimension
+ok 38 - scientific semantic scoring fails partial compliance independently by dimension
+  ---
+  duration_ms: 10.750512
+  ...
+# Subtest: blocks timezone relabeling, QC row drops, and zero-to-missing adversarial shortcuts
+ok 39 - blocks timezone relabeling, QC row drops, and zero-to-missing adversarial shortcuts
+  ---
+  duration_ms: 10.765008
+  ...
+# Subtest: consumes the existing plot quality scorer and enforces each case threshold
+ok 40 - consumes the existing plot quality scorer and enforces each case threshold
+  ---
+  duration_ms: 5.156532
+  ...
+# Subtest: rejects a high aggregate score when a case-required publication criterion fails
+ok 41 - rejects a high aggregate score when a case-required publication criterion fails
+  ---
+  duration_ms: 9.187646
+  ...
+# Subtest: rejects fabricated or internally inconsistent publication quality results
+ok 42 - rejects fabricated or internally inconsistent publication quality results
+  ---
+  duration_ms: 8.279145
+  ...
+# Subtest: scores adversarial dimensions and blocks representative boundary attacks
+ok 43 - scores adversarial dimensions and blocks representative boundary attacks
+  ---
+  duration_ms: 53.389254
+  ...
+# Subtest: scores publication dimensions and blocks headless and interaction shortcuts
+ok 44 - scores publication dimensions and blocks headless and interaction shortcuts
+  ---
+  duration_ms: 18.857955
+  ...
+# Subtest: scores runtime/export dimensions and rejects release-specific SVG drift
+ok 45 - scores runtime/export dimensions and rejects release-specific SVG drift
+  ---
+  duration_ms: 11.680772
+  ...
+# Subtest: requires artifact-backed manifest signals in addition to a 100 quality score
+ok 46 - requires artifact-backed manifest signals in addition to a 100 quality score
+  ---
+  duration_ms: 5.272795
+  ...
+# Subtest: accepts manifest gates only from a successful artifact inspection result
+ok 47 - accepts manifest gates only from a successful artifact inspection result
+  ---
+  duration_ms: 16.322663
+  ...
+# Subtest: rejects missing runtime evidence, wrong candidate routes, and raw quality scores
+ok 48 - rejects missing runtime evidence, wrong candidate routes, and raw quality scores
+  ---
+  duration_ms: 32.568528
+  ...
+# Subtest: does not count MATLAB comments as executable feature evidence
+ok 49 - does not count MATLAB comments as executable feature evidence
+  ---
+  duration_ms: 13.483829
+  ...
+# Subtest: does not count MATLAB string literals as executable features or forbidden calls
+ok 50 - does not count MATLAB string literals as executable features or forbidden calls
+  ---
+  duration_ms: 12.078216
+  ...
+# Subtest: does not accept report or runtime claims for code-scoped features
+ok 51 - does not accept report or runtime claims for code-scoped features
+  ---
+  duration_ms: 8.60417
+  ...
+# Subtest: rejects stale-event interaction shortcuts and headless exportapp claims
+ok 52 - rejects stale-event interaction shortcuts and headless exportapp claims
+  ---
+  duration_ms: 21.202712
+  ...
+# Subtest: requires the real quality criterion names and skips figure quality only for non-figure outcomes
+ok 53 - requires the real quality criterion names and skips figure quality only for non-figure outcomes
+  ---
+  duration_ms: 2.789032
+  ...
+# Subtest: requires concrete command, version and artifact evidence for verified execution claims
+ok 54 - requires concrete command, version and artifact evidence for verified execution claims
+  ---
+  duration_ms: 3.701352
+  ...
+# Subtest: never accepts Octave verification as MATLAB evidence
+ok 55 - never accepts Octave verification as MATLAB evidence
+  ---
+  duration_ms: 32.258246
+  ...
+# Subtest: runs complete registered suites and the JSON CLI entry point
+ok 56 - runs complete registered suites and the JSON CLI entry point
+  ---
+  duration_ms: 1017.780947
+  ...
+# Subtest: suite registration rejects missing, duplicate, and unknown cases
+ok 57 - suite registration rejects missing, duplicate, and unknown cases
+  ---
+  duration_ms: 12.104908
+  ...
+# Subtest: prompt contract covers all evaluation families and release-aware routing
+ok 58 - prompt contract covers all evaluation families and release-aware routing
+  ---
+  duration_ms: 3.262917
+  ...
+# Subtest: accepts themed, auditable PNG and PDF MATLAB/Octave outputs
+ok 59 - accepts themed, auditable PNG and PDF MATLAB/Octave outputs
+  ---
+  duration_ms: 38.597657
+  ...
+# Subtest: accepts the existing flat manifest style with one entry per format
+ok 60 - accepts the existing flat manifest style with one entry per format
+  ---
+  duration_ms: 8.112836
+  ...
+# Subtest: rejects jet, saveas, missing shared theme and missing PDF export
+ok 61 - rejects jet, saveas, missing shared theme and missing PDF export
+  ---
+  duration_ms: 3.309356
+  ...
+# Subtest: ignores prohibited patterns that only appear in MATLAB comments
+ok 62 - ignores prohibited patterns that only appear in MATLAB comments
+  ---
+  duration_ms: 2.731659
+  ...
+# Subtest: recognizes the shared PNG and PDF figure export helper
+ok 63 - recognizes the shared PNG and PDF figure export helper
+  ---
+  duration_ms: 9.209258
+  ...
+# Subtest: rejects undersized PNGs, textless PDFs and incomplete manifests
+ok 64 - rejects undersized PNGs, textless PDFs and incomplete manifests
+  ---
+  duration_ms: 3.972601
+  ...
+# Subtest: rejects cross-format metadata that cannot be traced to one figure
+ok 65 - rejects cross-format metadata that cannot be traced to one figure
+  ---
+  duration_ms: 2.594736
+  ...
+# Subtest: reports missing and malformed manifests without throwing
+ok 66 - reports missing and malformed manifests without throwing
+  ---
+  duration_ms: 3.224302
+  ...
+# Subtest: scores the eight second-round MATLAB figure quality criteria
+ok 67 - scores the eight second-round MATLAB figure quality criteria
+  ---
+  duration_ms: 5.640521
+  ...
+# Subtest: penalizes missing labels, small typography, weak lines, overlap and inaccessible color
+ok 68 - penalizes missing labels, small typography, weak lines, overlap and inaccessible color
+  ---
+  duration_ms: 3.437936
+  ...
+# Subtest: does not allow self-reported visual audit booleans to manufacture a score
+ok 69 - does not allow self-reported visual audit booleans to manufacture a score
+  ---
+  duration_ms: 2.914903
+  ...
+# Subtest: does not count comments or strings as theme, export, or quality evidence
+ok 70 - does not count comments or strings as theme, export, or quality evidence
+  ---
+  duration_ms: 2.844015
+  ...
+# Subtest: requires fresh manifest timestamps even when artifact hashes still match
+ok 71 - requires fresh manifest timestamps even when artifact hashes still match
+  ---
+  duration_ms: 2.897879
+  ...
+# Subtest: validates PNG, multi-page PDF, accessible SVG, structure, clipping, and manifest
+ok 72 - validates PNG, multi-page PDF, accessible SVG, structure, clipping, and manifest
+  ---
+  duration_ms: 66.860746
+  ...
+# Subtest: accepts a real bilingual Chinese and English figure contract
+ok 73 - accepts a real bilingual Chinese and English figure contract
+  ---
+  duration_ms: 9.137093
+  ...
+# Subtest: accepts MATLAB jsonencode singleton structs for figures and axes objects
+ok 74 - accepts MATLAB jsonencode singleton structs for figures and axes objects
+  ---
+  duration_ms: 6.712538
+  ...
+# Subtest: counts changed pixels rather than changed channels and enforces the ratio threshold
+ok 75 - counts changed pixels rather than changed channels and enforces the ratio threshold
+  ---
+  duration_ms: 8.07595
+  ...
+# Subtest: rejects adversarial pixel thresholds instead of disabling image regression
+ok 76 - rejects adversarial pixel thresholds instead of disabling image regression
+  ---
+  duration_ms: 4.461977
+  ...
+# Subtest: validates embedded PNG DPI and rejects CRC or dimension-bomb inputs
+ok 77 - validates embedded PNG DPI and rejects CRC or dimension-bomb inputs
+  ---
+  duration_ms: 24.43951
+  ...
+# Subtest: rejects malformed PNG chunk order, transparency, duplication, and trailing data
+ok 78 - rejects malformed PNG chunk order, transparency, duplication, and trailing data
+  ---
+  duration_ms: 52.160233
+  ...
+# Subtest: rejects PDF page count and page dimensions that disagree with the manifest
+ok 79 - rejects PDF page count and page dimensions that disagree with the manifest
+  ---
+  duration_ms: 4.880218
+  ...
+# Subtest: does not count PDF page dictionaries forged inside comments
+ok 80 - does not count PDF page dictionaries forged inside comments
+  ---
+  duration_ms: 6.990209
+  ...
+# Subtest: rejects SVG without a description or accessible name
+ok 81 - rejects SVG without a description or accessible name
+  ---
+  duration_ms: 4.639242
+  ...
+# Subtest: rejects active SVG content, comment-forged metadata, and actual metadata drift
+ok 82 - rejects active SVG content, comment-forged metadata, and actual metadata drift
+  ---
+  duration_ms: 11.391143
+  ...
+# Subtest: rejects malformed SVG roots, trailing markup, and external CSS references
+ok 83 - rejects malformed SVG roots, trailing markup, and external CSS references
+  ---
+  duration_ms: 9.544512
+  ...
+# Subtest: supports optional SVG while failing when SVG is explicitly required
+ok 84 - supports optional SVG while failing when SVG is explicitly required
+  ---
+  duration_ms: 3.625773
+  ...
+# Subtest: rejects missing fonts, undersized typography, clipped bounds, and inaccessible color use
+ok 85 - rejects missing fonts, undersized typography, clipped bounds, and inaccessible color use
+  ---
+  duration_ms: 3.581215
+  ...
+# Subtest: requires meaningful and control-character-free text object roles and strings
+ok 86 - requires meaningful and control-character-free text object roles and strings
+  ---
+  duration_ms: 39.249405
+  ...
+# Subtest: validates normalized and point bounds while rejecting unsupported coordinate units
+ok 87 - validates normalized and point bounds while rejecting unsupported coordinate units
+  ---
+  duration_ms: 5.549451
+  ...
+# Subtest: requires a CJK-capable font whenever rendered labels contain Chinese text
+ok 88 - requires a CJK-capable font whenever rendered labels contain Chinese text
+  ---
+  duration_ms: 5.248099
+  ...
+# Subtest: computes foreground/background contrast instead of trusting declared metadata
+ok 89 - computes foreground/background contrast instead of trusting declared metadata
+  ---
+  duration_ms: 14.88979
+  ...
+# Subtest: enforces publication layout, typography, embedded-font, and color contracts
+ok 90 - enforces publication layout, typography, embedded-font, and color contracts
+  ---
+  duration_ms: 5.758819
+  ...
+# Subtest: validates headless static fallback without claiming interaction succeeded
+ok 91 - validates headless static fallback without claiming interaction succeeded
+  ---
+  duration_ms: 5.309865
+  ...
+# Subtest: requires interaction accessibility and cleanup evidence on desktop
+ok 92 - requires interaction accessibility and cleanup evidence on desktop
+  ---
+  duration_ms: 11.158939
+  ...
+# Subtest: rejects duplicate and non-deterministically ordered figure ids
+ok 93 - rejects duplicate and non-deterministically ordered figure ids
+  ---
+  duration_ms: 8.675747
+  ...
+# Subtest: rejects duplicate artifact paths and non-ISO manifest timestamps
+ok 94 - rejects duplicate artifact paths and non-ISO manifest timestamps
+  ---
+  duration_ms: 4.543205
+  ...
+# Subtest: rejects stale generated_at even when refreshed hashes match current artifacts
+ok 95 - rejects stale generated_at even when refreshed hashes match current artifacts
+  ---
+  duration_ms: 3.139614
+  ...
+# Subtest: rejects artifact symlinks that escape the output directory
+ok 96 - rejects artifact symlinks that escape the output directory
+  ---
+  duration_ms: 3.786311
+  ...
+# Subtest: requires manifest schema v2 and format-specific export evidence
+ok 97 - requires manifest schema v2 and format-specific export evidence
+  ---
+  duration_ms: 34.329452
+  ...
+# Subtest: accepts release-aware legacy and modern MATLAB export strategies
+ok 98 - accepts release-aware legacy and modern MATLAB export strategies
+  ---
+  duration_ms: 9.74962
+  ...
+# Subtest: accepts the current top-level MATLAB manifest runtime fields
+ok 99 - accepts the current top-level MATLAB manifest runtime fields
+  ---
+  duration_ms: 3.737368
+  ...
+# Subtest: rejects contradictory runtime, error, and visual-inspection success claims
+ok 100 - rejects contradictory runtime, error, and visual-inspection success claims
+  ---
+  duration_ms: 4.260829
+  ...
+# Subtest: rejects export and batch APIs unavailable in the declared MATLAB release
+ok 101 - rejects export and batch APIs unavailable in the declared MATLAB release
+  ---
+  duration_ms: 4.960189
+  ...
+# Subtest: rejects SVG on releases older than print -dsvg support
+ok 102 - rejects SVG on releases older than print -dsvg support
+  ---
+  duration_ms: 3.896238
+  ...
+# Subtest: reports missing required toolboxes without treating base MATLAB as optional
+ok 103 - reports missing required toolboxes without treating base MATLAB as optional
+  ---
+  duration_ms: 4.162154
+  ...
+# Subtest: rejects artifact extension drift and unsupported manifest export keys
+ok 104 - rejects artifact extension drift and unsupported manifest export keys
+  ---
+  duration_ms: 3.187836
+  ...
+# Subtest: turns an explicit unavailable runtime manifest into a skip, never a pass
+ok 105 - turns an explicit unavailable runtime manifest into a skip, never a pass
+  ---
+  duration_ms: 3.288346
+  ...
+# Subtest: reports an explicit skip rather than a pass when MATLAB is unavailable
+ok 106 - reports an explicit skip rather than a pass when MATLAB is unavailable
+  ---
+  duration_ms: 12.116953
+  ...
+# Subtest: accepts a complete scientific data contract in strict mode
+ok 107 - accepts a complete scientific data contract in strict mode
+  ---
+  duration_ms: 7.357436
+  ...
+# Subtest: reports an explicit not-provided status for legacy manifests and fails strict mode
+ok 108 - reports an explicit not-provided status for legacy manifests and fails strict mode
+  ---
+  duration_ms: 4.810447
+  ...
+# Subtest: rejects dimension shape/order, unit, coordinate length, and direction inconsistencies
+ok 109 - rejects dimension shape/order, unit, coordinate length, and direction inconsistencies
+  ---
+  duration_ms: 36.317294
+  ...
+# Subtest: rejects timezone omission, invalid timezone, and coordinate timezone mismatch
+ok 110 - rejects timezone omission, invalid timezone, and coordinate timezone mismatch
+  ---
+  duration_ms: 61.22656
+  ...
+# Subtest: rejects malformed and non-monotonic datetime coordinates
+ok 111 - rejects malformed and non-monotonic datetime coordinates
+  ---
+  duration_ms: 37.57085
+  ...
+# Subtest: rejects silent missing-value transforms, inconsistent counts, QC, and uncertainty contracts
+ok 112 - rejects silent missing-value transforms, inconsistent counts, QC, and uncertainty contracts
+  ---
+  duration_ms: 4.403316
+  ...
+# Subtest: accepts the canonical runtime scientific contract with magnitude uncertainty
+ok 113 - accepts the canonical runtime scientific contract with magnitude uncertainty
+  ---
+  duration_ms: 3.438099
+  ...
+# Subtest: rejects an executable named matlab that does not prove it is MATLAB
+ok 114 - rejects an executable named matlab that does not prove it is MATLAB
+  ---
+  duration_ms: 19.440311
+  ...
+# Subtest: rejects GNU Octave even when a wrapper exposes a matlab-like batch interface
+ok 115 - rejects GNU Octave even when a wrapper exposes a matlab-like batch interface
+  ---
+  duration_ms: 303.011468
+  ...
+# Subtest: provides a directly executable CLI with pass and expected-failure exit codes
+ok 116 - provides a directly executable CLI with pass and expected-failure exit codes
+  ---
+  duration_ms: 656.032391
+  ...
+# Subtest: CLI returns a skip exit code and machine-readable reason without MATLAB
+ok 117 - CLI returns a skip exit code and machine-readable reason without MATLAB
+  ---
+  duration_ms: 174.936688
+  ...
+# Subtest: routes timetable-like time data to a gap-preserving time series
+ok 118 - routes timetable-like time data to a gap-preserving time series
+  ---
+  duration_ms: 17.027475
+  ...
+# Subtest: explicit uncertainty question outranks generic time coordinate inference
+ok 119 - explicit uncertainty question outranks generic time coordinate inference
+  ---
+  duration_ms: 3.014056
+  ...
+# Subtest: explicit interactive time-series requests select the native MATLAB template
+ok 120 - explicit interactive time-series requests select the native MATLAB template
+  ---
+  duration_ms: 5.072684
+  ...
+# Subtest: routes one-dimensional depth data to a positive-down profile
+ok 121 - routes one-dimensional depth data to a positive-down profile
+  ---
+  duration_ms: 2.54749
+  ...
+# Subtest: routes time-depth matrices to Hovmoller before generic scalar fields
+ok 122 - routes time-depth matrices to Hovmoller before generic scalar fields
+  ---
+  duration_ms: 2.54891
+  ...
+# Subtest: routes horizontal-depth matrices to ocean sections
+ok 123 - routes horizontal-depth matrices to ocean sections
+  ---
+  duration_ms: 1.980042
+  ...
+# Subtest: routes longitude-latitude matrices to unprojected geospatial fields
+ok 124 - routes longitude-latitude matrices to unprojected geospatial fields
+  ---
+  duration_ms: 1.972861
+  ...
+# Subtest: paired vector components outrank scalar matrix inference
+ok 125 - paired vector components outrank scalar matrix inference
+  ---
+  duration_ms: 2.705026
+  ...
+# Subtest: geospatial fields reject an unstated longitude convention
+ok 126 - geospatial fields reject an unstated longitude convention
+  ---
+  duration_ms: 3.59017
+  ...
+# Subtest: scientific comparison and T-S questions select specialized helpers
+ok 127 - scientific comparison and T-S questions select specialized helpers
+  ---
+  duration_ms: 5.396025
+  ...
+# Subtest: direction roses reject an unstated from/to convention
+ok 128 - direction roses reject an unstated from/to convention
+  ---
+  duration_ms: 31.75844
+  ...
+# Subtest: two-dimensional routes reject a one-dimensional contract
+ok 129 - two-dimensional routes reject a one-dimensional contract
+  ---
+  duration_ms: 2.257941
+  ...
+# Subtest: generated script is deterministic, sanitized and includes scientific guards
+ok 130 - generated script is deterministic, sanitized and includes scientific guards
+  ---
+  duration_ms: 52.540595
+  ...
+# Subtest: release plan is explicit for older MATLAB without native exportgraphics
+ok 131 - release plan is explicit for older MATLAB without native exportgraphics
+  ---
+  duration_ms: 1.594375
+  ...
+# Subtest: legacy MATLAB release is routed to an explicit audited-generator limitation
+ok 132 - legacy MATLAB release is routed to an explicit audited-generator limitation
+  ---
+  duration_ms: 4.270633
+  ...
+# Subtest: routing instruction block documents deterministic priority and prohibited transforms
+ok 133 - routing instruction block documents deterministic priority and prohibited transforms
+  ---
+  duration_ms: 0.626755
+  ...
+# Subtest: returns unresolved metadata instead of inventing units, timezone or missingness
+ok 134 - returns unresolved metadata instead of inventing units, timezone or missingness
+  ---
+  duration_ms: 2.625314
+  ...
+# Subtest: rejects unknown questions and question-coordinate contradictions
+ok 135 - rejects unknown questions and question-coordinate contradictions
+  ---
+  duration_ms: 34.132454
+  ...
+# Subtest: rejects ambiguous coordinate rank and implicit dimension permutation
+ok 136 - rejects ambiguous coordinate rank and implicit dimension permutation
+  ---
+  duration_ms: 1.806499
+  ...
+# Subtest: rejects scattered fields without explicit interpolation and masking policy
+ok 137 - rejects scattered fields without explicit interpolation and masking policy
+  ---
+  duration_ms: 1.82023
+  ...
+# Subtest: script generation rejects incomplete or incompatible uncertainty metadata
+ok 138 - script generation rejects incomplete or incompatible uncertainty metadata
+  ---
+  duration_ms: 4.190659
+  ...
+# Subtest: routing preserves pressure units but generation rejects a depth-specific asset mismatch
+ok 139 - routing preserves pressure units but generation rejects a depth-specific asset mismatch
+  ---
+  duration_ms: 6.134909
+  ...
+# Subtest: rejects positive-up vertical coordinates instead of silently reversing them
+ok 140 - rejects positive-up vertical coordinates instead of silently reversing them
+  ---
+  duration_ms: 1.683078
+  ...
+# Subtest: preserves a non-UTC timezone in generated Hovmoller code
+ok 141 - preserves a non-UTC timezone in generated Hovmoller code
+  ---
+  duration_ms: 3.275832
+  ...
+# Subtest: requires compatible units for comparison and vector components
+ok 142 - requires compatible units for comparison and vector components
+  ---
+  duration_ms: 2.165352
+  ...
+# Subtest: spectrum generation requires provenance and emits positive-domain guards
+ok 143 - spectrum generation requires provenance and emits positive-domain guards
+  ---
+  duration_ms: 3.589233
+  ...
+# Subtest: diverging fields require a scientific color reference
+ok 144 - diverging fields require a scientific color reference
+  ---
+  duration_ms: 2.386201
+  ...
+# Subtest: vector and directional generators retain physical scale conventions
+ok 145 - vector and directional generators retain physical scale conventions
+  ---
+  duration_ms: 6.409115
+  ...
+# Subtest: end-to-end resolver joins runtime, plot readiness and script generation
+ok 146 - end-to-end resolver joins runtime, plot readiness and script generation
+  ---
+  duration_ms: 11.463592
+  ...
+# Subtest: end-to-end interactive routing calls the native template with aligned metadata
+ok 147 - end-to-end interactive routing calls the native template with aligned metadata
+  ---
+  duration_ms: 5.092516
+  ...
+# Subtest: interactive uncertainty routes preserve magnitude and confidence-bound semantics
+ok 148 - interactive uncertainty routes preserve magnitude and confidence-bound semantics
+  ---
+  duration_ms: 51.633271
+  ...
+# Subtest: interactive generation supports the audited R2019b print fallback
+ok 149 - interactive generation supports the audited R2019b print fallback
+  ---
+  duration_ms: 9.336986
+  ...
+# Subtest: end-to-end resolver stops invalid, unavailable and Octave-routed requests
+ok 150 - end-to-end resolver stops invalid, unavailable and Octave-routed requests
+  ---
+  duration_ms: 21.209937
+  ...
+# Subtest: generated source enforces declared shape, timezone and missing-data status
+ok 151 - generated source enforces declared shape, timezone and missing-data status
+  ---
+  duration_ms: 2.530915
+  ...
+# Subtest: generated helper calls match MATLAB asset option and result contracts
+ok 152 - generated helper calls match MATLAB asset option and result contracts
+  ---
+  duration_ms: 2.680224
+  ...
+# Subtest: R2020 field generation gates clim with the documented caxis fallback
+ok 153 - R2020 field generation gates clim with the documented caxis fallback
+  ---
+  duration_ms: 2.844489
+  ...
+# Subtest: rejects malformed dimensions and rank drift instead of dropping extents
+ok 154 - rejects malformed dimensions and rank drift instead of dropping extents
+  ---
+  duration_ms: 3.599815
+  ...
+# Subtest: rejects placeholder units and ambiguous local time contracts
+ok 155 - rejects placeholder units and ambiguous local time contracts
+  ---
+  duration_ms: 2.356887
+  ...
+# Subtest: requires explicit disjoint QC semantics and generates auditable QC counts
+ok 156 - requires explicit disjoint QC semantics and generates auditable QC counts
+  ---
+  duration_ms: 3.788974
+  ...
+# Subtest: confidence intervals require explicit semantics and generate asymmetric bounds safely
+ok 157 - confidence intervals require explicit semantics and generate asymmetric bounds safely
+  ---
+  duration_ms: 3.166128
+  ...
+# Subtest: geospatial generation enforces declared ranges, monotonic coordinates and dateline policy
+ok 158 - geospatial generation enforces declared ranges, monotonic coordinates and dateline policy
+  ---
+  duration_ms: 3.431037
+  ...
+# Subtest: direction routing refuses radian data for a degree-only native helper
+ok 159 - direction routing refuses radian data for a degree-only native helper
+  ---
+  duration_ms: 1.908813
+  ...
+# Subtest: generator rejects variable names that collide after sanitization
+ok 160 - generator rejects variable names that collide after sanitization
+  ---
+  duration_ms: 1.829552
+  ...
+# Subtest: end-to-end resolver consumes the task-level nested scientific data contract
+ok 161 - end-to-end resolver consumes the task-level nested scientific data contract
+  ---
+  duration_ms: 5.451351
+  ...
+# Subtest: publication contract controls physical canvas, layout, typography and honest verification state
+ok 162 - publication contract controls physical canvas, layout, typography and honest verification state
+  ---
+  duration_ms: 34.238516
+  ...
+# Subtest: Chinese output requires a runtime CJK font and never fabricates glyph verification
+ok 163 - Chinese output requires a runtime CJK font and never fabricates glyph verification
+  ---
+  duration_ms: 4.593256
+  ...
+# Subtest: English publication contracts apply the declared text interpreter after helper rendering
+ok 164 - English publication contracts apply the declared text interpreter after helper rendering
+  ---
+  duration_ms: 2.408691
+  ...
+# Subtest: interactive generation makes automatic, forced-headless and desktop-only behavior explicit
+ok 165 - interactive generation makes automatic, forced-headless and desktop-only behavior explicit
+  ---
+  duration_ms: 5.203428
+  ...
+# Subtest: field routing refuses color guesses and emits accessible centered diverging code
+ok 166 - field routing refuses color guesses and emits accessible centered diverging code
+  ---
+  duration_ms: 3.093279
+  ...
+# Subtest: generator rejects publication requests it cannot honor exactly
+ok 167 - generator rejects publication requests it cannot honor exactly
+  ---
+  duration_ms: 4.142677
+  ...
+# Subtest: release-aware SVG generation preserves format and records verified metadata
+ok 168 - release-aware SVG generation preserves format and records verified metadata
+  ---
+  duration_ms: 5.57683
+  ...
+# Subtest: generator preflight rejects unavailable runtimes and toolboxes before emitting code
+ok 169 - generator preflight rejects unavailable runtimes and toolboxes before emitting code
+  ---
+  duration_ms: 3.83328
+  ...
+# Subtest: generator rejects unsupported or incomplete format sets without substitution
+ok 170 - generator rejects unsupported or incomplete format sets without substitution
+  ---
+  duration_ms: 3.221305
+  ...
+# Subtest: routes supported Chinese scientific questions and coordinate aliases deterministically
+ok 171 - routes supported Chinese scientific questions and coordinate aliases deterministically
+  ---
+  duration_ms: 6.634088
+  ...
+# Subtest: rejects unknown, duplicated and pseudo-boolean coordinate declarations
+ok 172 - rejects unknown, duplicated and pseudo-boolean coordinate declarations
+  ---
+  duration_ms: 0.869247
+  ...
+# Subtest: rejects duplicate and conflicting plot aliases before normalization
+ok 173 - rejects duplicate and conflicting plot aliases before normalization
+  ---
+  duration_ms: 1.117223
+  ...
+# Subtest: rejects coerced, unsafe and structurally ambiguous dimension metadata
+ok 174 - rejects coerced, unsafe and structurally ambiguous dimension metadata
+  ---
+  duration_ms: 1.688071
+  ...
+# Subtest: rejects structured metadata and invalid generator identifiers instead of guessing
+ok 175 - rejects structured metadata and invalid generator identifiers instead of guessing
+  ---
+  duration_ms: 5.907033
+  ...
+# Subtest: accepts normalized coordinate objects and stops adversarial requests end to end
+ok 176 - accepts normalized coordinate objects and stops adversarial requests end to end
+  ---
+  duration_ms: 2.560467
+  ...
+# Subtest: closed-world plot routing blocks typos, nested semantic overrides and path escape
+ok 177 - closed-world plot routing blocks typos, nested semantic overrides and path escape
+  ---
+  duration_ms: 3.13971
+  ...
+# Subtest: closed-world plot routing enforces bounded arrays, strings and nesting
+ok 178 - closed-world plot routing enforces bounded arrays, strings and nesting
+  ---
+  duration_ms: 0.923114
+  ...
+# Subtest: exports the complete Chinese Octave and MATLAB plotting contract
+ok 179 - exports the complete Chinese Octave and MATLAB plotting contract
+  ---
+  duration_ms: 7.861987
+  ...
+# Subtest: builds deterministic default injection context without side effects
+ok 180 - builds deterministic default injection context without side effects
+  ---
+  duration_ms: 1.794787
+  ...
+# Subtest: injects safe caller paths and rejects multiline or escaping path fragments
+ok 181 - injects safe caller paths and rejects multiline or escaping path fragments
+  ---
+  duration_ms: 2.126141
+  ...
+# Subtest: routes an explicit Octave context to Octave templates without changing MATLAB defaults
+ok 182 - routes an explicit Octave context to Octave templates without changing MATLAB defaults
+  ---
+  duration_ms: 0.545834
+  ...
+# Subtest: injects a ready plot request through task route, plot route and generator
+ok 183 - injects a ready plot request through task route, plot route and generator
+  ---
+  duration_ms: 24.903506
+  ...
+# Subtest: injects unresolved and runtime-routed states without orphan code generation
+ok 184 - injects unresolved and runtime-routed states without orphan code generation
+  ---
+  duration_ms: 13.071514
+  ...
+# Subtest: instruction injection is closed-world and cannot change MATLAB authority from plotRequest
+ok 185 - instruction injection is closed-world and cannot change MATLAB authority from plotRequest
+  ---
+  duration_ms: 25.474129
+  ...
+# Subtest: parses, normalizes and compares MATLAB releases without promoting invalid input
+ok 186 - parses, normalizes and compares MATLAB releases without promoting invalid input
+  ---
+  duration_ms: 4.736359
+  ...
+# Subtest: matrix covers release range and requested MATLAB plotting APIs
+ok 187 - matrix covers release range and requested MATLAB plotting APIs
+  ---
+  duration_ms: 0.670633
+  ...
+# Subtest: enforces API introduction thresholds and explicit legacy fallbacks
+ok 188 - enforces API introduction thresholds and explicit legacy fallbacks
+  ---
+  duration_ms: 6.145207
+  ...
+# Subtest: selectMatlabApi remains consumable by the plot router
+ok 189 - selectMatlabApi remains consumable by the plot router
+  ---
+  duration_ms: 0.900465
+  ...
+# Subtest: selects release-aware export strategies without changing requested format
+ok 190 - selects release-aware export strategies without changing requested format
+  ---
+  duration_ms: 1.902496
+  ...
+# Subtest: normalizes common filename extensions before export routing
+ok 191 - normalizes common filename extensions before export routing
+  ---
+  duration_ms: 0.98901
+  ...
+# Subtest: resolves base and optional product dependencies accurately
+ok 192 - resolves base and optional product dependencies accurately
+  ---
+  duration_ms: 0.610294
+  ...
+# Subtest: returns capabilities, formats and products in one generator-facing plan
+ok 193 - returns capabilities, formats and products in one generator-facing plan
+  ---
+  duration_ms: 0.738893
+  ...
+# Subtest: returns a generator-facing publication plan with explicit SVG and sizing strategies
+ok 194 - returns a generator-facing publication plan with explicit SVG and sizing strategies
+  ---
+  duration_ms: 4.520603
+  ...
+# Subtest: resolves publication sizing across every known MATLAB release
+ok 195 - resolves publication sizing across every known MATLAB release
+  ---
+  duration_ms: 17.05811
+  ...
+# Subtest: accepts the task router publication contract shape without false conflicts
+ok 196 - accepts the task router publication contract shape without false conflicts
+  ---
+  duration_ms: 3.835388
+  ...
+# Subtest: gates batch, multipage PDF, SVG, and exact export geometry independently
+ok 197 - gates batch, multipage PDF, SVG, and exact export geometry independently
+  ---
+  duration_ms: 1.409719
+  ...
+# Subtest: requires CJK font probing, per-format glyph checks, and non-color accessibility
+ok 198 - requires CJK font probing, per-format glyph checks, and non-color accessibility
+  ---
+  duration_ms: 3.303039
+  ...
+# Subtest: selects release-aware desktop interactions and disables them in headless fallback
+ok 199 - selects release-aware desktop interactions and disables them in headless fallback
+  ---
+  duration_ms: 4.540915
+  ...
+# Subtest: fails explicit full-app export when exportapp or headless UI verification is unavailable
+ok 200 - fails explicit full-app export when exportapp or headless UI verification is unavailable
+  ---
+  duration_ms: 8.866973
+  ...
+# Subtest: resolves a complete scientific data contract with release-aware time behavior
+ok 201 - resolves a complete scientific data contract with release-aware time behavior
+  ---
+  duration_ms: 79.391117
+  ...
+# Subtest: selects timetable fallbacks consistently across every known release
+ok 202 - selects timetable fallbacks consistently across every known release
+  ---
+  duration_ms: 15.233803
+  ...
+# Subtest: accepts the task router scientific contract shape without false dimension conflicts
+ok 203 - accepts the task router scientific contract shape without false dimension conflicts
+  ---
+  duration_ms: 32.352067
+  ...
+# Subtest: rejects dimension and unit contradictions instead of reshaping or inferring conversion
+ok 204 - rejects dimension and unit contradictions instead of reshaping or inferring conversion
+  ---
+  duration_ms: 1.978997
+  ...
+# Subtest: requires valid timezone and explicit missing-value semantics
+ok 205 - requires valid timezone and explicit missing-value semantics
+  ---
+  duration_ms: 1.604562
+  ...
+# Subtest: makes QC toolbox requirements and uncertainty validity explicit
+ok 206 - makes QC toolbox requirements and uncertainty validity explicit
+  ---
+  duration_ms: 2.401574
+  ...
+# Subtest: preserves vertical coordinate meaning and rejects silent direction changes
+ok 207 - preserves vertical coordinate meaning and rejects silent direction changes
+  ---
+  duration_ms: 2.027254
+  ...
+# Subtest: accepts scalar capability, format and toolbox inputs from direct consumers
+ok 208 - accepts scalar capability, format and toolbox inputs from direct consumers
+  ---
+  duration_ms: 0.346716
+  ...
+# Subtest: rejects Octave resolution and renders explicit compatibility instructions
+ok 209 - rejects Octave resolution and renders explicit compatibility instructions
+  ---
+  duration_ms: 0.685341
+  ...
+# Subtest: all known releases produce monotonic capability and export plans
+ok 210 - all known releases produce monotonic capability and export plans
+  ---
+  duration_ms: 37.451328
+  ...
+# Subtest: task router and plot router consume every release without contract drift
+ok 211 - task router and plot router consume every release without contract drift
+  ---
+  duration_ms: 99.859117
+  ...
+# Subtest: routers reject invalid and future releases instead of generating latest-release code
+ok 212 - routers reject invalid and future releases instead of generating latest-release code
+  ---
+  duration_ms: 3.559182
+  ...
+# Subtest: datetime fallback remains explicit while audited generation uses a supported release
+ok 213 - datetime fallback remains explicit while audited generation uses a supported release
+  ---
+  duration_ms: 6.984633
+  ...
+# Subtest: gates the repository audited manifest helper independently from raw export APIs
+ok 214 - gates the repository audited manifest helper independently from raw export APIs
+  ---
+  duration_ms: 0.320283
+  ...
+# Subtest: keeps toolbox installation, license, function and invocation evidence separate
+ok 215 - keeps toolbox installation, license, function and invocation evidence separate
+  ---
+  duration_ms: 1.960759
+  ...
+# Subtest: resolves old and current MATLAB runtime/export plans across every audited release
+ok 216 - resolves old and current MATLAB runtime/export plans across every audited release
+  ---
+  duration_ms: 53.77315
+  ...
+# Subtest: rejects runtime identity, release and headless command contradictions
+ok 217 - rejects runtime identity, release and headless command contradictions
+  ---
+  duration_ms: 3.264788
+  ...
+# Subtest: keeps PNG, PDF and SVG export and manifest support distinct
+ok 218 - keeps PNG, PDF and SVG export and manifest support distinct
+  ---
+  duration_ms: 6.575859
+  ...
+# Subtest: requires JVM and honest machine-verifiable manifest evidence
+ok 219 - requires JVM and honest machine-verifiable manifest evidence
+  ---
+  duration_ms: 2.573077
+  ...
+# Subtest: records optional toolbox installation natively without overstating license or invocation evidence
+ok 220 - records optional toolbox installation natively without overstating license or invocation evidence
+  ---
+  duration_ms: 1.056257
+  ...
+# Subtest: rejects inherited object keys as capabilities, formats and toolbox ids
+ok 221 - rejects inherited object keys as capabilities, formats and toolbox ids
+  ---
+  duration_ms: 0.633788
+  ...
+# Subtest: rejects spoofed executables and unsupported release evidence sources
+ok 222 - rejects spoofed executables and unsupported release evidence sources
+  ---
+  duration_ms: 2.341191
+  ...
+# Subtest: rejects command-line tricks that hide MATLAB failures
+ok 223 - rejects command-line tricks that hide MATLAB failures
+  ---
+  duration_ms: 3.180932
+  ...
+# Subtest: rejects orphan required functions instead of silently inferring a toolbox declaration
+ok 224 - rejects orphan required functions instead of silently inferring a toolbox declaration
+  ---
+  duration_ms: 1.080355
+  ...
+# Subtest: does not overstate artifact or native manifest toolbox verification
+ok 225 - does not overstate artifact or native manifest toolbox verification
+  ---
+  duration_ms: 2.299898
+  ...
+# Subtest: exposes runtime/export compatibility through the generator-facing plan
+ok 226 - exposes runtime/export compatibility through the generator-facing plan
+  ---
+  duration_ms: 0.980153
+  ...
+# Subtest: defines R2020a, R2024b and production MATLAB CI lanes with archival evidence
+ok 227 - defines R2020a, R2024b and production MATLAB CI lanes with archival evidence
+  ---
+  duration_ms: 1.051325
+  ...
+# Subtest: classifies MATLAB CI evidence without conflating unavailable, skipped, failed and passed
+ok 228 - classifies MATLAB CI evidence without conflating unavailable, skipped, failed and passed
+  ---
+  duration_ms: 0.784149
+  ...
+# Subtest: registers the MATLAB task route in the runtime API
+ok 229 - registers the MATLAB task route in the runtime API
+  ---
+  duration_ms: 1.926262
+  ...
+# Subtest: runtime composition exposes release-aware exports and manifest without a plot generator
+ok 230 - runtime composition exposes release-aware exports and manifest without a plot generator
+  ---
+  duration_ms: 7.695743
+  ...
+# Subtest: production wiring keeps MATLAB evidence external and rejects Octave relabeling
+ok 231 - production wiring keeps MATLAB evidence external and rejects Octave relabeling
+  ---
+  duration_ms: 0.758157
+  ...
+# Subtest: runtime composition returns stable contracts for malformed JSON shapes
+ok 232 - runtime composition returns stable contracts for malformed JSON shapes
+  ---
+  duration_ms: 21.427782
+  ...
+# Subtest: end-to-end contract reaches template, release matrix and quality gate
+ok 233 - end-to-end contract reaches template, release matrix and quality gate
+  ---
+  duration_ms: 81.335708
+  ...
+# Subtest: runtime composition canonicalizes Chinese and normalized coordinate contracts once
+ok 234 - runtime composition canonicalizes Chinese and normalized coordinate contracts once
+  ---
+  duration_ms: 9.495934
+  ...
+# Subtest: runtime composition forwards interactive tasks into the native data-tip template
+ok 235 - runtime composition forwards interactive tasks into the native data-tip template
+  ---
+  duration_ms: 6.070346
+  ...
+# Subtest: runtime composition preserves interactive confidence-bound metadata
+ok 236 - runtime composition preserves interactive confidence-bound metadata
+  ---
+  duration_ms: 5.302288
+  ...
+# Subtest: runtime composition blocks incomplete scientific semantics before plot generation
+ok 237 - runtime composition blocks incomplete scientific semantics before plot generation
+  ---
+  duration_ms: 5.783202
+  ...
+# Subtest: runtime composition blocks incomplete publication and headless semantics before generation
+ok 238 - runtime composition blocks incomplete publication and headless semantics before generation
+  ---
+  duration_ms: 1.963525
+  ...
+# Subtest: serves the composed MATLAB route through the signed runtime HTTP endpoint
+ok 239 - serves the composed MATLAB route through the signed runtime HTTP endpoint
+  ---
+  duration_ms: 1500.264807
+  ...
+# Subtest: keeps legacy release fallbacks visible while blocking unsupported arguments-based generation
+ok 240 - keeps legacy release fallbacks visible while blocking unsupported arguments-based generation
+  ---
+  duration_ms: 3.913169
+  ...
+# Subtest: routes explicit MATLAB-first tasks with release, toolbox and output contracts
+ok 241 - routes explicit MATLAB-first tasks with release, toolbox and output contracts
+  ---
+  duration_ms: 11.068521
+  ...
+# Subtest: accepts a complete publication, accessibility and dual-interaction contract
+ok 242 - accepts a complete publication, accessibility and dual-interaction contract
+  ---
+  duration_ms: 28.586664
+  ...
+# Subtest: blocks incomplete layout, typography, color, clipping, Chinese, accessibility and headless contracts
+ok 243 - blocks incomplete layout, typography, color, clipping, Chinese, accessibility and headless contracts
+  ---
+  duration_ms: 2.87694
+  ...
+# Subtest: normalizes publication aliases without claiming completed visual checks
+ok 244 - normalizes publication aliases without claiming completed visual checks
+  ---
+  duration_ms: 0.722862
+  ...
+# Subtest: blocks publication formats and headless APIs that drift from task and release contracts
+ok 245 - blocks publication formats and headless APIs that drift from task and release contracts
+  ---
+  duration_ms: 5.102492
+  ...
+# Subtest: gates unattended MATLAB commands by release and preserves legacy failure status
+ok 246 - gates unattended MATLAB commands by release and preserves legacy failure status
+  ---
+  duration_ms: 5.517852
+  ...
+# Subtest: requires per-format export APIs when a release mixes exportgraphics and print
+ok 247 - requires per-format export APIs when a release mixes exportgraphics and print
+  ---
+  duration_ms: 3.147038
+  ...
+# Subtest: normalizes and gates the schema-version-2 artifact manifest contract
+ok 248 - normalizes and gates the schema-version-2 artifact manifest contract
+  ---
+  duration_ms: 1.903919
+  ...
+# Subtest: rejects non-object payloads and contradictory routing aliases
+ok 249 - rejects non-object payloads and contradictory routing aliases
+  ---
+  duration_ms: 3.734517
+  ...
+# Subtest: rejects duplicate contract aliases and split metadata ownership
+ok 250 - rejects duplicate contract aliases and split metadata ownership
+  ---
+  duration_ms: 3.101824
+  ...
+# Subtest: rejects weakly typed availability and manifest booleans
+ok 251 - rejects weakly typed availability and manifest booleans
+  ---
+  duration_ms: 10.00907
+  ...
+# Subtest: canonicalizes duplicate formats and blocks URI or control-character manifest paths
+ok 252 - canonicalizes duplicate formats and blocks URI or control-character manifest paths
+  ---
+  duration_ms: 2.975952
+  ...
+# Subtest: accepts a complete machine-readable scientific data contract
+ok 253 - accepts a complete machine-readable scientific data contract
+  ---
+  duration_ms: 2.433806
+  ...
+# Subtest: blocks incomplete or contradictory dimensions, units, timezone, QC, uncertainty and coordinate direction
+ok 254 - blocks incomplete or contradictory dimensions, units, timezone, QC, uncertainty and coordinate direction
+  ---
+  duration_ms: 1.366283
+  ...
+# Subtest: requires explicit uncertainty unit conversion provenance
+ok 255 - requires explicit uncertainty unit conversion provenance
+  ---
+  duration_ms: 0.48628
+  ...
+# Subtest: never silently substitutes Octave for an unavailable MATLAB runtime
+ok 256 - never silently substitutes Octave for an unavailable MATLAB runtime
+  ---
+  duration_ms: 0.866069
+  ...
+# Subtest: routes explicit Octave work away from MATLAB generation
+ok 257 - routes explicit Octave work away from MATLAB generation
+  ---
+  duration_ms: 0.466824
+  ...
+# Subtest: returns stable states for unresolved metadata, release, toolbox and output failures
+ok 258 - returns stable states for unresolved metadata, release, toolbox and output failures
+  ---
+  duration_ms: 4.730279
+  ...
+# Subtest: documents the routing contract in prompts and versioned skill core
+ok 259 - documents the routing contract in prompts and versioned skill core
+  ---
+  duration_ms: 1.149385
+  ...
+# Subtest: enforces closed-world fields and blocks nested runtime or semantic overrides
+ok 260 - enforces closed-world fields and blocks nested runtime or semantic overrides
+  ---
+  duration_ms: 1.456834
+  ...
+# Subtest: rejects duplicate runtime task and release aliases even when values agree
+ok 261 - rejects duplicate runtime task and release aliases even when values agree
+  ---
+  duration_ms: 0.878194
+  ...
+# Subtest: bounds untrusted JSON depth, arrays, strings, accessors and dangerous keys
+ok 262 - bounds untrusted JSON depth, arrays, strings, accessors and dangerous keys
+  ---
+  duration_ms: 1.399232
+  ...
+# Subtest: rejects additional manifest traversal spellings without weakening MATLAB authority
+ok 263 - rejects additional manifest traversal spellings without weakening MATLAB authority
+  ---
+  duration_ms: 2.369107
+  ...
+# Subtest: signs short-lived owner-bound MCP tenant claims
+ok 264 - signs short-lived owner-bound MCP tenant claims
+  ---
+  duration_ms: 3.132523
+  ...
+# Subtest: rejects tampered and expired MCP tenant claims
+ok 265 - rejects tampered and expired MCP tenant claims
+  ---
+  duration_ms: 1.581209
+  ...
+# Subtest: rejects charts followed only by captions and generic impact prose
+ok 266 - rejects charts followed only by captions and generic impact prose
+  ---
+  duration_ms: 16.397706
+  ...
+# Subtest: accepts linked five-part explanations and quantified reality framing
+ok 267 - accepts linked five-part explanations and quantified reality framing
+  ---
+  duration_ms: 7.612992
+  ...
+# Subtest: rejects qualitative mechanism prose without physical diagnostics
+ok 268 - rejects qualitative mechanism prose without physical diagnostics
+  ---
+  duration_ms: 46.068382
+  ...
+# Subtest: accepts a reproducible scale-aware physical mechanism section
+ok 269 - accepts a reproducible scale-aware physical mechanism section
+  ---
+  duration_ms: 7.473772
+  ...
+# Subtest: accepts complete standalone point-temperature interaction HTML
+ok 270 - accepts complete standalone point-temperature interaction HTML
+  ---
+  duration_ms: 38.607853
+  ...
+# Subtest: rejects duplicate, missing and mismatched stable observation identities
+ok 271 - rejects duplicate, missing and mismatched stable observation identities
+  ---
+  duration_ms: 8.082054
+  ...
+# Subtest: reads HTML from a file path
+ok 272 - reads HTML from a file path
+  ---
+  duration_ms: 2.607257
+  ...
+# Subtest: rejects rendered and embedded point count mismatches
+ok 273 - rejects rendered and embedded point count mismatches
+  ---
+  duration_ms: 1.446247
+  ...
+# Subtest: rejects points without complete hover and focus support
+ok 274 - rejects points without complete hover and focus support
+  ---
+  duration_ms: 1.614926
+  ...
+# Subtest: does not accept interaction claims hidden in comments or inert strings
+ok 275 - does not accept interaction claims hidden in comments or inert strings
+  ---
+  duration_ms: 1.424501
+  ...
+# Subtest: rejects incomplete tooltip data fields for any point
+ok 276 - rejects incomplete tooltip data fields for any point
+  ---
+  duration_ms: 1.795726
+  ...
+# Subtest: requires a legend containing every data series
+ok 277 - requires a legend containing every data series
+  ---
+  duration_ms: 4.208192
+  ...
+# Subtest: rejects remote, relative and runtime network resources
+ok 278 - rejects remote, relative and runtime network resources
+  ---
+  duration_ms: 2.45831
+  ...
+# Subtest: rejects blob and javascript resource URLs
+ok 279 - rejects blob and javascript resource URLs
+  ---
+  duration_ms: 1.828822
+  ...
+# Subtest: ignores network and CSS resource claims that only appear in comments or strings
+ok 280 - ignores network and CSS resource claims that only appear in comments or strings
+  ---
+  duration_ms: 1.165883
+  ...
+# Subtest: returns composable checks and flattened violations without throwing on missing HTML
+ok 281 - returns composable checks and flattened violations without throwing on missing HTML
+  ---
+  duration_ms: 1.16302
+  ...
+# Subtest: requires hover and focus tooltips for every enumerable temperature point
+ok 282 - requires hover and focus tooltips for every enumerable temperature point
+  ---
+  duration_ms: 1.562186
+  ...
+# Subtest: defines every required point-temperature tooltip field
+ok 283 - defines every required point-temperature tooltip field
+  ---
+  duration_ms: 1.695973
+  ...
+# Subtest: preserves identity through ordering and owns callback cleanup
+ok 284 - preserves identity through ordering and owns callback cleanup
+  ---
+  duration_ms: 0.381968
+  ...
+# Subtest: requires legends for all multi-series charts
+ok 285 - requires legends for all multi-series charts
+  ---
+  duration_ms: 0.342744
+  ...
+# Subtest: requires a self-contained interactive HTML alongside static exports
+ok 286 - requires a self-contained interactive HTML alongside static exports
+  ---
+  duration_ms: 1.871476
+  ...
+# Subtest: exposes deterministic side-effect-free integration instructions
+ok 287 - exposes deterministic side-effect-free integration instructions
+  ---
+  duration_ms: 0.270947
+  ...
+# Subtest: rejects repeated charts without scientific metadata or family coverage
+ok 288 - rejects repeated charts without scientific metadata or family coverage
+  ---
+  duration_ms: 16.792571
+  ...
+# Subtest: accepts a diverse, sourced and scientifically annotated chart programme
+ok 289 - accepts a diverse, sourced and scientifically annotated chart programme
+  ---
+  duration_ms: 5.971922
+  ...
+# Subtest: detects an interrupted substantive turn behind an empty interrupted tail
+ok 290 - detects an interrupted substantive turn behind an empty interrupted tail
+  ---
+  duration_ms: 2.886814
+  ...
+# Subtest: does not request continuation after a later completed turn
+ok 291 - does not request continuation after a later completed turn
+  ---
+  duration_ms: 0.677198
+  ...
+# Subtest: recognizes persisted App Server thread states that require resume
+ok 292 - recognizes persisted App Server thread states that require resume
+  ---
+  duration_ms: 1.657055
+  ...
+# Subtest: normalizes string and object thread status values
+ok 293 - normalizes string and object thread status values
+  ---
+  duration_ms: 0.351278
+  ...
+# Subtest: rejects shallow non-wind numerical chapters
+ok 294 - rejects shallow non-wind numerical chapters
+  ---
+  duration_ms: 16.584752
+  ...
+# Subtest: keeps nested subsections inside their parent quality section
+ok 295 - keeps nested subsections inside their parent quality section
+  ---
+  duration_ms: 4.829458
+  ...
+# Subtest: rejects a wind chapter that only reports a regional mean
+ok 296 - rejects a wind chapter that only reports a regional mean
+  ---
+  duration_ms: 14.705774
+  ...
+# Subtest: accepts explicit wind-data unavailability with a documented reason
+ok 297 - accepts explicit wind-data unavailability with a documented reason
+  ---
+  duration_ms: 3.763958
+  ...
+1..297
+# tests 297
+# suites 0
+# pass 297
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3399.26345

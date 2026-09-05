@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-05T12:58:20Z",
+  "status": "runtime_pending",
+  "score": 60,
+  "maximum_score": 100,
+  "gates": [
+    {
+      "id": "fixture_science",
+      "weight": 20,
+      "status": "passed",
+      "trusted_evidence": [
+        "codex-runtime/matlab/evals/fixtures/crossed_time_depth_temperature.json",
+        "codex-runtime/matlab/evals/fixtures/paired_observation_model.json",
+        "codex-runtime/matlab/evals/fixtures/repeat_cast_salinity_profiles.json"
+      ]
+    },
+    {
+      "id": "scientific_contract",
+      "weight": 15,
+      "status": "passed",
+      "trusted_evidence": [
+        "evaluate.py:validate_fixture",
+        "evaluate.py:validate_crossed_design"
+      ]
+    },
+    {
+      "id": "anti_cheat",
+      "weight": 15,
+      "status": "passed",
+      "trusted_evidence": [
+        "anti-cheat-rules.json",
+        "evaluate.py:strip_matlab_comments_and_strings"
+      ]
+    },
+    {
+      "id": "hash_freeze",
+      "weight": 10,
+      "status": "pending",
+      "trusted_evidence": []
+    },
+    {
+      "id": "framework_tests",
+      "weight": 10,
+      "status": "passed",
+      "trusted_evidence": [
+        "codex-runtime/matlab/evals/tests/test_evaluate.py"
+      ]
+    },
+    {
+      "id": "matlab_runtime",
+      "weight": 20,
+      "status": "pending",
+      "trusted_evidence": []
+    },
+    {
+      "id": "artifact_visual_audit",
+      "weight": 10,
+      "status": "pending",
+      "trusted_evidence": []
+    }
+  ],
+  "fixture_results": [
+    {
+      "id": "crossed-time-depth-temperature",
+      "kind": "time_depth_grid",
+      "status": "passed",
+      "time_count": 6,
+      "depth_count": 4,
+      "pair_count": 24,
+      "missing_count": 1
+    },
+    {
+      "id": "paired-observation-model",
+      "kind": "paired_records",
+      "status": "passed",
+      "time_count": 4,
+      "depth_count": 3,
+      "pair_count": 12,
+      "missing_count": 1
+    },
+    {
+      "id": "repeat-cast-salinity-profiles",
+      "kind": "repeat_profiles",
+      "status": "passed",
+      "time_count": 3,
+      "depth_count": 6,
+      "pair_count": 18,
+      "missing_count": 1
+    }
+  ],
+  "runtime": {
+    "status": "pending",
+    "matlab_executable": null
+  },
+  "visual_audit": {
+    "status": "pending",
+    "reason": "MATLAB runtime has not run"
+  },
+  "anti_cheat": {
+    "status": "passed",
+    "source_scan": {
+      "required_tokens": [
+        "jsondecode",
+        "datetime",
+        "TimeZone",
+        "oi_plot_hovmoller",
+        "oi_plot_profile",
+        "oi_plot_comparison",
+        "oi_export_figure",
+        "oi_write_manifest"
+      ],
+      "forbidden_tokens_absent": true
+    },
+    "candidate_claims_ignored": [
+      "score",
+      "status",
+      "passed",
+      "gates"
+    ]
+  },
+  "freeze": {
+    "status": "pending",
+    "reason": "inventory not generated"
+  },
+  "tests": {
+    "tests_run": 10,
+    "output": [
+      "test_comments_and_strings_do_not_satisfy_static_tokens (test_evaluate.AntiCheatTests) ... ok",
+      "test_invalid_artifact_signature_is_rejected (test_evaluate.AntiCheatTests) ... ok",
+      "test_nested_score_claim_is_not_a_scoring_input (test_evaluate.AntiCheatTests) ... ok",
+      "test_rubric_weights_and_result_shape_are_strict (test_evaluate.AntiCheatTests) ... ok",
+      "test_all_repository_fixtures_pass (test_evaluate.FixtureValidationTests) ... ok",
+      "test_duplicate_stable_ids_are_rejected (test_evaluate.FixtureValidationTests) ... ok",
+      "test_time_depth_confounding_is_rejected (test_evaluate.FixtureValidationTests) ... ok",
+      "test_uncertainty_mask_must_align (test_evaluate.FixtureValidationTests) ... ok",
+      "test_freeze_inventory_detects_tampering (test_evaluate.FreezeTests) ... ok",
+      "test_inventory_excludes_itself_and_caches (test_evaluate.FreezeTests) ... ok",
+      "",
+      "----------------------------------------------------------------------",
+      "Ran 10 tests in 0.018s",
+      "",
+      "OK"
+    ]
+  },
+  "remaining_runtime_gates": [
+    "hash_freeze",
+    "matlab_runtime",
+    "artifact_visual_audit"
+  ]
+}

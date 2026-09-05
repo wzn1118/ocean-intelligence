@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "maximum_score": 100,
+  "score_policy": "Only evaluator-owned top-level gate results contribute to score.",
+  "gates": [
+    {"id":"fixture_science","weight":20,"layer":"static","required":true},
+    {"id":"scientific_contract","weight":15,"layer":"static","required":true},
+    {"id":"anti_cheat","weight":15,"layer":"static","required":true},
+    {"id":"hash_freeze","weight":10,"layer":"static","required":true},
+    {"id":"framework_tests","weight":10,"layer":"static","required":true},
+    {"id":"matlab_runtime","weight":20,"layer":"matlab","required":true},
+    {"id":"artifact_visual_audit","weight":10,"layer":"matlab_visual","required":true}
+  ],
+  "status_policy": {
+    "passed": "All gates pass and score is 100.",
+    "runtime_pending": "Every static gate passes, but one or more real MATLAB or visual gates are pending.",
+    "failed": "Any required static gate fails, or an attempted MATLAB gate fails."
+  }
+}

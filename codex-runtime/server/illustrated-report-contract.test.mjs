@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
-import { createIllustratedReportContract, FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, illustratedReportInstructions } from './illustrated-report-contract.mjs';
+import { createIllustratedReportContract, FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, illustratedReportInstructions, inspectIllustratedReportEvidence } from './illustrated-report-contract.mjs';
 import { OCEAN_REPORT_SPEC } from './ocean-report-spec.mjs';
 import { UNIVERSAL_OCEAN_REPORT_MODULES, UNIVERSAL_OCEAN_REPORT_SPEC } from './beibu-gulf-report-spec.mjs';
 import { WIND_REPORT_SPEC } from './wind-report-spec.mjs';
@@ -41,6 +45,8 @@ test('creates an adaptive illustrated report contract', () => {
   assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /全变量数值与专项分析加强 Spec/u);
   assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /物理海洋学高级推理 Spec/u);
   assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /全报告专业图表与可视化规范/u);
+  assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /MathWorks MATLAB 权威制图与证据流程/u);
+  assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /runtime_pending\/static-only/u);
   assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /海洋报告自然语言与去模板化编辑规范/u);
   assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /禁止非学术单字动词/u);
   assert.match(FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT, /图表物理解释与现实意义强制规范/u);
@@ -60,6 +66,9 @@ test('creates an adaptive illustrated report contract', () => {
   assert.match(PHYSICAL_OCEANOGRAPHY_SPEC, /Stewart 2008/u);
   assert.match(PHYSICAL_OCEANOGRAPHY_SPEC, /教材引用与数据证据引用分栏呈现/u);
   assert.match(OCEAN_REPORT_SPEC, /最终质量闸门/u);
+  assert.match(instructions, /only a real MathWorks MATLAB run/u);
+  assert.match(instructions, /data-claim-id/u);
+  assert.match(instructions, /generated_at/u);
 });
 
 test('injects the complete universal 15-module report profile for every report topic', () => {
@@ -80,3 +89,77 @@ test('injects the complete universal 15-module report profile for every report t
   assert.match(instructions, /新闻页面/u);
   assert.match(illustratedReportInstructions(createIllustratedReportContract('/tmp/generated', 'atlantic-report-test')), /15 个强制一级章节/u);
 });
+
+test('audits conclusion evidence, limitations, figure links, hashes, and manifest freshness', () => {
+  const fixture = createReportEvidenceFixture();
+  const result = inspectIllustratedReportEvidence(fixture);
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.claimsOk, true);
+  assert.equal(result.figureLinksOk, true);
+  assert.equal(result.artifactsOk, true);
+  assert.equal(result.manifestFreshnessOk, true);
+});
+
+test('rejects comment-forged claims, fake hashes, and stale regenerated manifests', () => {
+  const fixture = createReportEvidenceFixture();
+  writeFileSync(fixture.htmlPath, '<!-- <p data-claim-id="fake" data-evidence-ids="fig-1" data-limitations="fake limitation">fake</p> -->');
+  fixture.manifest.generated_at = new Date().toISOString();
+  writeFileSync(fixture.manifestPath, JSON.stringify(fixture.manifest));
+  const forgedClaim = inspectIllustratedReportEvidence(fixture);
+  assert.equal(forgedClaim.claimCount, 0);
+  assert.equal(forgedClaim.claimsOk, false);
+
+  const valid = createReportEvidenceFixture();
+  writeFileSync(valid.artifactPath, 'tampered-artifact');
+  const fakeHash = inspectIllustratedReportEvidence(valid);
+  assert.equal(fakeHash.artifactsOk, false);
+
+  valid.manifest.figures[0].exports.png.bytes = statSync(valid.artifactPath).size;
+  valid.manifest.figures[0].exports.png.sha256 = fileHash(valid.artifactPath);
+  valid.manifest.generated_at = new Date(statSync(valid.artifactPath).mtimeMs - 60_000).toISOString();
+  writeFileSync(valid.manifestPath, JSON.stringify(valid.manifest));
+  const stale = inspectIllustratedReportEvidence({ ...valid, freshnessToleranceMs: 1 });
+  assert.equal(stale.artifactsOk, true);
+  assert.equal(stale.manifestFreshnessOk, false);
+  assert.match(stale.freshness.violations.join('\n'), /newer_than_generated_at/u);
+});
+
+function createReportEvidenceFixture() {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'illustrated-report-evidence-'));
+  const htmlPath = path.join(root, 'report.html');
+  const markdownPath = path.join(root, 'report.md');
+  const artifactPath = path.join(root, 'figure.png');
+  const manifestPath = path.join(root, 'figures.json');
+  writeFileSync(htmlPath, [
+    '<html><body>',
+    '<p data-claim-id="claim-1" data-evidence-ids="fig-1" data-limitations="Only the observed UTC window is supported.">SST increased.</p>',
+    '<figure data-figure-id="fig-1" data-chart-type="line" data-chart-family="temporal" data-source="fixture">',
+    '<figcaption>SST in degrees Celsius over the observed UTC window; n=24 after QC, supporting claim-1 while not establishing a long-term trend.</figcaption>',
+    '</figure>',
+    '</body></html>',
+  ].join(''));
+  writeFileSync(markdownPath, '# Report\n\nConclusion with evidence and explicit limitations.');
+  writeFileSync(artifactPath, 'real-artifact-bytes-for-contract-test');
+  const manifest = {
+    schema_version: 2,
+    generated_at: new Date().toISOString(),
+    generator: 'report evidence fixture',
+    figures: [{
+      id: 'fig-1',
+      exports: {
+        png: {
+          file: path.basename(artifactPath),
+          bytes: statSync(artifactPath).size,
+          sha256: fileHash(artifactPath),
+        },
+      },
+    }],
+  };
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  return { root, htmlPath, markdownPath, artifactPath, manifestPath, outputDirectory: root, manifest };
+}
+
+function fileHash(file) {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}

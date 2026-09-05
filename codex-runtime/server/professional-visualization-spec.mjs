@@ -37,4 +37,14 @@ export const PROFESSIONAL_VISUALIZATION_SPEC = String.raw`
 - 调用 ocean_physics_diagnostics；除基础旋转/尺度分析外，输入允许时使用沿岸上升流输运、Eady增长率、波流相互作用、混合层完整收支。
 - 所有回归/相关必须同时给样本量、效应大小和限制；短序列不得声称长期趋势，相关不得写成因果。
 - 九区对比优先使用同色标小多图或九区热图，色标必须统一；时间序列统一UTC并明确本地时间换算。
+
+五、MathWorks MATLAB 权威制图与证据流程
+- MATLAB任务必须由真实MathWorks MATLAB执行；GNU Octave只能作为明确分离的兼容性结果，不得用于证明MATLAB运行、渲染、字体、交互、导出或视觉检查通过。
+- 无MATLAB时状态必须保持runtime_pending/static-only，保留可复现的 matlab -batch 命令、目标release、工具箱与license输入、CI环境、期望PNG/PDF/SVG/manifest产物和非零退出/缺件/哈希不符/视觉失败条件，禁止自评分为通过。
+- 中文图件使用可验证的CJK字体，显式设置白色背景、固定画布、字号、线宽、刻度方向、色标范围和导出分辨率。连续变量采用感知均匀色图，禁止jet/rainbow作为默认色图。
+- 时间序列必须显示UTC、单位、有效窗口和不确定性；地图与二维场必须核对纬度方向、矩阵维度、掩膜、统一CLim、矢量抽稀和参考箭头；剖面深度轴向下增加。
+- 每张图同时生成机器可读manifest，至少包含figure id、标题、chart type/family、变量、单位、来源、有效时间、样本量、QC、生成脚本、MATLAB release/toolbox/license证据、运行命令、输出文件、字节数和SHA-256。
+- PNG用于HTML、Markdown和PPT中的中文可靠呈现；仅在字体嵌入和文本保持通过检查后交付矢量PDF/SVG。不得把乱码、裁切、低分辨率、空白或重复图计入视觉数量。
+- 脚本、报告和图形冻结后最后生成manifest；generated_at与manifest文件时间不得早于任何被引用文件。修改任何脚本、报告或图形后必须重新运行MATLAB并重建全部哈希，禁止沿用陈旧哈希。
+- 注释、字符串、隐藏HTML、自述“已检查”、伪报告、伪哈希和候选自评分都不是证据；评分器必须重新读取文件、核对格式/尺寸/字节/SHA-256/新鲜度，并将结论逐条绑定到证据、限制和对应图件。
 `;

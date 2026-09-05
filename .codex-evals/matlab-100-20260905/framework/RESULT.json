@@ -1,0 +1,46 @@
+{
+  "scope": "framework",
+  "status": "runtime_pending",
+  "tests": [
+    {"name":"framework-unit","command":"python3 -m unittest discover -s codex-runtime/matlab/evals/tests -p 'test_*.py' -v","status":"passed","count":10},
+    {"name":"python-syntax","command":"python3 -m py_compile codex-runtime/matlab/evals/evaluate.py codex-runtime/matlab/evals/tests/test_evaluate.py","status":"passed"},
+    {"name":"skill-structure","command":"python3 /root/.codex/skills/.system/skill-creator/scripts/quick_validate.py /root/.codex/skills/matlab-scientific-plotting","status":"passed"},
+    {"name":"skill-static-qa","command":"python3 /root/.codex/skills/matlab-scientific-plotting/scripts/validate-matlab-skill.py","status":"passed"},
+    {"name":"skill-static-smoke","command":"bash /root/.codex/skills/matlab-scientific-plotting/scripts/static-smoke-test.sh","status":"passed","matlab_rendering_verified":false},
+    {"name":"node-server-all","command":"node --test codex-runtime/server/*.test.mjs","status":"passed","count":297},
+    {"name":"node-runtime-wiring","command":"node --test codex-runtime/server/matlab-runtime-wiring.test.mjs","status":"passed","count":12},
+    {"name":"scope-diff-check","command":"git diff --check -- .codex-evals/matlab-100-20260905/framework codex-runtime/matlab/evals","status":"passed"},
+    {"name":"matlab-runtime-check","command":"bash /root/.codex/skills/matlab-scientific-plotting/scripts/run-matlab-batch.sh --check-only","status":"runtime_pending","exit_code":127,"reason":"matlab executable not found on PATH"},
+    {"name":"adjacent-matlab-assets-static","command":"python3 codex-runtime/matlab/tests/validate_assets.py","status":"failed_outside_scope","failures":["asset lacks static contract: oi_plot_time_series.m","full100_export_contracts.m: MATLAB test source must remain ASCII"]}
+  ],
+  "files_changed": [
+    ".codex-evals/matlab-100-20260905/framework/REPORT.md",
+    ".codex-evals/matlab-100-20260905/framework/RESULT.json",
+    ".codex-evals/matlab-100-20260905/framework/DONE",
+    ".codex-evals/matlab-100-20260905/framework/SOURCE_SHA256SUMS.txt",
+    ".codex-evals/matlab-100-20260905/framework/matlab-assets-static.log",
+    ".codex-evals/matlab-100-20260905/framework/node-runtime-wiring.log",
+    ".codex-evals/matlab-100-20260905/framework/node-server-tests.log",
+    ".codex-evals/matlab-100-20260905/framework/static-evaluation.pre-freeze.json",
+    "codex-runtime/matlab/evals/README.md",
+    "codex-runtime/matlab/evals/anti-cheat-rules.json",
+    "codex-runtime/matlab/evals/ci-inputs.json",
+    "codex-runtime/matlab/evals/evaluate.py",
+    "codex-runtime/matlab/evals/fixtures/crossed_time_depth_temperature.json",
+    "codex-runtime/matlab/evals/fixtures/paired_observation_model.json",
+    "codex-runtime/matlab/evals/fixtures/repeat_cast_salinity_profiles.json",
+    "codex-runtime/matlab/evals/freeze-order.json",
+    "codex-runtime/matlab/evals/rubric.json",
+    "codex-runtime/matlab/evals/run_matlab_gate.m",
+    "codex-runtime/matlab/evals/score-schema.json",
+    "codex-runtime/matlab/evals/tests/test_evaluate.py",
+    "codex-runtime/matlab/evals/visual-audit.schema.json"
+  ],
+  "remaining_runtime_gates": [
+    "Execute run_matlab_gate.m with a real MathWorks matlab -batch process in a fresh output directory.",
+    "Verify freshly generated PNG, PDF, SVG, figures.json, runtime metadata, exit code, dimensions, bytes, and SHA-256.",
+    "Inspect CJK and mathematical glyphs, PDF/SVG fonts, clipping, layout, color accessibility, DataTip, Brush, lifecycle, and headless fallback through a trusted hash-bound visual audit.",
+    "Resolve the separate out-of-scope codex-runtime/matlab/tests/validate_assets.py failures before the repository-wide final audit."
+  ],
+  "score_claim": 70
+}

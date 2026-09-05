@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "id": "repeat-cast-salinity-profiles",
+  "title": "Synthetic repeat-cast salinity profiles",
+  "kind": "repeat_profiles",
+  "synthetic": true,
+  "provenance": {
+    "method": "deterministic_formula",
+    "formula": "salinity = 32.4 + 0.018*depth + cast_offset + 0.05*cos(depth/30)",
+    "seed": null,
+    "purpose": "Evaluation fixture only; not an observed ocean dataset"
+  },
+  "coordinates": {
+    "time": {
+      "values": [
+        "2026-08-10T06:00:00Z",
+        "2026-08-12T06:00:00Z",
+        "2026-08-14T06:00:00Z"
+      ],
+      "timezone": "UTC",
+      "direction": "increasing",
+      "unit": "datetime"
+    },
+    "depth": {
+      "values": [0, 20, 40, 60, 80, 100],
+      "direction": "positive_down",
+      "reference": "synthetic sea surface",
+      "unit": "m"
+    }
+  },
+  "variables": {
+    "salinity": {
+      "values": [
+        [32.37, 32.45, 32.52],
+        [32.769, 32.849, 32.919],
+        [33.111, 33.191, 33.261],
+        [33.459, 33.539, 33.609],
+        [33.857, null, 34.007],
+        [34.223, 34.303, 34.373]
+      ],
+      "dimension_order": ["depth", "time"],
+      "unit": "g kg-1",
+      "missing_representation": "null_to_NaN",
+      "missing_policy": "preserve"
+    },
+    "salinity_standard_uncertainty": {
+      "values": [
+        [0.015, 0.015, 0.015],
+        [0.015, 0.015, 0.015],
+        [0.018, 0.018, 0.018],
+        [0.018, 0.018, 0.018],
+        [0.02, null, 0.02],
+        [0.02, 0.02, 0.02]
+      ],
+      "dimension_order": ["depth", "time"],
+      "unit": "g kg-1",
+      "type": "standard_uncertainty"
+    },
+    "qc": {
+      "values": [
+        ["good", "good", "good"],
+        ["good", "good", "good"],
+        ["good", "good", "good"],
+        ["good", "good", "good"],
+        ["good", "missing", "suspect"],
+        ["good", "good", "good"]
+      ],
+      "dimension_order": ["depth", "time"],
+      "policy": "preserve"
+    }
+  },
+  "design": {
+    "time_depth_relationship": "fully_crossed",
+    "expected_pair_count": 18,
+    "scientific_question": "Do repeat casts show temporal salinity offsets at shared depths?"
+  }
+}

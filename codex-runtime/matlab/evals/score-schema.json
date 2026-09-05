@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ocean-intelligence.local/schemas/matlab-evaluation-result-v1.json",
+  "title": "Ocean Intelligence MATLAB evaluation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "score", "maximum_score", "gates",
+    "fixture_results", "runtime", "anti_cheat", "freeze", "remaining_runtime_gates"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["passed", "runtime_pending", "failed"]},
+    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "maximum_score": {"const": 100},
+    "gates": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "weight", "status", "trusted_evidence"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "weight": {"type": "integer", "minimum": 1},
+          "status": {"enum": ["passed", "pending", "failed"]},
+          "trusted_evidence": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "fixture_results": {"type": "array", "minItems": 3},
+    "runtime": {"type": "object"},
+    "anti_cheat": {"type": "object"},
+    "freeze": {"type": "object"},
+    "remaining_runtime_gates": {"type": "array", "items": {"type": "string"}}
+  }
+}

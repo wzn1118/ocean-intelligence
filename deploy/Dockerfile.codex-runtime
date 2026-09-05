@@ -1,0 +1,33 @@
+ARG NODE_IMAGE=node:22-bookworm-slim
+FROM ${NODE_IMAGE}
+
+ARG DEBIAN_MIRROR=http://repo.huaweicloud.com/debian
+
+RUN sed -i "s#http://deb.debian.org/debian#${DEBIAN_MIRROR}#g; s#http://security.debian.org/debian-security#${DEBIAN_MIRROR}-security#g" /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      bash \
+      fontconfig \
+      fonts-freefont-otf \
+      fonts-noto-cjk \
+      ghostscript \
+      gnuplot-nox \
+      octave \
+      poppler-utils \
+      util-linux \
+      xauth \
+      xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends librsvg2-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    OCEAN_MATLAB_RUNTIME=external-mathworks-only \
+    OCEAN_MATLAB_EVIDENCE_DIR=/workspace/.runtime/matlab-ci
+
+LABEL org.ocean-intelligence.matlab.runtime="external-mathworks-only" \
+      org.ocean-intelligence.matlab.octave-evidence-accepted="false"

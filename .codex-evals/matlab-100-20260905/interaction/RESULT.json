@@ -1,0 +1,52 @@
+{
+  "scope": "interaction",
+  "status": "runtime_pending",
+  "tests": [
+    {
+      "command": "node --test codex-runtime/server/point-interaction-quality.test.mjs codex-runtime/server/point-temperature-interaction-spec.test.mjs codex-runtime/server/matlab-interaction-contract.test.mjs",
+      "status": "passed",
+      "passed": 26,
+      "failed": 0
+    },
+    {
+      "command": "bash /root/.codex/skills/matlab-scientific-plotting/scripts/static-smoke-test.sh",
+      "status": "passed",
+      "evidence": "STATIC_SMOKE_OK; MATLAB_RENDERING=UNVERIFIED"
+    },
+    {
+      "command": "node --test codex-runtime/server/*.test.mjs",
+      "status": "partial",
+      "passed": 286,
+      "failed": 2,
+      "note": "Two failures are in other parallel illustrated-report/router scope; no files in those scopes were modified."
+    },
+    {
+      "command": "/root/.codex/skills/matlab-scientific-plotting/scripts/run-matlab-batch.sh --check-only",
+      "status": "runtime_pending",
+      "evidence": "MATLAB_RUNTIME=unavailable; MATLAB_SMOKE_SKIPPED=matlab_not_found"
+    }
+  ],
+  "files_changed": [
+    "codex-runtime/matlab/INTERACTIONS.md",
+    "codex-runtime/matlab/assets/interactive_timeseries_native_template.m",
+    "codex-runtime/server/point-interaction-quality.mjs",
+    "codex-runtime/server/point-interaction-quality.test.mjs",
+    "codex-runtime/server/point-temperature-interaction-spec.mjs",
+    "codex-runtime/server/point-temperature-interaction-spec.test.mjs",
+    "codex-runtime/server/matlab-interaction-contract.test.mjs",
+    ".codex-evals/matlab-100-20260905/interaction/EVIDENCE_FORMAT.md",
+    ".codex-evals/matlab-100-20260905/interaction/run_interaction_acceptance.m",
+    ".codex-evals/matlab-100-20260905/interaction/validate_interaction_evidence.mjs",
+    ".codex-evals/matlab-100-20260905/interaction/REPORT.md",
+    ".codex-evals/matlab-100-20260905/interaction/RESULT.json",
+    ".codex-evals/matlab-100-20260905/interaction/DONE"
+  ],
+  "remaining_runtime_gates": [
+    "Run run_interaction_acceptance('desktop', fresh_output_directory) in real MATLAB Desktop.",
+    "Run run_interaction_acceptance('headless', fresh_output_directory) with matlab -batch.",
+    "Validate both evidence JSON files with validate_interaction_evidence.mjs.",
+    "Visually inspect PNG/PDF fonts, CJK glyphs if present, clipping, markers and units.",
+    "Exercise Desktop DataTip, Brush, repeated callbacks, close and expected-exception cleanup manually or in archived MATLAB evidence."
+  ],
+  "score_claim": 95
+}

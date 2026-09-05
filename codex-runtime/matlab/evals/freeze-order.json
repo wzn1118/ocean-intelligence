@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "ordered_steps": [
+    "validate schemas and fixtures",
+    "run framework unit tests",
+    "run static anti-cheat checks",
+    "create a fresh MATLAB output directory and evaluator nonce",
+    "run MATLAB gate when matlab is available",
+    "rehash and validate all runtime artifacts",
+    "apply trusted visual audit bound to artifact hashes",
+    "write REPORT.md, RESULT.json, and DONE",
+    "generate SOURCE_SHA256SUMS.txt over all final scoped files except the inventory itself",
+    "verify SOURCE_SHA256SUMS.txt without modifying audited files"
+  ],
+  "inventory": {
+    "path": ".codex-evals/matlab-100-20260905/framework/SOURCE_SHA256SUMS.txt",
+    "roots": [
+      ".codex-evals/matlab-100-20260905/framework",
+      "codex-runtime/matlab/evals"
+    ],
+    "excluded": [
+      ".codex-evals/matlab-100-20260905/framework/SOURCE_SHA256SUMS.txt",
+      "**/__pycache__/**",
+      "**/*.pyc",
+      "**/runtime-output/**"
+    ]
+  }
+}

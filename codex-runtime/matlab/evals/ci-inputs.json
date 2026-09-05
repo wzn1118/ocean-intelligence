@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "runner": {
+    "operating_system": "Linux runner with MathWorks MATLAB installed",
+    "minimum_matlab_release": "R2019b",
+    "preferred_matlab_release": "R2025a or newer for direct exportgraphics SVG",
+    "required_products": ["MATLAB"],
+    "required_commands": ["matlab", "python3"],
+    "locale": "C.UTF-8"
+  },
+  "command": [
+    "python3",
+    "codex-runtime/matlab/evals/evaluate.py",
+    "--runtime",
+    "require",
+    "--output-dir",
+    ".codex-evals/matlab-100-20260905/framework/runtime-output",
+    "--visual-audit",
+    "/trusted-input/visual-audit.json",
+    "--result",
+    ".codex-evals/matlab-100-20260905/framework/runtime-evaluation.json"
+  ],
+  "expected_artifacts": [
+    "runtime-output/matlab-console.log",
+    "runtime-output/matlab-runtime.json",
+    "runtime-output/figures.json",
+    "runtime-output/*.png",
+    "runtime-output/*.pdf",
+    "runtime-output/*.svg",
+    "runtime-evaluation.json"
+  ],
+  "failure_conditions": [
+    "matlab executable absent or not MathWorks MATLAB",
+    "nonzero matlab -batch exit code",
+    "nonce mismatch or missing runtime metadata",
+    "missing, stale, symlinked, empty, or incorrectly signed artifact",
+    "manifest path, byte count, dimension, or SHA-256 mismatch",
+    "DataTip, Brush stable-ID, lifecycle, or headless fallback assertion failure",
+    "visual audit missing, false, self-attested, or not hash-bound",
+    "any static fixture, anti-cheat, test, or freeze gate failure"
+  ]
+}
