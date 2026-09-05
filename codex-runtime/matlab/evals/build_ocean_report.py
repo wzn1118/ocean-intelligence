@@ -34,6 +34,10 @@ FIXTURE_KINDS = {
     "paired-observation-model": "paired_records",
     "repeat-cast-salinity-profiles": "repeat_profiles",
 }
+GRID_NATIVE_SOURCES = {
+    "crossed-time-depth-temperature": "Image.CData",
+    "repeat-cast-salinity-profiles": "Lines.XData",
+}
 FIXTURE_BINDING_LIMITATION = (
     "Runtime records contain fixture IDs but no fixture content hashes or coordinate values; "
     "matching metadata does not verify which numeric fixture snapshot MATLAB consumed."
@@ -484,6 +488,94 @@ def validate_layout_measurement(figure: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def validate_plot_data_evidence(
+    figure: dict[str, Any], context: dict[str, Any], input_bound: bool, runtime_release: str
+) -> dict[str, Any]:
+    figure_id = figure["id"]
+    if "plot_data_evidence" in figure:
+        raise ReportBuildError("plot_data_evidence must be nested in scientific_data_contract")
+    contract = figure["scientific_data_contract"]
+    if "plot_data_evidence" not in contract:
+        return {"status": "not_verified", "provided": False, "declaration": None,
+                "reason": "Native plot/result array evidence not provided"}
+    declaration = contract["plot_data_evidence"]
+    fields = {
+        "schema_version", "figure_id", "fixture_id", "fixture_sha256", "matlab_release",
+        "dimension_order", "shape", "time_utc", "depth_m", "depth_unit", "quantity_unit",
+        "missing_policy", "native_data_source", "native_values", "missing_mask",
+        "input_match_asserted", "qc", "uncertainty",
+    }
+    if not isinstance(declaration, dict) or set(declaration) != fields:
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence fields are missing or unsupported")
+    if require_nonnegative_integer(declaration["schema_version"], "plot_data_evidence.schema_version") != 1:
+        raise ReportBuildError("plot_data_evidence.schema_version must be 1")
+    if figure_id not in GRID_NATIVE_SOURCES:
+        raise ReportBuildError(f"plot_data_evidence is unsupported for figure {figure_id}")
+    if (declaration["figure_id"] != figure_id or declaration["fixture_id"] != context["fixture_id"]
+            or declaration["fixture_sha256"] != context["fixture_sha256"]
+            or declaration["native_data_source"] != GRID_NATIVE_SOURCES[figure_id]):
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence identity/source/hash mismatch")
+    if normalize_matlab_release(declaration["matlab_release"], "plot_data_evidence.matlab_release") != runtime_release:
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence MATLAB release mismatch")
+    if require_bool(declaration["input_match_asserted"], "plot_data_evidence.input_match_asserted") is not True:
+        raise ReportBuildError("plot_data_evidence input match assertion must be true")
+    if declaration["dimension_order"] != context["dimension_order"] or not isinstance(declaration["shape"], list):
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence dimension order/shape mismatch")
+    shape_size(declaration["shape"], "plot_data_evidence.shape")
+    if declaration["shape"] != context["shape"]:
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence shape mismatch")
+    times = declaration["time_utc"]
+    depths = declaration["depth_m"]
+    if not isinstance(times, list) or not isinstance(depths, list):
+        raise ReportBuildError("plot_data_evidence time_utc/depth_m must be vectors")
+    if [parse_utc(value, "plot_data_evidence.time_utc") for value in times] != [
+        parse_utc(value, "fixture.time_utc") for value in context["time"]["values"]
+    ]:
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence time order mismatch")
+    numeric_values(depths, "plot_data_evidence.depth_m")
+    if depths != context["coordinates"]["depth"]["values"] or declaration["depth_unit"] != "m":
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence depth order/unit mismatch")
+    if declaration["quantity_unit"] != context["unit"] or declaration["missing_policy"] != "preserve":
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence unit/missing policy mismatch")
+    qc = declaration["qc"]
+    uncertainty = declaration["uncertainty"]
+    if not isinstance(qc, dict) or set(qc) != {"provided", "policy", "flags"}:
+        raise ReportBuildError("plot_data_evidence QC fields are missing or unsupported")
+    if not isinstance(uncertainty, dict) or set(uncertainty) != {"present", "type", "unit", "display", "values"}:
+        raise ReportBuildError("plot_data_evidence uncertainty fields are missing or unsupported")
+    if require_bool(qc["provided"], "plot_data_evidence.qc.provided") is not True or qc["policy"] != "preserve":
+        raise ReportBuildError("plot_data_evidence QC must be provided and preserved")
+    if (require_bool(uncertainty["present"], "plot_data_evidence.uncertainty.present") is not True
+            or uncertainty["type"] != context["uncertainty"]["type"]
+            or uncertainty["unit"] != context["uncertainty"]["unit"] or uncertainty["display"] != "metadata"):
+        raise ReportBuildError("plot_data_evidence uncertainty must preserve fixture type/unit with metadata display")
+    rows, columns = context["shape"]
+    expected = context["plot_input"]
+    for field, values, source in (
+        ("native_values", declaration["native_values"], expected["values"]),
+        ("uncertainty.values", uncertainty["values"], expected["uncertainty_values"]),
+    ):
+        flattened = flatten_matrix(values, rows, columns, f"plot_data_evidence.{field}")
+        numeric_values(flattened, f"plot_data_evidence.{field}")
+        if values != source:
+            raise ReportBuildError(f"figure {figure_id} plot_data_evidence {field} differs from the complete fixture array")
+    flags = flatten_matrix(qc["flags"], rows, columns, "plot_data_evidence.qc.flags")
+    if any(not isinstance(flag, str) for flag in flags) or qc["flags"] != expected["qc_flags"]:
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence QC flags/order differ from fixture")
+    mask = flatten_matrix(declaration["missing_mask"], rows, columns, "plot_data_evidence.missing_mask")
+    for flag in mask:
+        require_bool(flag, "plot_data_evidence.missing_mask")
+    if mask != [value is None for row in expected["values"] for value in row]:
+        raise ReportBuildError(f"figure {figure_id} plot_data_evidence missing mask differs from fixture")
+    return {
+        "status": "runtime_declaration_verified" if input_bound else "not_verified",
+        "provided": True, "local_arrays_match": True, "input_fixture_binding_verified": input_bound,
+        "reason": "Native plot/result declarations match the complete fixture arrays; not independently re-executed"
+        if input_bound else "Arrays match local fixtures but runtime input bytes are not bound",
+        "declaration": declaration,
+    }
+
+
 def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[str, Any]]) -> dict[str, Any]:
     if runtime_root.is_symlink() or not runtime_root.is_dir():
         raise ReportBuildError(f"runtime output directory is missing or unsafe: {runtime_root}")
@@ -492,6 +584,8 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
     runtime_path = runtime_root / "matlab-runtime.json"
     manifest, manifest_snapshot = load_json_snapshot(manifest_path, "figures.json")
     runtime, runtime_snapshot = load_json_snapshot(runtime_path, "matlab-runtime.json")
+    if "plot_data_evidence" in runtime or "plot_data_evidence" in manifest:
+        raise ReportBuildError("plot_data_evidence must be nested in each figure's scientific_data_contract")
 
     if runtime.get("schema_version") != 1:
         raise ReportBuildError("matlab-runtime.json schema_version must be 1")
@@ -566,6 +660,12 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
         ) != runtime_release:
             raise ReportBuildError(f"figure {figure_id} MATLAB release does not match runtime record")
         scientific = verify_scientific_contract(figure, figure_contexts[figure_id])
+        plot_data = validate_plot_data_evidence(figure, context, fixture_input is not None, runtime_release)
+        scientific["qc"]["plot_evidence_status"] = plot_data["status"]
+        scientific["uncertainty"]["plot_evidence_status"] = plot_data["status"]
+        if plot_data["status"] == "runtime_declaration_verified":
+            scientific["qc"]["plot_filtering"] = "preserve"
+            scientific["uncertainty"]["plot_display"] = "metadata"
         layout_measurement = validate_layout_measurement(figure)
         exports = figure.get("exports")
         if not isinstance(exports, dict) or set(exports) != set(REQUIRED_FORMATS):
@@ -590,6 +690,7 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
                 "title": title,
                 "source": source,
                 "scientific_data": scientific,
+                "plot_data_evidence": plot_data,
                 "layout_measurement": layout_measurement,
                 "verification": {
                     "file_hashes_and_dimensions": "passed", "visual_inspection": "not_verified",
@@ -981,6 +1082,13 @@ def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any
         "observation_ids": [f"temp-050m-{index + 1:03d}" for index in range(len(interactive_row))],
         "missing_time_indices": [index for index, value in enumerate(interactive_row) if value is None],
     }
+    for identifier in GRID_NATIVE_SOURCES:
+        variables = payloads[identifier]["variables"]
+        variable = by_id[identifier]["variable"]
+        figure_contexts[identifier]["plot_input"] = {
+            "values": variables[variable]["values"], "qc_flags": variables["qc"]["values"],
+            "uncertainty_values": variables[f"{variable}_standard_uncertainty"]["values"],
+        }
     return summaries, figure_contexts
 
 
@@ -1151,6 +1259,27 @@ def render_report(evidence: dict[str, Any]) -> str:
                 for record in measurement["unmeasured_text_objects"]
             ) or "无未测记录"
         lines.append(f"| `{figure['id']}` | 通过 | {counts} | {coverage} | {unmeasured_text} |")
+    lines.extend([
+        "", "### 原生图元数据核对", "",
+        "仅在输入字节绑定通过且原生数值、QC、不确定度完整数组逐项一致时，标记 `runtime_declaration_verified`。这是 MATLAB 运行声明核对，不是视觉验证或独立重执行；metadata 不代表绘制误差带。",
+        "",
+        "| 图 ID | 原生读取 | 状态 | QC | 不确定度类型 / 单位 / 显示 |",
+        "|---|---|---|---|---|",
+    ])
+    for figure in runtime["figures"]:
+        proof = figure["plot_data_evidence"]
+        declaration = proof["declaration"]
+        source = declaration["native_data_source"] if declaration else "未提供"
+        status = proof["status"]
+        if status == "runtime_declaration_verified":
+            qc_text = "preserve，保留 suspect"
+            uncertainty = declaration["uncertainty"]
+            uncertainty_text = f"{uncertainty['type']} / {uncertainty['unit']} / {uncertainty['display']}"
+        else:
+            status += "（输入字节未绑定）" if declaration else "（未提供）"
+            qc_text = "应用未验证"
+            uncertainty_text = "应用未验证"
+        lines.append(f"| `{figure['id']}` | {source} | {status} | {qc_text} | {uncertainty_text} |")
     lines.extend(
         [
             "",
@@ -1158,8 +1287,8 @@ def render_report(evidence: dict[str, Any]) -> str:
             "",
             "- 缺测保持为 `null -> NaN` 语义，不填补、不按零值处理。",
             "- QC 保留 `good`、`suspect`、`missing` 原状态；统计未把 `suspect` 自动删除，因此有效数与严格高质量样本数含义不同。",
-            "- 清单 `qc.status=present`、`uncertainty.status=present` 表示源 fixture 元数据存在；不能证明图件已接收、筛选或呈现这些字段，绘图应用状态记为 `not_verified`。",
-            "- 当前 gate 的温度场、盐度剖面和配对图调用未传 QC/不确定度数组；本报告相关统计来自源 fixture，不代表这些图已应用 QC 或绘制误差。交互调用传入 QCFlag 和 Uncertainty，但 QCFlag 用于点位元数据，不构成质量筛选。",
+            "- 清单 `qc.status=present`、`uncertainty.status=present` 仅表示源 fixture 元数据存在，不能单独证明图件已接收、筛选或呈现这些字段。",
+            "- 各图应用证据见原生图元核对表；配对图和交互图未提供本项证据，不推定已核验其 QC 筛选或不确定度呈现。",
             "- 不确定度为 fixture 提供的标准不确定度，仅用于描述合成输入和逐记录误差覆盖；没有扩展为现实仪器误差、代表性误差或海区综合不确定度。",
             "- 三份 fixture 的时间窗不同，合并包络不代表连续采样，也不用于趋势计算。",
             "",

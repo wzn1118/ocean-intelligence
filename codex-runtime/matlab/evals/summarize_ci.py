@@ -23,6 +23,10 @@ CORE_STAGES = (
 )
 STATUSES = ("passed", "failed", "pending", "running")
 POSTPROCESSING_FILES = ("rendered-artifact-evidence.json", "ci-validation-summary.json")
+DISPLAY_FILE = "display-comparison/display-rendering.json"
+DISPLAY_CASES = ("publication", "native-pdf-page-probe", "vector-text-alignment-probe")
+DISPLAY_STATUSES = ("running", "completed_pending_external_review", "completed_with_failures")
+DISPLAY_CASE_STATUSES = ("pending", "running", "export_checks_completed", "failed")
 NOTICE = (
     "CI 状态为本地证据推断，未提供 GitHub 状态、未查询远端，不重新验真。"
     "已知后处理失败优先于缺少视觉审核的 pending。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
@@ -45,9 +49,19 @@ def reject_constant(value: str) -> None:
     raise ValueError("JSON 含非有限数字: " + value)
 
 
+def unique_json_object(pairs: list[tuple[str, Any]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON 含重复 key: " + key)
+        result[key] = value
+    return result
+
+
 def read_json(path: Path, issues: list, optional: bool = False) -> dict | None:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
+        payload = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant,
+                             object_pairs_hook=unique_json_object)
         if not isinstance(payload, dict):
             raise ValueError("JSON 顶层必须是对象")
         return payload
@@ -318,6 +332,102 @@ def summarize_postprocessing(directory: Path, release: str, issues: list) -> dic
     return {"status": combined_status([item["status"] for item in sources]), "sources": sources}
 
 
+def summarize_display_diagnostics(directory: Path, release: str) -> dict:
+    issues: list = []
+    cases = {identifier: {"id": identifier, "status": "not_run", "reported_status": None,
+                          "error_identifier": "", "error_message": ""}
+             for identifier in DISPLAY_CASES}
+    result = {"source": DISPLAY_FILE, "present": False, "status": "not_run",
+              "reported_status": None, "release": release, "reported_release": None,
+              "display": None, "cases": list(cases.values()), "issues": issues}
+    payload = read_json(directory / DISPLAY_FILE, issues, optional=True)
+    result["present"] = payload is not None or bool(issues)
+    if payload is None:
+        result["status"] = "failed" if issues else "not_run"
+        return result
+    for key in ("release", "display", "status"):
+        output_key = {"release": "reported_release", "status": "reported_status"}.get(key, key)
+        result[output_key] = payload.get(key) if isinstance(payload.get(key), str) else None
+    required = {"schema_version": 1, "scope": "virtual_display_diagnostics_only",
+                "release": release, "visual_verified": False, "desktop_interaction_verified": False}
+    for key, expected in required.items():
+        actual = payload.get(key)
+        if type(actual) is not type(expected) or actual != expected:
+            issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayDiagnostics",
+                  f"{key}: 预期 {expected!r}，实际 {actual!r}")
+    for key in ("started_at", "version", "display"):
+        if not isinstance(payload.get(key), str) or not payload[key].strip():
+            issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayDiagnostics", key + " 必须为非空字符串")
+    for key in ("jvm_available", "desktop_available"):
+        if type(payload.get(key)) is not bool:
+            issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayDiagnostics", key + " 必须为 bool")
+    density = payload.get("screen_pixels_per_inch")
+    if (type(density) not in (int, float) or density <= 0
+            or (isinstance(density, float) and not math.isfinite(density))):
+        issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayDiagnostics", "screen_pixels_per_inch 必须为正有限数字")
+    allowed = {*required, "started_at", "version", "display", "jvm_available", "desktop_available",
+               "screen_pixels_per_inch", "status", "cases", "completed_at", "failed_count"}
+    if payload.keys() - allowed:
+        issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayDiagnostics",
+              "未知诊断字段: " + ", ".join(sorted(payload.keys() - allowed)))
+    reported_status = result["reported_status"]
+    if reported_status not in DISPLAY_STATUSES:
+        issue(issues, DISPLAY_FILE, "ci_summary:InvalidStatus", "无效诊断状态: " + repr(reported_status))
+    records = payload.get("cases")
+    if not isinstance(records, list):
+        issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayCases", "cases 必须为三个 callback 的数组")
+        records = []
+    seen = set()
+    for index, record in enumerate(records):
+        if (not isinstance(record, dict) or not isinstance(record.get("id"), str)
+                or record["id"] not in cases):
+            issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayCase", f"cases[{index}] 缺少已知 callback id")
+            continue
+        identifier = record["id"]
+        source = DISPLAY_FILE + ":" + identifier
+        if identifier in seen:
+            issue(issues, source, "ci_summary:InvalidDisplayCase", "callback id 重复")
+            cases[identifier]["status"] = "failed"
+            continue
+        seen.add(identifier)
+        case = cases[identifier]
+        status = record.get("status")
+        case["reported_status"] = status if isinstance(status, str) else None
+        case["status"] = status if isinstance(status, str) and status in DISPLAY_CASE_STATUSES else "failed"
+        before = len(issues)
+        if not isinstance(status, str) or status not in DISPLAY_CASE_STATUSES:
+            issue(issues, source, "ci_summary:InvalidStatus", "无效 callback 状态: " + repr(status))
+        if record.keys() - {"id", "status", "error_identifier", "error_message"}:
+            issue(issues, source, "ci_summary:InvalidDisplayCase", "callback 含未知字段")
+        for key in ("error_identifier", "error_message"):
+            if not isinstance(record.get(key), str):
+                issue(issues, source, "ci_summary:InvalidDisplayCase", key + " 必须为字符串")
+            else:
+                case[key] = first_line(record[key])
+        if case["error_identifier"] or case["error_message"] or status == "failed":
+            issue(issues, source, case["error_identifier"] or "(无 identifier)",
+                  case["error_message"] or "callback 报告失败，未提供错误消息")
+        if len(issues) > before:
+            case["status"] = "failed"
+    for identifier in cases:
+        if identifier not in seen:
+            issue(issues, DISPLAY_FILE + ":" + identifier, "ci_summary:InvalidDisplayCase", "缺少 callback 记录")
+    statuses = [case["status"] for case in cases.values()]
+    if reported_status in ("completed_pending_external_review", "completed_with_failures"):
+        failure_count = payload.get("failed_count")
+        if (type(failure_count) is not int or failure_count != statuses.count("failed")
+                or any(status not in ("export_checks_completed", "failed") for status in statuses)
+                or (reported_status == "completed_pending_external_review" and failure_count != 0)
+                or (reported_status == "completed_with_failures" and failure_count == 0)):
+            issue(issues, DISPLAY_FILE, "ci_summary:InconsistentDisplayStatus", "完成状态、failed_count 与 callback 状态不一致")
+        if not isinstance(payload.get("completed_at"), str) or not payload["completed_at"].strip():
+            issue(issues, DISPLAY_FILE, "ci_summary:InvalidDisplayDiagnostics", "完成状态缺少 completed_at")
+    elif reported_status == "running" and any(key in payload for key in ("completed_at", "failed_count")):
+        issue(issues, DISPLAY_FILE, "ci_summary:InconsistentDisplayStatus", "running 不应带最终完成字段")
+    result["status"] = "failed" if issues else reported_status
+    return result
+
+
 def summarize(input_root: Path) -> dict:
     root = Path(input_root).resolve()
     if not root.is_dir():
@@ -357,6 +467,9 @@ def summarize(input_root: Path) -> dict:
             *([result["postprocessing"]["status"]] if result["postprocessing"]["sources"] else []),
             result["evaluator"]["visual_status"], *[item["status"] for item in result["issues"]],
         ])
+        result["display_diagnostics"] = summarize_display_diagnostics(
+            directories.get(result["release"], root / ("matlab-full100-" + result["release"])),
+            result["release"])
     statuses = [result["status"] for result in results]
     return {"schema_version": 1, "input_root": str(root), "status": combined_status(statuses),
             "status_source": "local_artifact_evidence", "github_status": None,
@@ -402,6 +515,30 @@ def markdown(summary: dict) -> str:
                 result["release"], item["source"], item["identifier"])) + ": " + escaped(item["message"]))
     if not any(result["issues"] for result in summary["releases"]):
         lines.append("无。")
+    if any(result.get("display_diagnostics", {}).get("present") for result in summary["releases"]):
+        labels = {"not_run": "未运行", "pending": "未运行", "running": "运行中",
+                  "completed_pending_external_review": "完成待外部检查", "failed": "有失败",
+                  "export_checks_completed": "回调 API 完成（待外部检查）"}
+        lines.extend(["", "## 虚拟 DISPLAY 独立诊断", "",
+                      "仅记录虚拟 DISPLAY 下三个 callback 的 API 完成状态；不计入主阶段分母、评分或总体门禁。"
+                      "不代表视觉通过或桌面交互验证；缺少诊断包记未运行。", "",
+                      "| 版本 | 诊断状态 | 报告 release | DISPLAY | publication 状态 / 错误 | native-pdf-page-probe 状态 / 错误 | vector-text-alignment-probe 状态 / 错误 |",
+                      "| --- | --- | --- | --- | --- | --- | --- |"])
+        for result in summary["releases"]:
+            diagnostic = result["display_diagnostics"]
+            row = [result["release"], labels[diagnostic["status"]],
+                   diagnostic["reported_release"] or "未提供", diagnostic["display"] or "未提供"]
+            for case in diagnostic["cases"]:
+                detail = labels[case["status"]]
+                if case["error_identifier"] or case["error_message"]:
+                    detail += " / " + (case["error_identifier"] or "(无 identifier)") + ": " + case["error_message"]
+                row.append(detail)
+            lines.append("| " + " | ".join(escaped(value) for value in row) + " |")
+        lines.append("")
+        for result in summary["releases"]:
+            for item in result["display_diagnostics"]["issues"]:
+                lines.append("- 独立诊断 " + " / ".join(escaped(value) for value in (
+                    result["release"], item["source"], item["identifier"])) + ": " + escaped(item["message"]))
     return "\n".join(lines) + "\n"
 
 

@@ -43,6 +43,16 @@ Reports also distinguish file hashes/dimensions from the declared coverage of
 graphics bounds. Native layout text without public geometry remains unmeasured;
 old manifests without coverage fields are reported as unavailable, not complete.
 
+For the temperature field and salinity profiles, the MATLAB gate passes the
+fixture's complete QC and uncertainty arrays to the plotting helpers without
+filtering or drawing uncertainty bands. It reads native image/line values and
+the helpers' returned arrays into `scientific_data_contract.plot_data_evidence`.
+The report checks every value, order, mask, unit, policy, release and fixture hash.
+Matching runtime input snapshots are required for `runtime_declaration_verified`;
+missing declarations remain `not_verified`, and inconsistent declarations fail.
+This is not a visual audit or independent re-execution. Other figures do not
+inherit this evidence merely because their source metadata contains QC.
+
 The GitHub postprocessing probe uses the same MathWorks `run-matlab-command`
 launcher as `matlab-actions/run-command@v3`, with online batch licensing enabled.
 It still runs the MATLAB vendor assertion and parses the actual release marker;
@@ -55,6 +65,21 @@ Observed direct-launch failures in run 33987455982 are retained in its sanitized
 Native page and vector-text probes preserve experimental files separately from
 promoted publication artifacts. An export call completing is not a finding that
 the experimental PDF has exact dimensions, embedded fonts, or correct layout.
+
+The workflow also runs publication and native PDF probes on an isolated Xvfb
+display after the primary gates. The `display-comparison` directory
+and display-server logs are independent diagnostics. `summarize_ci.py` displays
+them separately, without adding stages or points or changing the main outcome.
+Virtual display availability and callback completion do not prove desktop
+interaction, font embedding, text alignment, or a successful visual review.
+
+Run 33989124823 retained a no-display baseline on all three releases. Its R2026a
+display controls removed the observed text-anchor clipping in two samples while
+preserving exact pages; R2021a/R2024b print fonts remained unembedded. The next
+full R2026a gate uses the same Xvfb environment as a candidate rendering setup,
+with actual display and screen DPI recorded. This changes the R2026a environment,
+not the artifacts or acceptance rules; it is not an all-figure visual approval.
+The two older primary jobs remain no-display. Desktop interaction stays unverified.
 
 ## Commands
 

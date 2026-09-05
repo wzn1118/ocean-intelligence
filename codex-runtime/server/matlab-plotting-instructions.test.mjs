@@ -127,6 +127,27 @@ test('builds deterministic default injection context without side effects', () =
   assert.equal(Object.keys(options).length, 0);
 });
 
+test('keeps rendered geometry and native array evidence distinct from visual approval', () => {
+  for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions()]) {
+    assert.match(instructions, /layout\.Text 无公开 Units\/Extent\/Position/u);
+    assert.match(instructions, /不能用零矩形当成完整几何/u);
+    assert.match(instructions, /仅 drawnow 可能保留占位文字 Extent/u);
+    assert.match(instructions, /测量探针放在独立隐藏图中/u);
+    assert.match(instructions, /源图最终实测几何/u);
+    assert.match(instructions, /scientific_data_contract\.plot_data_evidence/u);
+    assert.match(instructions, /完整数组、顺序、缺失掩码、单位、策略、release 和输入哈希/u);
+    assert.match(instructions, /runtime_declaration_verified/u);
+    assert.match(instructions, /缺证据仍为 not_verified/u);
+    assert.match(instructions, /metadata 不是误差带/u);
+    assert.match(instructions, /不是独立重执行或视觉验证/u);
+  }
+  assert.match(repositorySkill, /placeholder text extents/u);
+  assert.match(repositorySkill, /separate measurement figure/u);
+  assert.match(repositorySkill, /runtime_declaration_verified/u);
+  assert.match(repositorySkill, /absent declarations remain `not_verified`/u);
+  assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /plot_data_evidence/u);
+});
+
 test('injects safe caller paths and rejects multiline or escaping path fragments', () => {
   const instructions = matlabPlottingInstructions({
     repositoryRoot: '/opt/ocean-intelligence/',
@@ -230,7 +251,7 @@ test('scopes the WenQuanYi preference to the tested native vector font evidence'
 test('keeps tiledlayout title coverage unresolved until every requested artifact is checked', () => {
   const instructions = matlabPlottingInstructions();
   assert.match(instructions, /tiledlayout 标题也必须在每个请求格式中核验文本、字形、占位和裁切/u);
-  assert.match(instructions, /几何漏项目前仍在诊断，不得声称已修复/u);
+  assert.match(instructions, /必须记录未测覆盖，不能用零矩形当成完整几何/u);
   assert.match(instructions, /不得仅凭现有 bounds 门禁通过认定标题完整/u);
   assert.match(repositorySkill, /`tiledlayout` titles in every requested format/u);
   assert.match(repositorySkill, /geometry coverage gap is still under diagnosis, not a confirmed fix/u);

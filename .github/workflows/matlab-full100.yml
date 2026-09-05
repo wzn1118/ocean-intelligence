@@ -112,11 +112,25 @@ jobs:
         continue-on-error: true
         shell: bash
         run: node codex-runtime/matlab/tests/generate_router_smoke.mjs "${{ matrix.release }}" "$MATLAB_FULL100_OUTPUT"
+      - name: Start R2026a native rendering display
+        if: matrix.release == 'R2026a'
+        shell: bash
+        run: |
+          test ! -e /tmp/.X97-lock
+          Xvfb :97 -screen 0 1600x1200x24 -nolisten tcp > "$MATLAB_FULL100_OUTPUT/primary-display-server.log" 2>&1 &
+          echo "MATLAB_PRIMARY_XVFB_PID=$!" >> "$GITHUB_ENV"
+          echo "DISPLAY=:97" >> "$GITHUB_ENV"
+          for attempt in {1..30}; do
+            if xdpyinfo -display :97 > "$MATLAB_FULL100_OUTPUT/primary-display-server-info.txt" 2>&1; then exit 0; fi
+            sleep 1
+          done
+          exit 1
       - name: Run licensed MATLAB plotting, reporting and interaction gates
         id: matlab-runtime
         continue-on-error: true
         uses: matlab-actions/run-command@v3
         with:
+          startup-options: ${{ matrix.release == 'R2026a' && '-display :97' || '' }}
           command: addpath('codex-runtime/matlab/tests'); run_github_full100('${{ matrix.release }}', getenv('MATLAB_FULL100_OUTPUT'), getenv('MATLAB_EVAL_NONCE'))
       - name: Validate MATLAB evidence and compute runtime score
         id: runtime-score
@@ -154,6 +168,10 @@ jobs:
         if: always() && env.MATLAB_XVFB_PID != ''
         shell: bash
         run: kill "$MATLAB_XVFB_PID" || true
+      - name: Stop R2026a native rendering display
+        if: always() && env.MATLAB_PRIMARY_XVFB_PID != ''
+        shell: bash
+        run: kill "$MATLAB_PRIMARY_XVFB_PID" || true
       - name: Enforce MATLAB runtime and score gate
         if: always()
         shell: bash

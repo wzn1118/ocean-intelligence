@@ -113,6 +113,8 @@ for caseIndex = 1:numel(caseNames)
     end
     clear cleanupFigure;
 end
+[~, entryOrder] = sort(string({entries.id}));
+entries = entries(entryOrder);
 oi_write_manifest(fullfile(outputDirectory, "figures.json"), entries);
 fprintf("MATLAB_COMPARISON_STATISTICS_LAYOUT=passed\n");
 fprintf("MATLAB_COMPARISON_STATISTICS_OUTPUT=%s\n", outputDirectory);

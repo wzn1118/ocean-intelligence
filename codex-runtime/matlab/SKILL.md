@@ -105,6 +105,8 @@ For example, 1200 x 675 output pixels at 300 DPI means 4 x 2.25 inches. Waiting 
 
 For static time-series figures, use `assets/oi_plot_time_series.m` with explicit `ValueVariables`, units, timezone semantics, gap threshold, QC policy, and uncertainty definition. It is a registered plot asset exercised directly by `tests/run_plot_regression.m`, `tests/test_asset_contracts.m`, and `tests/test_asset_adversarial_contracts.m`. Do not describe it as server-router generated until `matlab-plot-router.mjs` actually calls the helper.
 
+In the tested headless releases, `drawnow` alone can leave placeholder text extents. Render the relevant state natively before measuring it. Avoid adding measurement probes to the source axes: they can change automatic layout. Prefer a separate measurement figure with identical typography, then use the source figure's final measured geometry. Native `layout.Text` may not expose public bounds; report that measurement gap instead of using a zero rectangle. PNG correctness does not prove PDF/SVG text alignment, and repeated export or PNG prewarming did not repair the R2026a vector-text probe in run 33988300354.
+
 ## Output Contract
 
 Return runnable `.m` source plus requested PNG/PDF/SVG outputs when supported. Write manifest `schema_version: 2` to a safe relative JSON path with deterministic figure IDs. Top-level evidence includes generation time, generator, runtime status, execution verification, MATLAB release, toolboxes, artifact validation, visual inspection, warnings, errors, and figures. Each figure records title, source, theme, variables, units, time/space scope, generation script, runtime release, toolbox dependencies, text/axes evidence, accessibility, rendering, publication, interaction/headless evidence, and exports.
@@ -114,6 +116,8 @@ For PNG record file, width, height, DPI, bytes, and SHA-256. For PDF/SVG record 
 Only verified artifacts enter the manifest or report. Never expose temporary paths, `file://` URIs, or tenant host paths.
 
 For ocean-region reports, bind figure provenance and computed statistics to the actual input snapshots consumed by that MATLAB run. Check their relative paths, bytes, and SHA-256 against runtime records (`runtime.input_fixtures` for the fixture bundle). Reading a same-name or same-shape source file later is not runtime input evidence. Missing runtime hashes leave the binding `unverified`; mismatched hashes must be rejected, never refreshed into passing evidence. Keep synthetic fixtures labeled `synthetic_benchmark` or synthetic data even when execution and hashes are verified; they are not evidence of real ocean conditions, observed trends, or regional mechanisms.
+
+For the evaluator's temperature field and salinity profiles, `scientific_data_contract.plot_data_evidence` records native graphics values and the plotting helper's returned QC and uncertainty arrays. The report checks complete arrays, order, masks, units, policy, release, and fixture hash. Only input-bound matching declarations receive `runtime_declaration_verified`; absent declarations remain `not_verified`. Metadata-only uncertainty is not an error band, preserving suspect flags is not QC filtering, and matching declarations are not independent re-execution or visual verification.
 
 ## Failure Rules
 

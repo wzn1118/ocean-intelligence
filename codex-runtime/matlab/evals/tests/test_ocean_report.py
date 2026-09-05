@@ -230,6 +230,32 @@ class RuntimeBundle:
         }
         figure["publication"] = {"layout": {"stable": count == 0}}
 
+    def record_plot_data_evidence(self, identifier: str) -> dict:
+        figure = next(item for item in self.manifest["figures"] if item["id"] == identifier)
+        path = ocean_report.DEFAULT_FIXTURE_DIRECTORY / ocean_report.EXPECTED_FIXTURES[identifier]
+        fixture = json.loads(path.read_bytes())
+        variable_name = "temperature" if identifier == "crossed-time-depth-temperature" else "salinity"
+        variable = fixture["variables"][variable_name]
+        uncertainty = fixture["variables"][variable_name + "_standard_uncertainty"]
+        declaration = {
+            "schema_version": 1, "figure_id": identifier, "fixture_id": identifier,
+            "fixture_sha256": sha256(path), "matlab_release": self.release,
+            "dimension_order": ["depth", "time"],
+            "shape": [len(variable["values"]), len(variable["values"][0])],
+            "time_utc": fixture["coordinates"]["time"]["values"],
+            "depth_m": fixture["coordinates"]["depth"]["values"], "depth_unit": "m",
+            "quantity_unit": variable["unit"], "missing_policy": "preserve",
+            "native_data_source": "Image.CData" if variable_name == "temperature" else "Lines.XData",
+            "native_values": variable["values"],
+            "missing_mask": [[value is None for value in row] for row in variable["values"]],
+            "input_match_asserted": True,
+            "qc": {"provided": True, "policy": "preserve", "flags": fixture["variables"]["qc"]["values"]},
+            "uncertainty": {"present": True, "type": uncertainty["type"], "unit": uncertainty["unit"],
+                            "display": "metadata", "values": uncertainty["values"]},
+        }
+        figure["scientific_data_contract"]["plot_data_evidence"] = declaration
+        return declaration
+
 
 class OceanReportTests(unittest.TestCase):
     def fixture_payload(self, identifier: str) -> dict[str, object]:
@@ -285,7 +311,7 @@ class OceanReportTests(unittest.TestCase):
                 })
                 self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "not_verified")
             report = (root / "report.md").read_text(encoding="utf-8")
-            table = report.split("### 布局测量覆盖")[1].split("## 8.")[0]
+            table = report.split("### 布局测量覆盖")[1].split("### 原生图元数据核对")[0]
             self.assertEqual(report.count("### 布局测量覆盖"), 1)
             for identifier in figures:
                 self.assertEqual(table.count(f"`{identifier}`"), 1)
@@ -464,6 +490,250 @@ class OceanReportTests(unittest.TestCase):
         self.assertEqual(interactive["qc"], {"good": 4, "suspect": 1, "missing": 1})
         self.assertEqual(interactive["missing_time_indices"], [2])
         self.assertEqual(interactive["observation_ids"][2], "temp-050m-003")
+
+    def test_native_grid_evidence_binds_full_arrays_without_visual_promotion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            declarations = {identifier: bundle.record_plot_data_evidence(identifier) for identifier in ocean_report.GRID_NATIVE_SOURCES}
+            bundle.write_metadata()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            for figure in evidence["runtime_evidence"]["figures"]:
+                proof = figure["plot_data_evidence"]
+                if figure["id"] in declarations:
+                    self.assertEqual(proof["status"], "runtime_declaration_verified")
+                    self.assertTrue(proof["local_arrays_match"])
+                    self.assertTrue(proof["input_fixture_binding_verified"])
+                    self.assertEqual(proof["declaration"], declarations[figure["id"]])
+                    self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "preserve")
+                    self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"], "metadata")
+                    self.assertEqual(proof["declaration"]["uncertainty"]["type"], "standard_uncertainty")
+                    self.assertIn("suspect", [flag for row in proof["declaration"]["qc"]["flags"] for flag in row])
+                else:
+                    self.assertEqual(proof["status"], "not_verified")
+                    self.assertFalse(proof["provided"])
+                    self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "not_verified")
+                    self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"], "not_verified")
+                self.assertEqual(figure["verification"]["visual_inspection"], "not_verified")
+                self.assertEqual(figure["verification"]["layout_visual"], "not_verified")
+            report = (root / "report.md").read_text(encoding="utf-8")
+            table = report.split("### 原生图元数据核对")[1].split("## 8.")[0]
+            for identifier in ocean_report.EXPECTED_FIGURES:
+                self.assertEqual(table.count(f"`{identifier}`"), 1)
+            self.assertIn("Image.CData | runtime_declaration_verified", table)
+            self.assertIn("Lines.XData | runtime_declaration_verified", table)
+            self.assertEqual(table.count("not_verified（未提供）"), 2)
+            self.assertIn("preserve，保留 suspect", table)
+            self.assertIn("standard_uncertainty / g kg-1 / metadata", table)
+            self.assertIn("不是视觉验证或独立重执行", table)
+            self.assertNotIn("当前 gate 的温度场、盐度剖面和配对图调用未传", report)
+
+    def test_native_declarations_without_input_snapshots_stay_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            for identifier in ocean_report.GRID_NATIVE_SOURCES:
+                bundle.record_plot_data_evidence(identifier)
+            bundle.write_metadata()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            self.assertEqual(evidence["runtime_fixture_binding"]["status"], "unverified")
+            for figure in evidence["runtime_evidence"]["figures"]:
+                proof = figure["plot_data_evidence"]
+                self.assertEqual(proof["status"], "not_verified")
+                self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "not_verified")
+                if figure["id"] in ocean_report.GRID_NATIVE_SOURCES:
+                    self.assertTrue(proof["local_arrays_match"])
+                    self.assertFalse(proof["input_fixture_binding_verified"])
+            self.assertEqual((root / "report.md").read_text(encoding="utf-8").count("not_verified（输入字节未绑定）"), 2)
+
+    def test_legacy_presence_and_bound_inputs_cannot_replace_native_arrays(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            for figure in evidence["runtime_evidence"]["figures"]:
+                self.assertEqual(figure["plot_data_evidence"]["status"], "not_verified")
+                self.assertFalse(figure["plot_data_evidence"]["provided"])
+                self.assertIsNone(figure["plot_data_evidence"]["declaration"])
+            self.assertEqual((root / "report.md").read_text(encoding="utf-8").count("not_verified（未提供）"), 4)
+
+    def test_native_evidence_versions_identity_and_field_set_are_strict(self) -> None:
+        mutations = (
+            ("schema_version", 2), ("schema_version", True), ("schema_version", 1.0),
+            ("figure_id", "other"), ("fixture_id", "paired-observation-model"),
+            ("fixture_sha256", "0" * 64), ("native_data_source", "copied_input"),
+            ("native_data_source", "Lines.XData"), ("matlab_release", "R2024b"),
+            ("matlab_release", "R9.10.0.2198249 (R2021a) Update 8"),
+            ("input_match_asserted", False), ("input_match_asserted", 1),
+            ("input_match_asserted", "true"), ("unknown_proof", True),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                declaration = bundle.record_plot_data_evidence("crossed-time-depth-temperature")
+                declaration[field] = value
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_native_evidence_bad_arrays_fail_even_without_input_binding(self) -> None:
+        mutations = (
+            lambda proof: proof["native_values"][0].__setitem__(0, 19.0),
+            lambda proof: proof["native_values"][0].__setitem__(0, True),
+            lambda proof: proof["native_values"].pop(),
+            lambda proof: proof.update(native_values=[list(column) for column in zip(*proof["native_values"])]),
+            lambda proof: proof.update(native_values=[list(reversed(row)) for row in proof["native_values"]]),
+            lambda proof: proof["uncertainty"]["values"][0].__setitem__(0, 0.5),
+            lambda proof: proof["uncertainty"]["values"][0].__setitem__(0, False),
+            lambda proof: proof["uncertainty"]["values"].pop(),
+            lambda proof: proof["qc"]["flags"].pop(),
+            lambda proof: proof["qc"].update(flags=[["good" if flag == "suspect" else flag for flag in row] for row in proof["qc"]["flags"]]),
+            lambda proof: proof["missing_mask"][0].__setitem__(0, True),
+            lambda proof: proof["missing_mask"][0].__setitem__(0, 0),
+        )
+        for bound in (False, True):
+            for identifier in ocean_report.GRID_NATIVE_SOURCES:
+                for index, mutate in enumerate(mutations):
+                    with self.subTest(bound=bound, figure=identifier, change=index), tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        bundle = RuntimeBundle(root)
+                        if bound:
+                            bundle.capture_input_fixtures()
+                        declaration = bundle.record_plot_data_evidence(identifier)
+                        mutate(declaration)
+                        bundle.write_metadata()
+                        with self.assertRaises(ocean_report.ReportBuildError):
+                            ocean_report.build_ocean_report(root)
+                        self.assertFalse((root / "report.md").exists())
+
+    def test_native_evidence_missing_masks_cannot_be_filled_or_moved(self) -> None:
+        for field in ("native_values", "uncertainty", "qc", "missing_mask"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                declaration = bundle.record_plot_data_evidence("crossed-time-depth-temperature")
+                if field == "native_values":
+                    declaration[field][2][2] = 0
+                elif field == "uncertainty":
+                    declaration[field]["values"][2][2] = 0
+                elif field == "qc":
+                    declaration[field]["flags"][2][2] = "good"
+                else:
+                    declaration[field][2][2] = False
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+
+    def test_coordinate_roundoff_tolerance_does_not_relax_data_array_equality(self) -> None:
+        for identifier in ocean_report.GRID_NATIVE_SOURCES:
+            for field in ("native_values", "uncertainty"):
+                with self.subTest(figure=identifier, field=field), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    bundle = RuntimeBundle(root)
+                    bundle.capture_input_fixtures()
+                    declaration = bundle.record_plot_data_evidence(identifier)
+                    values = declaration[field] if field == "native_values" else declaration[field]["values"]
+                    values[0][0] = math.nextafter(values[0][0], math.inf)
+                    bundle.write_metadata()
+                    with self.assertRaisesRegex(ocean_report.ReportBuildError, "differs from the complete fixture array"):
+                        ocean_report.build_ocean_report(root)
+
+    def test_native_evidence_coordinates_policies_and_metadata_must_match(self) -> None:
+        mutations = (
+            lambda proof: proof.update(dimension_order=["time", "depth"]),
+            lambda proof: proof.update(shape=[6, 4]),
+            lambda proof: proof.update(shape=[True, 6]),
+            lambda proof: proof.update(time_utc=list(reversed(proof["time_utc"]))),
+            lambda proof: proof["time_utc"].__setitem__(0, "2026-08-01T00:00:00+08:00"),
+            lambda proof: proof.update(depth_m=list(reversed(proof["depth_m"]))),
+            lambda proof: proof["depth_m"].__setitem__(0, False),
+            lambda proof: proof.update(depth_unit="km"),
+            lambda proof: proof.update(quantity_unit="K"),
+            lambda proof: proof.update(missing_policy="fill"),
+            lambda proof: proof["qc"].update(policy="good_only"),
+            lambda proof: proof["qc"].update(provided=False),
+            lambda proof: proof["qc"].update(provided=1),
+            lambda proof: proof["uncertainty"].update(present=False),
+            lambda proof: proof["uncertainty"].update(present="true"),
+            lambda proof: proof["uncertainty"].update(type="standard-deviation"),
+            lambda proof: proof["uncertainty"].update(unit="K"),
+            lambda proof: proof["uncertainty"].update(display="band"),
+            lambda proof: proof["uncertainty"].update(visual_verified=True),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(change=index), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                declaration = bundle.record_plot_data_evidence("crossed-time-depth-temperature")
+                mutate(declaration)
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+
+    def test_native_evidence_null_incomplete_or_misplaced_is_not_ignored(self) -> None:
+        for value in (None, [], True, {}, {"schema_version": 1}, {"provided": True}):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.manifest["figures"][0]["scientific_data_contract"]["plot_data_evidence"] = value
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+        for location in ("runtime", "manifest", "figure"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                container = bundle.runtime if location == "runtime" else bundle.manifest if location == "manifest" else bundle.manifest["figures"][0]
+                container["plot_data_evidence"] = {"provided": True}
+                bundle.write_metadata()
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, "must be nested"):
+                    ocean_report.build_ocean_report(root)
+
+    def test_native_evidence_cannot_extend_to_paired_or_interactive_figures(self) -> None:
+        for identifier in ("paired-observation-model", "paired-interactive"):
+            with self.subTest(figure=identifier), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                declaration = bundle.record_plot_data_evidence("crossed-time-depth-temperature")
+                target = next(item for item in bundle.manifest["figures"] if item["id"] == identifier)
+                target["scientific_data_contract"]["plot_data_evidence"] = declaration
+                bundle.write_metadata()
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, "unsupported for figure"):
+                    ocean_report.build_ocean_report(root)
+
+    def test_gate_native_evidence_wiring_is_scoped_and_reads_result_arrays(self) -> None:
+        gate = MODULE_PATH.with_name("run_matlab_gate.m").read_text(encoding="utf-8")
+        self.assertIn('"QCFlags", temperature_qc, "QCPolicy", "preserve"', gate)
+        self.assertIn('"QCFlags", profile_qc, "QCPolicy", "preserve"', gate)
+        self.assertIn('"UncertaintyType", temperature_fixture.variables.temperature_standard_uncertainty.type', gate)
+        self.assertIn('"UncertaintyType", profile_fixture.variables.salinity_standard_uncertainty.type', gate)
+        self.assertIn('"UncertaintyDisplay", "metadata"', gate)
+        self.assertIn('native_values = double(result.Image.CData)', gate)
+        self.assertIn('native_values(:, series_index) = double(result.Lines(series_index).XData(:))', gate)
+        self.assertIn('isequaln(native_values, expected_values)', gate)
+        self.assertIn('isequaln(result.QCFlags, expected_qc)', gate)
+        self.assertIn('isequaln(result.UncertaintyValues, expected_uncertainty)', gate)
+        self.assertIn('ruler2num(result.Image.XData, result.Axes.XAxis)', gate)
+        self.assertIn('ruler2num(parse_utc_time(fixture.coordinates.time.values), result.Axes.XAxis)', gate)
+        self.assertIn('assert_numeric_coordinates(native_time([1 end]), expected_time([1 end]))', gate)
+        self.assertIn('native_centers = linspace(native_time(1), native_time(end), size(native_values, 2))', gate)
+        self.assertIn('assert_numeric_coordinates(native_centers, expected_time)', gate)
+        self.assertIn('endpoint_ulp = max(eps(abs([actual([1 end]); expected([1 end])])))', gate)
+        self.assertIn('abs(actual - expected) <= 4 * ulp', gate)
+        self.assertNotIn('isequaln(native_time', gate)
+        self.assertIn('contract.plot_data_evidence = measure_grid_plot_data(result, fixture, input_snapshot)', gate)
+        self.assertNotIn('entry.plot_data_evidence', gate)
 
     def test_manifest_scientific_mismatches_fail_before_report_write(self) -> None:
         changes = [

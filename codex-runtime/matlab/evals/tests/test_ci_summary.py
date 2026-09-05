@@ -61,6 +61,31 @@ VALIDATION_SUMMARY_FIXTURE = {
                  "rendered-artifacts: exit 1; log: rendered-artifacts.log"],
 }
 
+DISPLAY_DIAGNOSTICS_FIXTURE = {
+    "schema_version": 1,
+    "scope": "virtual_display_diagnostics_only",
+    "started_at": "2026-09-05T19:00:00Z",
+    "release": "R2021a",
+    "version": "9.10.0 (R2021a)",
+    "display": ":98",
+    "jvm_available": True,
+    "desktop_available": False,
+    "screen_pixels_per_inch": 72,
+    "visual_verified": False,
+    "desktop_interaction_verified": False,
+    "status": "completed_pending_external_review",
+    "cases": [
+        {"id": "publication", "status": "export_checks_completed",
+         "error_identifier": "", "error_message": ""},
+        {"id": "native-pdf-page-probe", "status": "export_checks_completed",
+         "error_identifier": "", "error_message": ""},
+        {"id": "vector-text-alignment-probe", "status": "export_checks_completed",
+         "error_identifier": "", "error_message": ""},
+    ],
+    "failed_count": 0,
+    "completed_at": "2026-09-05T19:02:00Z",
+}
+
 
 class SummaryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -73,6 +98,7 @@ class SummaryTests(unittest.TestCase):
         directory = self.root / ("matlab-full100-" + release)
         directory.mkdir(exist_ok=True)
         path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         return path
 
@@ -123,6 +149,225 @@ class SummaryTests(unittest.TestCase):
 
     def release_result(self, release: str = "R2021a") -> dict:
         return next(result for result in ci_summary.summarize(self.root)["releases"] if result["release"] == release)
+
+    def display_diagnostics(self, expected_release: str, **overrides: object) -> dict:
+        payload = copy.deepcopy(DISPLAY_DIAGNOSTICS_FIXTURE)
+        payload.update(release=expected_release)
+        payload.update(overrides)
+        self.write_json(expected_release, ci_summary.DISPLAY_FILE, payload)
+        return payload
+
+    def main_summary(self, summary: dict) -> dict:
+        result = copy.deepcopy(summary)
+        for release in result["releases"]:
+            release.pop("display_diagnostics", None)
+        return result
+
+    def test_display_missing_old_packages_are_not_run_and_have_no_table(self) -> None:
+        self.complete_runtime()
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(summary["status"], "pending")
+        self.assertEqual(summary["stage_counts"]["total"], 21)
+        self.assertNotIn("虚拟 DISPLAY 独立诊断", ci_summary.markdown(summary))
+        for result in summary["releases"]:
+            diagnostic = result["display_diagnostics"]
+            self.assertFalse(diagnostic["present"])
+            self.assertEqual(diagnostic["status"], "not_run")
+            self.assertEqual(diagnostic["issues"], [])
+            self.assertEqual([case["status"] for case in diagnostic["cases"]], ["not_run"] * 3)
+            self.assertEqual(result["issues"], [])
+
+    def test_display_partial_matrix_and_running_callbacks(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        payload = copy.deepcopy(DISPLAY_DIAGNOSTICS_FIXTURE)
+        payload.update(release="R2026a", status="running")
+        payload.pop("completed_at")
+        payload.pop("failed_count")
+        for case, status in zip(payload["cases"], ("export_checks_completed", "running", "pending")):
+            case["status"] = status
+        self.write_json("R2026a", ci_summary.DISPLAY_FILE, payload)
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(self.main_summary(summary), before)
+        self.assertEqual([result["display_diagnostics"]["status"] for result in summary["releases"]],
+                         ["not_run", "not_run", "running"])
+        diagnostic = summary["releases"][2]["display_diagnostics"]
+        self.assertEqual(diagnostic["issues"], [])
+        self.assertEqual([case["status"] for case in diagnostic["cases"]],
+                         ["export_checks_completed", "running", "pending"])
+        report = ci_summary.markdown(summary)
+        self.assertIn("| R2026a | 运行中 | R2026a | :98 |", report)
+        self.assertIn("| R2021a | 未运行 | 未提供 | 未提供 |", report)
+        self.assertIn("回调 API 完成（待外部检查）", report)
+        self.assertIn("不代表视觉通过或桌面交互验证", report)
+
+    def test_display_completion_never_changes_main_ci_outcome_or_score(self) -> None:
+        self.complete_runtime()
+        for release in ci_summary.RELEASES:
+            self.evaluator(release, status="passed", score=100,
+                           visual_audit={"status": "passed"},
+                           gates=[{"id": "artifact_visual_audit", "status": "passed"}])
+        for main_status in ("pending", "running", "failed", "passed"):
+            with self.subTest(main_status=main_status):
+                stages = self.stages("R2021a")
+                stages["stages"][0]["status"] = main_status
+                self.write_json("R2021a", "ci-stage-status.json", stages)
+                before = self.main_summary(ci_summary.summarize(self.root))
+                for release in ci_summary.RELEASES:
+                    self.display_diagnostics(release)
+                summary = ci_summary.summarize(self.root)
+                self.assertEqual(summary["status"], main_status)
+                self.assertEqual(self.main_summary(summary), before)
+                for result in summary["releases"]:
+                    diagnostic = result["display_diagnostics"]
+                    self.assertEqual(diagnostic["status"], "completed_pending_external_review")
+                    self.assertEqual(diagnostic["issues"], [])
+                self.display_diagnostics("R2021a", visual_verified=True)
+                failed_diagnostic = ci_summary.summarize(self.root)
+                self.assertEqual(failed_diagnostic["releases"][0]["display_diagnostics"]["status"], "failed")
+                self.assertEqual(self.main_summary(failed_diagnostic), before)
+        report = ci_summary.markdown(summary)
+        self.assertIn("完成待外部检查", report)
+        self.assertNotIn("visual passed", report)
+
+    def test_display_completion_does_not_supply_missing_score_or_visual_review(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for release in ci_summary.RELEASES:
+            self.display_diagnostics(release)
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(self.main_summary(summary), before)
+        self.assertEqual(summary["status"], "pending")
+        for result in summary["releases"]:
+            self.assertIsNone(result["evaluator"]["reported_score"])
+            self.assertEqual(result["evaluator"]["visual_status"], "pending")
+
+    def test_display_callback_failures_are_separate_and_errors_are_escaped(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for final in (False, True):
+            with self.subTest(final=final):
+                payload = copy.deepcopy(DISPLAY_DIAGNOSTICS_FIXTURE)
+                payload["cases"][0].update(status="failed", error_identifier="Display:Failure",
+                                            error_message="first | <error> `label`\nstack trace")
+                if final:
+                    payload.update(status="completed_with_failures", failed_count=1)
+                else:
+                    payload.update(status="running")
+                    payload.pop("completed_at")
+                    payload.pop("failed_count")
+                    payload["cases"][1]["status"] = "running"
+                    payload["cases"][2]["status"] = "pending"
+                self.write_json("R2021a", ci_summary.DISPLAY_FILE, payload)
+                summary = ci_summary.summarize(self.root)
+                diagnostic = summary["releases"][0]["display_diagnostics"]
+                self.assertEqual(self.main_summary(summary), before)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertEqual(diagnostic["reported_status"], payload["status"])
+                self.assertEqual(diagnostic["issues"][0]["identifier"], "Display:Failure")
+                self.assertEqual(diagnostic["cases"][0]["error_message"], "first | <error> `label`")
+                report = ci_summary.markdown(summary)
+                self.assertIn("Display:Failure: first &#124; &lt;error&gt; &#96;label&#96;", report)
+                self.assertNotIn("stack trace", report)
+
+    def test_display_invalid_metadata_is_failed_without_affecting_main(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        overrides = [
+            {"schema_version": True}, {"schema_version": 2}, {"scope": "desktop_interaction"},
+            {"scope": None}, {"release": "R2026a"}, {"release": None}, {"display": ""},
+            {"display": False}, {"version": []}, {"started_at": None}, {"visual": True},
+            {"desktop_interaction": True}, {"score": 100}, {"screen_pixels_per_inch": 0},
+            {"screen_pixels_per_inch": True}, {"screen_pixels_per_inch": "72"},
+            {"status": "passed"}, {"status": []}, {"failed_count": False}, {"failed_count": 1},
+            {"failed_count": "0"}, {"completed_at": ""}, {"completed_at": False},
+            {"status": "running"}, {"status": "completed_with_failures"},
+        ]
+        for key in ("visual_verified", "desktop_interaction_verified"):
+            overrides.extend({key: value} for value in (True, 0, 1, "false", None, [], {}))
+        for key in ("jvm_available", "desktop_available"):
+            overrides.extend({key: value} for value in (0, 1, "false", None))
+        for override in overrides:
+            with self.subTest(override=override):
+                self.display_diagnostics("R2021a", **override)
+                summary = ci_summary.summarize(self.root)
+                diagnostic = summary["releases"][0]["display_diagnostics"]
+                self.assertTrue(diagnostic["present"])
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertTrue(diagnostic["issues"])
+                self.assertEqual(self.main_summary(summary), before)
+                ci_summary.markdown(summary)
+                json.dumps(summary, allow_nan=False)
+        self.display_diagnostics("R2021a", jvm_available=False, desktop_available=True)
+        self.assertEqual(self.release_result()["display_diagnostics"]["status"],
+                         "completed_pending_external_review")
+
+    def test_display_invalid_case_shapes_and_contradictory_completion(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        valid_cases = DISPLAY_DIAGNOSTICS_FIXTURE["cases"]
+        invalid_cases = [None, {}, [], "completed", [None], valid_cases[:1],
+                         [valid_cases[0], valid_cases[0], valid_cases[2]]]
+        for override in ({"id": "unknown"}, {"id": []}, {"status": "passed"}, {"status": None},
+                         {"status": True}, {"status": []}, {"status": "running"}, {"status": "pending"},
+                         {"error_identifier": False}, {"error_message": {}},
+                         {"error_message": "error despite completed"}, {"visual_verified": True},
+                         {"status": "failed"}):
+            cases = copy.deepcopy(valid_cases)
+            cases[0].update(override)
+            invalid_cases.append(cases)
+        for key in valid_cases[0]:
+            cases = copy.deepcopy(valid_cases)
+            cases[0].pop(key)
+            invalid_cases.append(cases)
+        for cases in invalid_cases:
+            with self.subTest(cases=cases):
+                self.display_diagnostics("R2021a", cases=cases)
+                summary = ci_summary.summarize(self.root)
+                diagnostic = summary["releases"][0]["display_diagnostics"]
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertTrue(diagnostic["issues"])
+                self.assertEqual(self.main_summary(summary), before)
+                ci_summary.markdown(summary)
+
+    def test_display_malformed_json_and_duplicate_keys_are_diagnostic_failures(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        encoded = json.dumps(DISPLAY_DIAGNOSTICS_FIXTURE)
+        contents = [b"{", b"[]", b"null", b"\xff", b'{"status": NaN}',
+                    encoded.replace('"screen_pixels_per_inch": 72', '"screen_pixels_per_inch": 1e999').encode(),
+                    encoded.replace('"visual_verified": false',
+                                    '"visual_verified": true, "visual_verified": false').encode(),
+                    encoded.replace('"status": "export_checks_completed"',
+                                    '"status": "failed", "status": "export_checks_completed"', 1).encode()]
+        for content in contents:
+            with self.subTest(content=content):
+                path = self.write_json("R2021a", ci_summary.DISPLAY_FILE, {})
+                path.write_bytes(content)
+                summary = ci_summary.summarize(self.root)
+                self.assertEqual(self.main_summary(summary), before)
+                self.assertEqual(summary["releases"][0]["display_diagnostics"]["status"], "failed")
+                self.assertTrue(summary["releases"][0]["display_diagnostics"]["issues"])
+                json.dumps(summary, allow_nan=False)
+                fingerprint = self.fingerprint()
+                process = self.run_cli("--format", "json")
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(json.loads(process.stdout), summary)
+                self.assertEqual(fingerprint, self.fingerprint())
+
+    def test_read_json_duplicate_keys_use_existing_invalid_json_contract(self) -> None:
+        self.complete_runtime()
+        for name in ("ci-stage-status.json", "matlab-runtime-probe.json", "evaluator-result.json",
+                     *ci_summary.POSTPROCESSING_FILES):
+            with self.subTest(name=name):
+                self.complete_runtime()
+                path = self.write_json("R2021a", name, {})
+                path.write_text('{"status":"failed","status":"passed"}', encoding="utf-8")
+                summary = ci_summary.summarize(self.root)
+                self.assertEqual(summary["releases"][0]["status"], "failed")
+                self.assertIn("ci_summary:InvalidJSON", [item["identifier"] for item in summary["releases"][0]["issues"]])
+                self.assertEqual(summary["releases"][1]["runtime_status"], "passed")
+                path.unlink()
 
     def test_empty_artifacts_never_report_postprocessing_pass(self) -> None:
         self.complete_runtime()

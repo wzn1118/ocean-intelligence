@@ -105,8 +105,10 @@ const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 - MATLAB 字体安装证据必须来自 listfonts 或 fc-list 枚举结果的精确字体族名匹配（可忽略大小写），不得用 fc-match fallback 返回了替代字体就认定请求字体已安装。字体候选匹配不等于 PDF 字体嵌入，也不等于 CJK 字形可读；PNG/PDF/SVG 必须分别核验实际产物，未核验项保持 unverified，不得以源码文本或候选字体命中报成功。
 - MATLAB 的 CJK+Latin 输出在用户未指定 FontName 且精确安装检查通过时，默认优先 WenQuanYi Zen Hei，保持主题、导出器和交互字体一致；不覆盖用户显式字体选择。字体探针 33985570222 在 R2021a/R2024b/R2026a 的 WenQuanYi Zen Hei + exportgraphics(..., "ContentType", "vector") PDF 中验证了所测中英文/数字可读、精确文本提取和字体嵌入。这是有限探针证据，不是所有字形或后端的保证。
 - 该探针的原生 PDF 是内容裁剪而非精确页；R2021a/R2024b 的 print PDF 仍未嵌入，改用 WenQuanYi 默认字体不能声称已解决旧版嵌入或精确页合同，也不能据此更换严格导出策略。整图布局、最终尺寸、粗体、中文旋转轴及 PNG/SVG 仍须分别验证，不得沿用探针结果标记完成。两旧版 Noto 原生标题为 ######，Droid 原生 Latin/数字为方框，不能将它们当成等效已验证回退，也不能把这些后端失败伪报为字体未安装。
-- tiledlayout 标题也必须在每个请求格式中核验文本、字形、占位和裁切；其几何漏项目前仍在诊断，不得声称已修复，也不得仅凭现有 bounds 门禁通过认定标题完整。缺少对应产物证据时保留未验证状态。
+- tiledlayout 标题也必须在每个请求格式中核验文本、字形、占位和裁切；已测 layout.Text 无公开 Units/Extent/Position，必须记录未测覆盖，不能用零矩形当成完整几何，也不得仅凭现有 bounds 门禁通过认定标题完整。缺少对应产物证据时保留未验证状态。
+- 所测 headless 版本中仅 drawnow 可能保留占位文字 Extent；先实际原生渲染对应状态。测量探针放在独立隐藏图中，保留相同字体、字号、旋转与 interpreter，避免干扰源 axes 的自动布局；间距使用源图最终实测几何。PNG 正常不能证明 PDF/SVG 对齐，33988300354 的重复导出及 PNG 预热未修复 R2026a 矢量文字定位。
 - 海区报告的统计和图件必须绑定实际参与该次 MATLAB 运行的输入快照；核对相对路径、bytes、SHA-256 与运行记录一致，fixture 包核对 runtime.input_fixtures。报告时另读同名/同 shape 源文件不能替代运行输入；缺少运行时哈希标记 unverified，哈希不一致必须拒绝，不能刷新证据洗白。
+- evaluator 的温度场和盐度剖面通过 scientific_data_contract.plot_data_evidence 记录原生图元值及 helper 返回的 QC/不确定度数组；报告必须逐项核对完整数组、顺序、缺失掩码、单位、策略、release 和输入哈希。仅输入字节绑定且声明匹配时标记 runtime_declaration_verified；缺证据仍为 not_verified，不向其他图外推。metadata 不是误差带，保留 suspect 不是 QC 筛选，声明核对不是独立重执行或视觉验证。
 - 合成 fixture 必须明确标注 synthetic_benchmark/合成数据；即使 MATLAB 实跑和哈希绑定通过，也不能将其描述为真实海况、实测趋势或海区机制证据。
 `;
 
