@@ -341,7 +341,7 @@ test('injects native PNG inches/off and vector inches/on without claiming full v
   assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /runtime\.export_size_units|本次 PNG inches\/off 策略/u);
 });
 
-test('repository entry documents the limited raster probe and pending cross-release validation', () => {
+test('repository entry separates cross-release sizing evidence from pending SVG and visual validation', () => {
   assert.match(repositoryReadme, /先读本目录的 `SKILL\.md` 与本文/u);
   assert.match(repositoryReadme, /用 `which` 核对同名函数来源/u);
   assert.match(repositoryReadme, /不代表本目录已被 Codex 自动发现为技能/u);
@@ -353,10 +353,13 @@ test('repository entry documents the limited raster probe and pending cross-rele
     }
     assert.doesNotMatch(document, /Units="pixels"/u);
   }
-  assert.match(repositorySkill, /still requires full cross-release CI validation/u);
-  assert.match(repositorySkill, /Do not claim the size defect is fixed or that visual quality is approved/u);
+  assert.match(repositorySkill, /full native regression runs passed the dimension checks/u);
+  assert.match(repositorySkill, /This is not full-figure visual approval/u);
+  assert.match(repositorySkill, /has not yet run through MATLAB Java DOM on all three releases/u);
   assert.match(repositorySkill, /shrank fonts and increased tick counts/u);
-  assert.match(repositoryReadme, /仍待跨版本全量 CI 验证，不能声称尺寸问题已修复或视觉满分/u);
+  assert.match(repositoryReadme, /三版全量原生回归的尺寸检查已通过/u);
+  assert.match(repositoryReadme, /这不是全图视觉保证/u);
+  assert.match(repositoryReadme, /尚未在 MATLAB Java DOM 上完成三版执行/u);
   assert.match(repositoryReadme, /不放宽既有门禁/u);
 });
 

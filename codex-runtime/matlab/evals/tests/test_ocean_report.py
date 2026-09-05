@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -32,6 +33,7 @@ INTERACTIVE_VECTOR_PATHS = (
     ("uncertainty", "errorbar", "negative_delta"),
     ("uncertainty", "errorbar", "positive_delta"),
 )
+SIMULATED_AUDIT_REASON = "Synthetic unit-test audit; NOT actual inspector evidence or a visual pass."
 
 
 def sha256(path: Path) -> str:
@@ -223,6 +225,117 @@ class RuntimeBundle:
             })
         self.runtime["input_fixtures"] = inputs
         self.write_metadata()
+
+    def simulated_rendered_audit(self, *, font_failure: bool = True) -> dict:
+        def check(name: str, status: str = "passed", **details) -> dict:
+            return {"name": name, "status": status, "reason": SIMULATED_AUDIT_REASON, **details}
+
+        artifacts = []
+        for figure in self.manifest["figures"]:
+            for format_name, export in figure["exports"].items():
+                path = self.root / export["file"]
+                digest = sha256(path)
+                checks = [check("manifest_binding")]
+                dimensions = {"width": export["width"], "height": export["height"],
+                              "expected_width": export["width"], "expected_height": export["height"]}
+                if format_name == "png":
+                    pixel_count = export["width"] * export["height"]
+                    foreground = pixel_count // 4
+                    checks.extend([check("png_header", **dimensions), check("png_dimensions", **dimensions),
+                                   check("png_pixels", width=export["width"], height=export["height"],
+                                         foreground_pixels=foreground, foreground_fraction=foreground / pixel_count,
+                                         rgb_extrema=[[0, 255], [0, 255], [0, 255]], nonuniform=True)])
+                elif format_name == "svg":
+                    checks.extend([check("svg_xml"), check("svg_references"), check("svg_dimensions", **dimensions),
+                                   check("svg_geometry", width_px=export["width"], height_px=export["height"],
+                                         native_viewbox=[0, 0, export["viewbox_width"], export["viewbox_height"]],
+                                         css_width_px=export["width"], css_height_px=export["height"],
+                                         physical_width_in=export["width"] / 96, physical_height_in=export["height"] / 96),
+                                   check("svg_accessibility", title=figure["title"], description=SIMULATED_AUDIT_REASON)])
+                else:
+                    title = figure["title"]
+                    text_hash = hashlib.sha256(title.encode("utf-8")).hexdigest()
+                    snapshot = {"snapshot_sha256": digest, "bbox_output_sha256": text_hash}
+                    pdfinfo = (f"Pages: 1\nEncrypted: no\nPage 1 size: {export['width']:.17g} x "
+                               f"{export['height']:.17g} pts\n")
+                    embedded = "no" if font_failure else "yes"
+                    pdffonts = ("name type encoding emb sub uni object ID\n--------------------------------------\n"
+                                f"SimulatedUnitTestFont Type 1 WinAnsi {embedded} no yes 1 0\n")
+                    checks.extend([
+                        check("pdfinfo", returncode=0, stdout=pdfinfo, stderr=""),
+                        check("pdffonts", returncode=0, stdout=pdffonts, stderr=""),
+                        check("pdf_page_1_dimensions", **dimensions),
+                        check("pdf_structure", page_count=1, page_dimensions=[{
+                            "page": 1, "width_pt": export["width"], "height_pt": export["height"],
+                        }]),
+                        check("pdf_font_inventory", fonts=[{
+                            "name": "SimulatedUnitTestFont", "type": "Type 1", "encoding": "WinAnsi",
+                            "embedded": embedded, "subset": "no",
+                            "unicode_map": "yes", "object_id": 1, "generation": 0,
+                        }]),
+                        check("pdf_font_embedding", "failed" if font_failure else "passed"),
+                        check("pdftotext", **snapshot, returncode=0, stderr=""),
+                        check("pdf_text_extractability", **snapshot, pages=[{
+                            "page": 1, "word_count": len(title.split()), "text_excerpt": title,
+                            "excerpt_truncated": False, "normalized_text_sha256": text_hash,
+                        }]),
+                        check("pdf_text_integrity", **snapshot, expected_count=1,
+                              normalization="NFKC; whitespace collapsed; CJK-to-CJK extraction gaps joined",
+                              word_order="pdftotext bbox-layout XML order, not coordinate sorting",
+                              all_fonts_have_unicode_maps=True, labels=[{
+                                  "expected": title, "normalized": title, "sources": ["title"],
+                                  "status": "passed", "matching_pages": [1], "partial_matches": [],
+                                  "reason": SIMULATED_AUDIT_REASON,
+                              }]),
+                    ])
+                checks.append(check("stable_snapshot"))
+                artifacts.append({"file": export["file"], "format": format_name, "figure_id": figure["id"],
+                                  "bytes": path.stat().st_size, "sha256": digest, "checks": checks})
+        manifest = self.root / "figures.json"
+        audit = {
+            "schema_version": 1, "evidence_type": "automated_rendered_artifact_inspection",
+            "generated_at": "2026-09-05T18:40:24.397540Z", "scope": "automated_artifact_checks_only",
+            "limitations": SIMULATED_AUDIT_REASON,
+            "human_visual_inspection": "not_verified", "desktop_interaction": "not_verified",
+            "cjk_glyph_rendering": "not_verified", "matlab_execution": "not_verified",
+            "manifest": "/previous-runner/unit-fixture/evaluator-runtime/figures.json",
+            "artifact_root": "/previous-runner/unit-fixture/evaluator-runtime",
+            "manifest_bytes": manifest.stat().st_size, "manifest_sha256": sha256(manifest),
+            "inspector_sha256": hashlib.sha256(SIMULATED_AUDIT_REASON.encode("ascii")).hexdigest(),
+            "dependencies": {
+                "pillow": {"status": "available", "version": "simulated-unit-fixture"},
+                **{name: {"status": "available", "path": f"/previous-runner/unit-fixture/bin/{name}"}
+                   for name in ("pdfinfo", "pdffonts", "pdftotext")},
+            },
+            "policy": {"max_file_bytes": 128 * 1024 * 1024, "max_png_pixels": 40_000_000,
+                       "png_white_threshold": 250, "png_min_foreground_fraction": 0.001,
+                       "svg_ratio_relative_tolerance": 0.005, "pdf_dimension_tolerance_pt": 1.0,
+                       "pdf_max_pages": 1000, "pdf_text_max_output_bytes": 1024 * 1024,
+                       "pdf_text_max_expected_strings": 128, "pdf_text_max_expected_length": 4096,
+                       "pdf_timeout_seconds": 30},
+            "checks": [check("manifest_snapshot")], "artifacts": artifacts,
+            "artifact_sha256": {artifact["file"]: artifact["sha256"] for artifact in artifacts},
+        }
+        self.recount_simulated_audit(audit)
+        return audit
+
+    @staticmethod
+    def recount_simulated_audit(audit: dict) -> None:
+        def status_of(records: list[dict]) -> str:
+            statuses = {record["status"] for record in records}
+            return "failed" if "failed" in statuses else "not_verified" if "not_verified" in statuses else "passed"
+
+        for artifact in audit["artifacts"]:
+            artifact["status"] = status_of(artifact["checks"])
+        audit["status"] = status_of(audit["checks"] + audit["artifacts"])
+        audit["summary"] = {status: sum(artifact["status"] == status for artifact in audit["artifacts"])
+                            for status in ("passed", "failed", "not_verified")}
+        audit["summary"]["artifact_count"] = len(audit["artifacts"])
+
+    def write_simulated_rendered_audit(self, audit: dict) -> Path:
+        path = self.root / "simulated-rendered-audit.json"
+        path.write_text(json.dumps(audit), encoding="utf-8")
+        return path
 
     def record_layout_measurement(self, identifier: str, unmeasured: list[dict] | dict) -> None:
         figure = next(item for item in self.manifest["figures"] if item["id"] == identifier)
@@ -1723,6 +1836,341 @@ class OceanReportTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ocean_report.ReportBuildError, "visual inspection as not_run"):
                 ocean_report.build_ocean_report(root, ocean_report.DEFAULT_FIXTURE_DIRECTORY)
+
+
+class RenderedAuditTests(unittest.TestCase):
+    def assert_valid_audit(self, bundle: RuntimeBundle, audit: dict) -> tuple[Path, dict]:
+        audit_path = bundle.write_simulated_rendered_audit(audit)
+        result = ocean_report.build_ocean_report(bundle.root, rendered_audit=audit_path)
+        self.assertEqual(result["status"], "passed")
+        evidence = json.loads((bundle.root / "report-evidence.json").read_bytes())
+        imported = evidence["runtime_evidence"]["rendered_audit"]
+        self.assertIs(imported["provided"], True)
+        self.assertEqual(imported["binding_status"], "passed")
+        self.assertEqual(imported["status"], audit["status"])
+        self.assertEqual(imported["source"]["bytes"], audit_path.stat().st_size)
+        self.assertEqual(imported["source"]["sha256"], sha256(audit_path))
+        self.assertEqual(imported["manifest"]["bytes"], (bundle.root / "figures.json").stat().st_size)
+        self.assertEqual(imported["manifest"]["sha256"], sha256(bundle.root / "figures.json"))
+        self.assertEqual(imported["summary"], audit["summary"])
+        self.assertEqual({item["file"]: item["checks"] for item in imported["artifacts"]},
+                         {item["file"]: item["checks"] for item in audit["artifacts"]})
+        self.assertEqual(imported["scope"], "automated_artifact_checks_only")
+        self.assertIs(imported["trusted_visual_audit"], False)
+        self.assertFalse(evidence["runtime_evidence"]["visual_inspection"]["verified"])
+        self.assertEqual(evidence["runtime_evidence"]["desktop_validation"]["status"], "not_performed")
+        for figure in evidence["runtime_evidence"]["figures"]:
+            self.assertEqual(figure["verification"]["visual_inspection"], "not_verified")
+        return audit_path, imported
+
+    def assert_invalid_audit(self, mutate, *, font_failure: bool = True) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            audit = bundle.simulated_rendered_audit(font_failure=font_failure)
+            self.assert_valid_audit(bundle, audit)
+            (root / "report.md").unlink()
+            (root / "report-evidence.json").unlink()
+            mutate(audit, bundle)
+            bundle.write_metadata()
+            audit_path = bundle.write_simulated_rendered_audit(audit)
+            with mock.patch.object(ocean_report, "write_outputs", wraps=ocean_report.write_outputs) as writer:
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root, rendered_audit=audit_path)
+                writer.assert_not_called()
+            self.assertFalse((root / "report.md").exists())
+            self.assertFalse((root / "report-evidence.json").exists())
+
+    @staticmethod
+    def pdf_check(audit: dict, name: str) -> dict:
+        artifact = next(item for item in audit["artifacts"] if item["format"] == "pdf")
+        return next(check for check in artifact["checks"] if check["name"] == name)
+
+    def test_valid_simulated_failed_audit_generates_report_with_font_failures_in_front(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            audit = bundle.simulated_rendered_audit()
+            _, imported = self.assert_valid_audit(bundle, audit)
+            self.assertEqual(imported["summary"], {"passed": 8, "failed": 4, "not_verified": 0, "artifact_count": 12})
+            self.assertIn("NOT actual inspector evidence", audit["limitations"])
+            report = (root / "report.md").read_text(encoding="utf-8")
+            front = "\n## ".join(report.split("\n## ", 2)[:2])
+            self.assertIn("failed", front)
+            self.assertEqual(report.replace(r"\_", "_").count("pdf_font_embedding=failed"), 4)
+            self.assertEqual(report.count("embedded=no"), 4)
+            for artifact in audit["artifacts"]:
+                if artifact["format"] == "pdf":
+                    self.assertIn(artifact["file"], report)
+            self.assertIs(imported["trusted_visual_audit"], False)
+
+    def test_valid_simulated_passed_audit_still_is_not_a_visual_or_execution_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            audit = bundle.simulated_rendered_audit(font_failure=False)
+            _, imported = self.assert_valid_audit(bundle, audit)
+            self.assertEqual(imported["summary"], {"passed": 12, "failed": 0, "not_verified": 0, "artifact_count": 12})
+            self.assertIs(imported["trusted_visual_audit"], False)
+
+    def test_no_argument_keeps_rendered_audit_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.write_simulated_rendered_audit(bundle.simulated_rendered_audit())
+            result = ocean_report.build_ocean_report(root)
+            self.assertEqual(result["status"], "passed")
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            imported = evidence["runtime_evidence"]["rendered_audit"]
+            self.assertIs(imported["provided"], False)
+            self.assertEqual(imported["status"], "not_verified")
+            self.assertIs(imported["trusted_visual_audit"], False)
+
+    def test_valid_simulated_text_not_verified_cannot_be_promoted_to_passed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            audit = bundle.simulated_rendered_audit(font_failure=False)
+            check = self.pdf_check(audit, "pdf_text_integrity")
+            check["status"] = "not_verified"
+            check["labels"][0].update(status="not_verified", matching_pages=[])
+            text = "Unrelated simulated extraction"
+            page = self.pdf_check(audit, "pdf_text_extractability")["pages"][0]
+            page.update(text_excerpt=text, word_count=len(text.split()),
+                        normalized_text_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest())
+            bundle.recount_simulated_audit(audit)
+            _, imported = self.assert_valid_audit(bundle, audit)
+            self.assertEqual(imported["status"], "not_verified")
+            self.assertEqual(imported["summary"]["not_verified"], 1)
+
+    def test_cli_explicit_simulated_failed_audit_is_a_successful_report_not_visual_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            audit_path = bundle.write_simulated_rendered_audit(bundle.simulated_rendered_audit())
+            process = subprocess.run([sys.executable, "-B", str(MODULE_PATH), "--runtime-output", str(root),
+                                      "--rendered-audit", str(audit_path)], text=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(json.loads(process.stdout)["status"], "passed")
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            self.assertEqual(evidence["runtime_evidence"]["rendered_audit"]["status"], "failed")
+            self.assertIs(evidence["runtime_evidence"]["rendered_audit"]["trusted_visual_audit"], False)
+
+    def test_explicit_missing_or_invalid_audit_cannot_fall_back_to_no_argument(self) -> None:
+        for kind in ("missing", "empty", "invalid_json", "directory", "symlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                audit_path, _ = self.assert_valid_audit(bundle, bundle.simulated_rendered_audit())
+                (root / "report.md").unlink()
+                (root / "report-evidence.json").unlink()
+                original = audit_path.read_bytes()
+                audit_path.unlink()
+                if kind in {"empty", "invalid_json"}:
+                    audit_path.write_bytes(b"" if kind == "empty" else b'{"status":')
+                elif kind == "directory":
+                    audit_path.mkdir()
+                elif kind == "symlink":
+                    target = root / "audit-target.json"
+                    target.write_bytes(original)
+                    audit_path.symlink_to(target)
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root, rendered_audit=audit_path)
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_root_and_artifact_passes_cannot_contradict_font_failure_leaves(self) -> None:
+        def mutate(audit, bundle):
+            audit["status"] = "passed"
+            audit["summary"] = {"passed": 12, "failed": 0, "not_verified": 0, "artifact_count": 12}
+            for artifact in audit["artifacts"]:
+                artifact["status"] = "passed"
+        self.assert_invalid_audit(mutate)
+
+    def test_deleted_font_failure_checks_cannot_create_a_pass(self) -> None:
+        for remove_inventory in (False, True):
+            with self.subTest(remove_inventory=remove_inventory):
+                def mutate(audit, bundle):
+                    removed = {"pdf_font_embedding", "pdf_font_inventory"} if remove_inventory else {"pdf_font_embedding"}
+                    for artifact in audit["artifacts"]:
+                        artifact["checks"] = [check for check in artifact["checks"] if check["name"] not in removed]
+                    bundle.recount_simulated_audit(audit)
+                    self.assertEqual(audit["status"], "passed")
+                self.assert_invalid_audit(mutate)
+
+    def test_audit_byte_hash_and_snapshot_maps_must_match_current_files(self) -> None:
+        for field in ("manifest_bytes", "manifest_sha256", "artifact_bytes", "artifact_sha256",
+                      "coherent_false_hash", "map_missing", "map_extra", "pdf_snapshot"):
+            with self.subTest(field=field):
+                def mutate(audit, bundle):
+                    artifact = audit["artifacts"][0]
+                    if field == "manifest_bytes":
+                        audit[field] += 1
+                    elif field == "manifest_sha256":
+                        audit[field] = "0" * 64
+                    elif field == "artifact_bytes":
+                        artifact["bytes"] += 1
+                    elif field in {"artifact_sha256", "coherent_false_hash"}:
+                        artifact["sha256"] = "0" * 64
+                        if field == "coherent_false_hash":
+                            audit["artifact_sha256"][artifact["file"]] = artifact["sha256"]
+                    elif field == "map_missing":
+                        del audit["artifact_sha256"][artifact["file"]]
+                    elif field == "map_extra":
+                        audit["artifact_sha256"]["unregistered.pdf"] = "0" * 64
+                    else:
+                        self.pdf_check(audit, "pdf_text_integrity")["snapshot_sha256"] = "0" * 64
+                self.assert_invalid_audit(mutate)
+
+    def test_artifact_identity_coverage_and_duplicates_are_rejected(self) -> None:
+        for operation in ("missing", "duplicate", "duplicate_identity", "wrong_id", "wrong_format", "wrong_file"):
+            with self.subTest(operation=operation):
+                def mutate(audit, bundle):
+                    if operation == "missing":
+                        removed = audit["artifacts"].pop()
+                        del audit["artifact_sha256"][removed["file"]]
+                    elif operation == "duplicate":
+                        audit["artifacts"].append(copy.deepcopy(audit["artifacts"][0]))
+                    elif operation == "duplicate_identity":
+                        audit["artifacts"][3]["figure_id"] = audit["artifacts"][0]["figure_id"]
+                    else:
+                        field = {"wrong_id": "figure_id", "wrong_format": "format", "wrong_file": "file"}[operation]
+                        audit["artifacts"][0][field] = {"wrong_id": "unknown", "wrong_format": "pdf",
+                                                       "wrong_file": "other.png"}[operation]
+                    bundle.recount_simulated_audit(audit)
+                self.assert_invalid_audit(mutate)
+
+    def test_numeric_and_status_types_do_not_accept_boolean_equality(self) -> None:
+        for path, value in (
+            (("schema_version",), True), (("schema_version",), 1.0), (("schema_version",), "1"),
+            (("manifest_bytes",), True), (("artifacts", 0, "bytes"), False),
+            (("summary", "not_verified"), False), (("summary", "failed"), "4"),
+            (("status",), True), (("artifacts", 0, "status"), "success"),
+            (("artifacts", 0, "checks", 0, "status"), None),
+            (("policy", "pdf_dimension_tolerance_pt"), True),
+        ):
+            with self.subTest(path=path, value=value):
+                def mutate(audit, bundle):
+                    target = audit
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = value
+                self.assert_invalid_audit(mutate)
+        with self.subTest(check="pdf_structure", field="page_dimensions[0].page", value=True):
+            def mutate(audit, bundle):
+                self.pdf_check(audit, "pdf_structure")["page_dimensions"][0]["page"] = True
+            self.assert_invalid_audit(mutate)
+
+    def test_font_inventory_cannot_contradict_a_passed_embedding_check(self) -> None:
+        for embedded in ("no", False, True):
+            with self.subTest(embedded=embedded):
+                def mutate(audit, bundle):
+                    self.pdf_check(audit, "pdf_font_inventory")["fonts"][0]["embedded"] = embedded
+                self.assert_invalid_audit(mutate, font_failure=False)
+
+    def test_text_labels_must_cover_current_manifest_and_use_strict_counts(self) -> None:
+        for operation in ("missing", "empty", "wrong_title", "duplicate", "boolean_count"):
+            with self.subTest(operation=operation):
+                def mutate(audit, bundle):
+                    check = self.pdf_check(audit, "pdf_text_integrity")
+                    if operation == "missing":
+                        del check["labels"]
+                    elif operation == "empty":
+                        check.update(labels=[], expected_count=0)
+                    elif operation == "wrong_title":
+                        check["labels"][0].update(expected="Unrelated old title", normalized="Unrelated old title")
+                    elif operation == "duplicate":
+                        check["labels"].append(copy.deepcopy(check["labels"][0]))
+                        check["expected_count"] = 2
+                    else:
+                        check["expected_count"] = True
+                self.assert_invalid_audit(mutate)
+
+    def test_nested_text_failure_cannot_be_hidden_by_passed_check(self) -> None:
+        def mutate(audit, bundle):
+            self.pdf_check(audit, "pdf_text_integrity")["labels"][0].update(status="failed", matching_pages=[])
+        self.assert_invalid_audit(mutate, font_failure=False)
+
+    def test_changed_manifest_metadata_invalidates_audit_without_changing_exports(self) -> None:
+        def mutate(audit, bundle):
+            bundle.manifest["generator"] += " changed after inspection"
+            for artifact in audit["artifacts"]:
+                self.assertEqual(sha256(bundle.root / artifact["file"]), artifact["sha256"])
+        self.assert_invalid_audit(mutate)
+
+    def test_old_absolute_provenance_paths_are_preserved_without_access_or_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            audit = bundle.simulated_rendered_audit()
+            original_open, original_stat, original_lstat = Path.open, Path.stat, Path.lstat
+
+            def guarded_open(path, *args, **kwargs):
+                self.assertFalse(str(path).startswith("/previous-runner/"), f"opened provenance path: {path}")
+                return original_open(path, *args, **kwargs)
+
+            def guarded_stat(path, *args, **kwargs):
+                self.assertFalse(str(path).startswith("/previous-runner/"), f"probed provenance path: {path}")
+                return original_stat(path, *args, **kwargs)
+
+            def guarded_lstat(path, *args, **kwargs):
+                self.assertFalse(str(path).startswith("/previous-runner/"), f"probed provenance path: {path}")
+                return original_lstat(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "open", guarded_open), mock.patch.object(Path, "stat", guarded_stat), \
+                    mock.patch.object(Path, "lstat", guarded_lstat), \
+                    mock.patch.object(subprocess, "Popen", side_effect=AssertionError("report must not rerun inspector tools")):
+                _, imported = self.assert_valid_audit(bundle, audit)
+            self.assertEqual(imported["provenance"], "external_inspector_declaration")
+            self.assertEqual(imported["source"]["declared_manifest"], audit["manifest"])
+            self.assertEqual(imported["source"]["declared_artifact_root"], audit["artifact_root"])
+
+    def test_absolute_or_escaping_artifact_files_are_not_provenance_paths(self) -> None:
+        for path in ("/previous-runner/unit-fixture/figure.png", "../figure.png", "nested/../../figure.png"):
+            with self.subTest(path=path):
+                def mutate(audit, bundle):
+                    audit["artifacts"][0]["file"] = path
+                self.assert_invalid_audit(mutate)
+
+    def test_audit_snapshot_is_rechecked_before_report_write(self) -> None:
+        for operation in ("bytes", "delete", "symlink"):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                audit_path, _ = self.assert_valid_audit(bundle, bundle.simulated_rendered_audit())
+                (root / "report.md").unlink()
+                (root / "report-evidence.json").unlink()
+                original = audit_path.read_bytes()
+                original_render = ocean_report.render_report
+
+                def change_after_render(evidence):
+                    report = original_render(evidence)
+                    if operation == "bytes":
+                        audit_path.write_bytes(original + b"\n")
+                    else:
+                        audit_path.unlink()
+                        if operation == "symlink":
+                            target = root / "replacement-audit.json"
+                            target.write_bytes(original)
+                            audit_path.symlink_to(target)
+                    return report
+
+                with mock.patch.object(ocean_report, "render_report", side_effect=change_after_render), \
+                        mock.patch.object(ocean_report, "write_outputs", wraps=ocean_report.write_outputs) as writer:
+                    with self.assertRaises(ocean_report.ReportBuildError):
+                        ocean_report.build_ocean_report(root, rendered_audit=audit_path)
+                    writer.assert_not_called()
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_scope_and_visual_claims_cannot_promote_automated_evidence(self) -> None:
+        for field, value in (("evidence_type", "human_visual_audit"), ("scope", "complete_visual_approval"),
+                             ("human_visual_inspection", "passed"), ("desktop_interaction", "passed"),
+                             ("cjk_glyph_rendering", "passed"), ("matlab_execution", "passed")):
+            with self.subTest(field=field, value=value):
+                def mutate(audit, bundle):
+                    audit[field] = value
+                self.assert_invalid_audit(mutate, font_failure=False)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,9 @@
 
 `oi_export_figure` 的严格尺寸路径在 R2019b-R2024b 仍明确使用 `print`，不是导出失败后的重试。R2025a+ 原生 PNG 使用 `Units="inches"`、`Width=widthPixels/dpi`、`Height=heightPixels/dpi`、`Resolution=dpi`、`PreserveAspectRatio="off"`；PDF/SVG 保持相同物理尺寸的 inches 与 `PreserveAspectRatio="on"`，均使用 `Padding="figure"`。绘图前先设置最终物理画布，不能把屏幕像素当输出像素。逐格式 `runtime.export_size_units` 记录实际路径的 inches；目标策略不能冒充执行证据。
 
-第11轮有限探针中，保持宽高比 on 为 2/6 尺寸准确，off 为 6/6；但 pixels/off 实图出现字体缩小和刻度变多，拒绝作为生产方案。inches/off 保留近似原物理字号且所测 3/3 尺寸准确，但轴位置和留白有变化。新 PNG 策略仍待跨版本全量 CI 验证，不能声称尺寸问题已修复或视觉满分。必须重新核验真实像素/DPI、字体、刻度、裁切与逐格式产物，不做导出后 resize、重采样、裁切或填边，不放宽既有门禁。
+第11轮有限探针中，保持宽高比 on 为 2/6 尺寸准确，off 为 6/6；但 pixels/off 实图出现字体缩小和刻度变多，拒绝作为生产方案。inches/off 保留近似原物理字号且所测 3/3 尺寸准确，但轴位置和留白有变化。第12、13轮各通过 57/60 个 CI 阶段，R2021a/R2024b/R2026a 各为 19/20；三版全量原生回归的尺寸检查已通过，包含 R2026a PNG inches/off 路径，不再仅有早期探针证据。三幅 unit-circle 图的局部像素包围框宽高差不超过 2 个边缘像素，但这不是全图视觉保证。仍须逐图核验字体、刻度、裁切与各格式产物，不做导出后 resize、重采样、裁切或填边，不放宽既有门禁。
+
+第14轮 `oi_annotate_svg` 仅对受支持的 SVG 子集进行受限嵌套 viewport 规范化：原生 `viewBox` 和绘图坐标保留在内部 viewport，外层 viewport 被规范化。这是原生导出后的 XML 后处理，不是未经处理的纯原生 SVG；未知或不支持的 SVG 必须拒绝，不能泛化覆盖或降低尺寸门禁。数学检查和单一渲染引擎 12 次零像素变化仅为前置证据，尚未在 MATLAB Java DOM 上完成三版执行，也不能继承前两轮的原生或视觉验收结论。
 
 交互图件使用 `assets/interactive_timeseries_native_template.m`，详细边界见 `INTERACTIONS.md`。该模板以稳定 `ObservationID` 连接 data tip 与 brush 选择，并区分桌面 `uifigure`/`exportapp` 和无界面传统 figure/`exportgraphics` 路径；默认不启用生命周期不明确的 `linkdata`。
 
@@ -19,3 +21,7 @@
 - 基线 PNG 使用与输出 manifest 相同的相对文件名；像素阈值可通过 `inspectMatlabPlotRegression` 的 `pixelChannelThreshold` 与 `pixelDiffRatioThreshold` 配置。
 
 `taskType="interactive"` 的 MATLAB 路由会实际调用原生交互模板；其生成脚本额外接收 `ObservationID`、`Station` 和 `QCFlag`，并在生成前校验逐点对齐。对应 Node 契约测试与 MATLAB 回归均在上述回归入口中覆盖。
+
+第13轮 `paired-interactive` v2 原生完整值、QC、不确定度和 errorbar 数组核对已在三版通过；报告 native proof 覆盖为 3/4 图，`paired-observation-model` 比较散点仍为 `not_verified`。这是输入字节绑定的运行声明核对，不是独立重跑、桌面交互或全图视觉证明，也不代表服务已热更新。
+
+报告构建通过 `evals/build_ocean_report.py --runtime-output <运行产物目录> --rendered-audit <外部检查JSON>` 显式接收外部检查文件，核对审计文件 bytes/SHA-256、manifest/产物绑定、检查条件与状态一致性，不自动寻找审计文件。shell 工作流先执行图件检查，再将该文件传入报告；报告只验证外部自动检查声明，不重跑或认证检查工具，不是 trusted 视觉审计。缺证据保持 `not_verified`，旧版 `pdf_font_embedding=failed` 必须明确显示，不能被未验证的文本或视觉项掩盖。本轮三版报告集成都已构建，源 CI 产物未改；报告构建成功不代表其中的图件失败已消除。

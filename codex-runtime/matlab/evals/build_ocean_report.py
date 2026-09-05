@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import importlib.util
 import json
 import math
 import os
@@ -1248,10 +1249,42 @@ def markdown_table_text(value: str) -> str:
     return escaped
 
 
+def empty_rendered_audit() -> dict[str, Any]:
+    return {
+        "provided": False, "source": None, "binding_status": "not_verified", "manifest": None,
+        "artifacts": [], "checks": [], "status": "not_verified",
+        "summary": {"passed": 0, "failed": 0, "not_verified": 0, "artifact_count": 0},
+        "scope": "automated_artifact_checks_only", "provenance": "external_inspector_declaration",
+        "trusted_visual_audit": False,
+        "limitations": "No external rendered audit was supplied; no file discovery or visual verification performed.",
+    }
+
+
+def validate_rendered_audit(path: Path, runtime_bundle: dict[str, Any]) -> dict[str, Any]:
+    payload, snapshot = load_json_snapshot(path, "rendered audit")
+    spec = importlib.util.spec_from_file_location("external_rendered_audit", EVAL_ROOT / "external_rendered_audit.py")
+    if spec is None or spec.loader is None:
+        raise ReportBuildError("cannot load the local external rendered audit validator")
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    try:
+        checked = validator.validate_declaration(payload, runtime_bundle)
+    except (validator.AuditValidationError, KeyError, TypeError, ValueError, OverflowError, RecursionError) as error:
+        raise ReportBuildError(f"invalid rendered audit: {error}") from error
+    return {
+        **empty_rendered_audit(), **checked, "provided": True, "binding_status": "passed",
+        "manifest": dict(runtime_bundle["manifest_file"]), "limitations": validator.LIMITATIONS,
+        "source": {"file": str(path.absolute()), **snapshot, "generated_at": payload["generated_at"],
+                   "inspector_sha256": payload["inspector_sha256"],
+                   "declared_manifest": payload["manifest"], "declared_artifact_root": payload["artifact_root"]},
+    }
+
+
 def render_report(evidence: dict[str, Any]) -> str:
     fixtures = {item["id"]: item for item in evidence["fixtures"]}
     paired = fixtures["paired-observation-model"]
     runtime = evidence["runtime_evidence"]
+    rendered_audit = runtime["rendered_audit"]
     binding_verified = evidence["runtime_fixture_binding"]["status"] == "verified"
     lines = [
         "# MATLAB 海洋合成基准证据报告",
@@ -1265,6 +1298,11 @@ def render_report(evidence: dict[str, Any]) -> str:
         f"- 垂向坐标：{evidence['coverage']['depth']['minimum']:g}-{evidence['coverage']['depth']['maximum']:g} m，正方向向下；各 fixture 的实际范围见后表。",
         "- 水平坐标：经度与纬度均未提供，状态为 `not_provided`。",
         f"- 运行证据：{runtime['runtime']} {runtime['matlab_release']}；`figures.json` 记录执行已验证和产物校验通过。",
+        f"- 外部自动图件检查：`{rendered_audit['status']}`"
+        + (f"（{rendered_audit['summary']['passed']} passed / {rendered_audit['summary']['failed']} failed / "
+           f"{rendered_audit['summary']['not_verified']} not_verified；{rendered_audit['summary']['artifact_count']} 个产物）"
+           if rendered_audit["provided"] else "（未提供显式 rendered audit）")
+        + "。报告生成成功不代表图件质量全部通过；人工视觉仍为 `not_verified`。",
         "- 验证边界：未执行桌面人工验证，未执行人工视觉检查，不形成任何评分或生产验收结论。",
         ("- 输入绑定：已核对 `matlab-runtime.json.input_fixtures` 的三份记录、包内 `fixture-inputs/` 快照及本地统计输入，字节数与 SHA-256 全部一致，输入字节绑定已验证；引用使用包内快照。"
          if binding_verified else
@@ -1372,6 +1410,25 @@ def render_report(evidence: dict[str, Any]) -> str:
             f"| `{artifact['figure_id']}` | {artifact['format'].upper()} | `{artifact['file']}` | "
             f"{dimension_label(artifact)} | {artifact['bytes']} | `{artifact['sha256']}` |"
         )
+    if rendered_audit["provided"]:
+        lines.extend([
+            "", "### 外部自动图件检查", "",
+            "仅重验外部 inspector 声明的文件绑定、检查条件及状态一致性；未重跑工具，不能认证工具执行，也不是 trusted 视觉审计。"
+            "PDF 文本检查仅涉及可提取性，不推定可见字形或裁切原因。failed 优先于 not_verified；已知失败不会降级为未验证。",
+            f"审计 JSON：{markdown_table_text(Path(rendered_audit['source']['file']).name)}；"
+            f"{rendered_audit['source']['bytes']} bytes；SHA-256 `{rendered_audit['source']['sha256']}`。",
+            "", "| 图 ID | 格式 | 自动检查 | 失败或未验证叶子 |", "|---|---|---|---|",
+        ])
+        for artifact in rendered_audit["artifacts"]:
+            details = [f"`{check['name']}={check['status']}`: {markdown_table_text(check['reason'])}"
+                       for check in artifact["checks"] if check["status"] != "passed"]
+            for check in artifact["checks"]:
+                if check["name"] == "pdf_font_inventory" and check["status"] == "passed":
+                    details.extend(f"font {markdown_table_text(font['name'])}: embedded={font['embedded']}"
+                                   for font in check["fonts"] if font["embedded"] != "yes")
+            values = [markdown_table_text(value) for value in
+                      (artifact["figure_id"], artifact["format"].upper(), artifact["status"])]
+            lines.append("| " + " | ".join([*values, "; ".join(details) or "无"]) + " |")
     lines.extend([
         "", "### 布局测量覆盖", "",
         "以下为清单记录，未独立重测。完整标志仅指边界审计覆盖；文件哈希/尺寸通过、`bounds_audited` 或 `layout.stable` 均不等于视觉、字形或布局外观通过。`layout.Text` 无公开 Extent 的标题/标签保持未验证。",
@@ -1432,7 +1489,9 @@ def render_report(evidence: dict[str, Any]) -> str:
             "1. 数据来源为合成基准，非实测海况、遥感产品、再分析或业务预报。",
             "2. 没有命名海区及经纬度，无法生成真实空间覆盖、九区统计或海区风险判断。",
             "3. 样本规模只服务于绘图和合同回归，不能外推季节变化、异常事件或动力机制。",
-            "4. `figures.json` 明确记录人工视觉检查未运行；本报告不补写桌面、字形、PDF 字体嵌入或人工审阅结论。",
+            ("4. `figures.json` 明确记录人工视觉检查未运行；外部自动字体/文本检查单列，不补写桌面、字形或人工审阅通过。"
+             if rendered_audit["provided"] else
+             "4. `figures.json` 明确记录人工视觉检查未运行；本报告不补写桌面、字形、PDF 字体嵌入或人工审阅结论。"),
             "5. 本报告不读取评分结果，也不声明满分、生产就绪或业务验收通过。",
             ("6. 输入字节绑定不等于图上数值、QC 或不确定度呈现已核验，未执行独立图像科学内容核验。"
              if binding_verified else
@@ -1500,6 +1559,7 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
             "desktop_available": runtime_bundle["runtime"]["desktop_available"],
             "desktop_validation": {"status": "not_performed", "reason": "run_matlab_gate records batch/headless assertions only"},
             "visual_inspection": runtime_bundle["manifest"]["visual_inspection"],
+            "rendered_audit": runtime_bundle.get("rendered_audit", empty_rendered_audit()),
             "interaction_assertions": runtime_bundle["runtime"]["interaction"],
             "manifest_file": runtime_bundle["manifest_file"],
             "runtime_file": runtime_bundle["runtime_file"],
@@ -1555,18 +1615,26 @@ def write_outputs(runtime_root: Path, report_text: str, evidence: dict[str, Any]
             path.unlink(missing_ok=True)
     return {
         "status": "passed",
+        "rendered_audit_status": evidence["runtime_evidence"]["rendered_audit"]["status"],
         "report": {"path": str(report_path), "bytes": report_path.stat().st_size, "sha256": sha256_file(report_path)},
         "evidence": {"path": str(evidence_path), "bytes": evidence_path.stat().st_size, "sha256": sha256_file(evidence_path)},
         "artifact_count": len(evidence["runtime_evidence"]["artifacts"]),
     }
 
 
-def build_ocean_report(runtime_output: Path, fixture_directory: Path = DEFAULT_FIXTURE_DIRECTORY) -> dict[str, Any]:
+def build_ocean_report(
+    runtime_output: Path, fixture_directory: Path = DEFAULT_FIXTURE_DIRECTORY, *, rendered_audit: Path | None = None,
+) -> dict[str, Any]:
     if runtime_output.is_symlink() or fixture_directory.is_symlink():
         raise ReportBuildError("runtime and fixture directories must not be symlinks")
     runtime_root = runtime_output.resolve()
+    if rendered_audit is not None and rendered_audit.resolve() in {runtime_root / REPORT_NAME, runtime_root / EVIDENCE_NAME}:
+        raise ReportBuildError("rendered audit input must not be a report output path")
     fixtures, figure_contexts = load_fixture_statistics(fixture_directory.resolve())
     runtime_bundle = validate_runtime_bundle(runtime_root, figure_contexts)
+    runtime_bundle["rendered_audit"] = (
+        validate_rendered_audit(rendered_audit, runtime_bundle) if rendered_audit is not None else empty_rendered_audit()
+    )
     bound_inputs = {item["id"]: item for item in runtime_bundle["input_fixtures"]}
     for fixture in fixtures:
         fixture["reference_file"] = (
@@ -1582,6 +1650,8 @@ def build_ocean_report(runtime_output: Path, fixture_directory: Path = DEFAULT_F
         verify_input_snapshot(input_path, item)
     for fixture in fixtures:
         verify_input_snapshot(fixture_directory / fixture["file"], fixture)
+    if rendered_audit is not None:
+        verify_input_snapshot(rendered_audit, runtime_bundle["rendered_audit"]["source"])
     return write_outputs(runtime_root, report_text, evidence)
 
 
@@ -1597,9 +1667,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--runtime-output", type=Path, required=True, help="Directory containing figures.json, matlab-runtime.json, and exports")
     parser.add_argument("--fixture-dir", type=Path, default=DEFAULT_FIXTURE_DIRECTORY, help="Directory containing the three repository evaluation fixtures")
+    parser.add_argument("--rendered-audit", type=Path, help="Explicit external inspector JSON; validates declarations, not trusted visual approval")
     arguments = parser.parse_args(argv)
     try:
-        result = build_ocean_report(arguments.runtime_output, arguments.fixture_dir)
+        result = build_ocean_report(arguments.runtime_output, arguments.fixture_dir, rendered_audit=arguments.rendered_audit)
     except (ReportBuildError, OSError) as error:
         print(json.dumps({"status": "failed", "error": str(error)}, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1

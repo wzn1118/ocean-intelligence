@@ -11,7 +11,10 @@ required = {
         "png_physical_dpi", "pdf_geometry", "apply_export_font",
         "color_accessibility_audit", "oi_annotate_svg", "ExportSVG",
     ],
-    "oi_annotate_svg.m": ["xmlread", "xmlwrite", "viewBox", "aria-label", "setAttribute"],
+    "oi_annotate_svg.m": ["xmlread", "xmlwrite", "viewBox", "aria-label", "setAttribute",
+                          "validate_normalization_profile", "UnsupportedNormalization",
+                          "nested-native-viewbox-v1", "data-native-viewbox",
+                          "viewport.appendChild(child)", "'overflow', 'visible'"],
     "oi_write_manifest.m": [
         "validate_artifact_evidence", "assert_artifacts_unchanged",
         "validate_written_manifest", "PhysicalSizeMismatch", "movefile",

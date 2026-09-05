@@ -573,12 +573,12 @@ def inspect_svg(data: bytes, record: dict[str, Any] | None,
         require(all(math.isfinite(value) for value in viewbox) and min(viewbox[2:]) > 0,
                 "SVG viewBox must have finite coordinates and positive extents")
         require(math.isclose(width / height, viewbox[2] / viewbox[3], rel_tol=ASPECT_RATIO_TOLERANCE),
-                "SVG viewport/native viewBox aspect ratio mismatch")
+                "SVG viewport/root viewBox aspect ratio mismatch")
         compare_dimensions(checks, "svg_dimensions", width, height, record, 0.001)
         if record is not None and any(key in record for key in ("viewbox_width", "viewbox_height")):
             require(all(positive_number(record.get(key)) and math.isclose(record[key], actual, rel_tol=1e-6, abs_tol=0.001)
                         for key, actual in zip(("viewbox_width", "viewbox_height"), viewbox[2:])),
-                    "SVG native viewBox dimensions differ from manifest")
+                    "SVG root viewBox dimensions differ from manifest")
         declarations = {}
         for declaration in root.get("style", "").split(";"):
             if ":" in declaration:
@@ -587,7 +587,7 @@ def inspect_svg(data: bytes, record: dict[str, Any] | None,
         css_width = svg_length(declarations["width"]) if "width" in declarations else width
         css_height = svg_length(declarations["height"]) if "height" in declarations else height
         require(math.isclose(css_width / css_height, viewbox[2] / viewbox[3], rel_tol=ASPECT_RATIO_TOLERANCE),
-                "SVG CSS viewport/native viewBox aspect ratio mismatch")
+                "SVG CSS viewport/root viewBox aspect ratio mismatch")
         physical_dimensions = (css_width / 96, css_height / 96)
         physical_attributes = ("data-physical-width-in", "data-physical-height-in")
         if any(name in root.attrib for name in physical_attributes):
@@ -602,7 +602,7 @@ def inspect_svg(data: bytes, record: dict[str, Any] | None,
                 require(positive_number(record.get(name))
                         and math.isclose(record[name], measured, rel_tol=1e-6, abs_tol=1e-6),
                         f"SVG manifest {name} differs from CSS physical viewport")
-        add_check(checks, "svg_geometry", "passed", "absolute viewport and current native viewBox ratios agree",
+        add_check(checks, "svg_geometry", "passed", "absolute viewport and serialized root viewBox ratios agree",
                   width_px=width, height_px=height, native_viewbox=viewbox,
                   css_width_px=css_width, css_height_px=css_height,
                   physical_width_in=physical_dimensions[0], physical_height_in=physical_dimensions[1])

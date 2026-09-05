@@ -13,6 +13,7 @@ assert(~isfolder(outputDirectory), "full100_export_contracts:FreshOutput", ...
     "Runtime gate requires a fresh output directory: %s", outputDirectory);
 mkdir(outputDirectory);
 cleanupOutput = onCleanup(@() maybe_remove_output(outputDirectory, keepArtifacts));
+test_svg_viewport_normalization();
 theme = oi_ocean_theme();
 if oi_font_available("WenQuanYi Zen Hei")
     assert(theme.FontName == "WenQuanYi Zen Hei", ...
