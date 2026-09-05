@@ -211,7 +211,7 @@ for (const [targetRelease, exportApi, generalStatus] of [
   });
 }
 
-test('native inches/off policy stays scoped to audited exports and remains an unverified plan', () => {
+test('audited inches/off guidance separates historical sizing from unverified new tasks and general routes', () => {
   for (const targetRelease of ['R2025a', 'R2026a']) {
     const general = routeMatlabTask({ runtime: 'matlab', targetRelease, outputFormats: ['png', 'pdf', 'svg'] });
     assert.equal(general.status, 'ready');
@@ -224,8 +224,20 @@ test('native inches/off policy stays scoped to audited exports and remains an un
   const block = matlabTaskRoutingInstructionBlock();
   assert.match(block, /PNG 使用 Units inches、Width=widthPixels\/dpi、Height=heightPixels\/dpi、Resolution=dpi 和 PreserveAspectRatio off/u);
   assert.match(block, /PDF\/SVG 使用相同物理 Width\/Height 的 Units inches 和 PreserveAspectRatio on/u);
-  assert.match(block, /新 PNG inches\/off 策略尚待跨版本全量 CI 验证，不得声称已修复或视觉满分/u);
+  assert.match(block, /均保留 Padding figure/u);
+  assert.match(block, /逐格式 export_size_units 记录实际请求的 inches/u);
+  assert.match(block, /第12-16轮已有 R2021a\/R2024b\/R2026a 三版原生尺寸证据/u);
+  assert.match(block, /含 R2026a PNG inches\/off/u);
+  assert.match(block, /3 组 circle 局部像素宽高差不超过 2 个边缘像素/u);
+  assert.match(block, /已有尺寸和局部证据不代表本次任务实跑或整体 CI 通过/u);
+  assert.match(block, /全图视觉尚未通过/u);
+  assert.match(block, /每次新图仍须逐格式验证尺寸\/DPI、字体、刻度和裁切/u);
+  assert.doesNotMatch(block, /尚待跨版本全量 CI 验证|待首次全量验证/u);
+  assert.match(block, /目标策略不等于已经实跑通过/u);
   assert.match(block, /不采用会缩小字体并增加刻度的 pixels\/off 路径/u);
+  assert.match(block, /requestedCapabilities 显式包含 auditedFigureManifest/u);
+  assert.match(block, /旧版 exportgraphics 仍可能存在，只是缺少严格尺寸参数/u);
+  assert.match(block, /仅要求 manifest 或出版物理尺寸不改变一般路由的通用 API 策略/u);
 });
 
 test('manifest requirement and physical sizing alone preserve general routing and do not authorize legacy print', () => {

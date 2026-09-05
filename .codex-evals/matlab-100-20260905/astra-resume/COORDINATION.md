@@ -224,3 +224,20 @@
 - 三版12个图例case的原件复核完成，42个原件hash未变；所测R26可见PDF没有观察到旧版标题越框，中英文可提取、WenQuanYi嵌入，但仍不签完整视觉或公开bounds。`pdf-embedding-review-round18.md`的八旧PDF副本实验虽嵌入Nimbus替代字体，却改变颜色/透明度/轮廓并保留旧裁切，拒绝直接用于生产或评分。
 - 早停汇总新增两项回归，原始0分和现有失败不被跨版本/旧包补位覆盖；全部892个本批原文件hash保持不变。汇总仍只是本地声明转述，不认证run或完整替换的元数据。
 - 推送前281项Python、全部已跟踪服务器Node、8项生成器smoke、资产/技能/Family B/导出静态检查通过；61个MATLAB文件通过R2021a语法检查。29文件冻结与workflow YAML/报告触发范围复核通过，完整静态评分70/100、runtime_pending；不与本批失败CI原始0分混称。本轮最小U修复和新增原生负例待新licensed CI。
+
+## 第十九批接续
+
+- 第十八批本地提交 `e9ca42d`，远端 `ac97b7419ccb6ae704f259a633ccf0a6608d39cc`，运行 [33997547843](https://github.com/wzn1118/ocean-intelligence/actions/runs/33997547843) 已结束。三版各19/20、合计57/60，原始90/100，整体CI仍失败。原件 `/tmp/matlab-run-33997547843`，汇总 `/tmp/matlab-ci-summary-33997547843/summary.md`。
+- 三版evaluator-runtime首次完成比较v3生产、原生对象读取和报告消费，四张合成基准图均为 `runtime_declaration_verified`，绑定达到4/4。独立U用例的全部原生断言、PNG/PDF/SVG和manifest也已完成；不是只依据文件存在推断，详见 `comparison-v3-review-round19.md` 的日志末尾标记和完整记录/端点复核。937个原文件hash保持不变。仍没有真实海区观测、完整HTML/DOCX报告或视觉验收。
+- family-b-runtime后续失败来自测试误把匹配ID的合法cellstr当作非法SampleLabels。主线程仅纠正测试：新增行/列cellstr正例，保留并扩充错ID、错序、非向量及非文本负例，不收紧既有helper接口。独立 `test_comparison_native_evidence` 尚未被执行，不能借用evaluator正例或U角色负例声称其篡改测试通过。
+- 原件审查发现R21比较图PNG/SVG的xlabel与图例标题遮挡，旧两版PDF另有标题裁切、图例越界和Courier未嵌入。R26自动外检12/12不是完整视觉通过，旧两版仍各8/12；R24额外DISPLAY的嵌入SVG字体拒绝仍保留。
+- `svg-derived-pdf-review-round19.md`对八份旧原生SVG副本做实际转换及三联图检查。原SVG文字已轮廓化，派生PDF虽为576x360pt却没有任何可提取文字或字体资源；空font表不是嵌入成功。该路径还保留原图例缺陷，拒绝直接替换生产PDF或提升评分。没有重写任何原产物。
+- 原生页面探针新增隔离canvas-extent实验，用真实白色背景矩形测试0pt/3pt内缩的panel导出；保留原三候选和原阶段断言。新实验单独记录原生PDF/PNG、几何、bytes/hash和失败，不计入原阶段数量，也不预称精确页面、字体或视觉通过；等待下一次MATLAB执行。
+- 内置服务曾因常驻模块缓存而未加载新提示，已在空闲检查后重启。专用诊断线程首次Astra请求发生七次网络重试并中断，失败记录保留；容器缺系统CA，补齐证书并重启后，同一线程两轮真实完成，第二轮未传model仍记录gpt-6-astra，均为never和danger-full-access、无审批。只读命令实际返回helper/技能hash，基础developer注入也经rollout核实。详见 `runtime-activation-result-round19.md`；不是全线程刷新、本机MATLAB执行或真实报告验收。
+- Dockerfile仅增加ca-certificates并补wiring回归，用户已有CLI安装/版本修改单独保留、不一并提交；当前容器补证书不等于重建镜像。`thread-instruction-refresh-review-round19.md`核对CLI 0.153.4 schema，turn/start不支持顶层developerInstructions，现有旧线程也缺重建区域上下文的持久字段；没有通过未验证参数覆写旧线程提示。
+- 仓库技能、路由和注入说明更新为已观察到的原生尺寸、单侧U、4/4和本批失败边界；磁盘文档继续更新不等于当前诊断线程自动热刷新。下一轮仍须原生运行、独立产物检查与报告核验，不放宽100分门禁。
+- 海区HTML报告新增逐图变量目录绑定：图内name唯一、属于ocean_report.variables且unit一致，目录冲突不任选一个；合法子集和顺序变化仍允许。16个新增合成用例先复现旧漏检后通过，HTML仍只能引用本图实际变量，不把这类contract测试算作真实海区报告通过。
+- 本轮十个原代理已分批续派：路由/技能同步、比较v3原件复核、图件视觉复核、旧PDF候选实验、原生canvas探针、旧线程提示schema、标签测试独立复核、图件变量目录、报告时间边界、不确定度说明对应关系及探针归档边界。部分代理承担两项接续任务，峰值并发六；不是十个用户侧边栏会话同时活跃。主线程负责环境生效、测试误判修复、整合及新CI。
+- 十项已全部收齐。`comparison-visual-review-round19.md`逐一查看18件图件，定位旧版主标题裁切和图例遮挡，27个审查原件未改。`report-time-review-round19.md`和`report-uncertainty-review-round19.md`实际复现时间解析/交互窗口脱节及自由说明串否定碰撞，下一轮按明确机器字段修复；这不是现有真实海区数据错误的证据。
+- `canvas-probe-contract-review-round19.md`指出补充实验不在汇总中，以及补充写盘可能破坏原报告。主线程已去掉实验后的原报告重写，原报告预先保存独立子报告路径，实验错误仍写stderr/独立记录；汇总JSON和Markdown均显式声明未读取canvas实验、不许由主阶段passed推断成功。新增缺失/失败/运行中/完成的隔离回归通过，未改旧分母或分数。尚未做MATLAB I/O故障注入。
+- 推送前282项Python、全部已跟踪服务器Node、8项生成器smoke、资产/技能/Family B/导出静态检查通过；61个MATLAB文件通过R2021a语法检查，修改后的探针再独立通过。29文件冻结与workflow YAML复核通过，完整静态评分70/100、runtime_pending。新标签正负例、原生篡改及canvas候选仍待新licensed CI，不预称20/20、字体或视觉成功。

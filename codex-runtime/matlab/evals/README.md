@@ -69,14 +69,21 @@ row. The report independently reconstructs that row; single-element shape and
 dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
 Round 13 passed this v2 path on R2021a/R2024b/R2026a. Those earlier archived
-reports had 3/4 native-proof coverage, with comparison `not_verified`.
-That historical coverage does not apply to the failed round-17 packages.
+reports retain 3/4 native-proof coverage, with comparison `not_verified`.
+Round 18 has 4/4 bound declarations on all three releases: every entry under
+`report-evidence.json`'s `runtime_evidence.figures` has
+`plot_data_evidence.status="runtime_declaration_verified"`. Do not upgrade old
+packages with evidence from this later run.
 
-Round 17 adds a comparison v3 candidate for `paired-observation-model`.
+Comparison v3 (`schema_version=3`) for `paired-observation-model` first completed
+licensed same-figure data binding in round 18.
 `oi_plot_comparison` accepts optional strict `RecordMetadata` only for numeric
 row-aligned inputs: exactly `ID`, `Time`, `Depth`, `DepthUnit`, and
 `DepthDirection`, with unique nonblank string IDs, non-NaT UTC datetimes and
 finite nonnegative depths in `m`/`positive_down`, all aligned to input rows.
+Explicit `SampleLabels` must match all IDs; matching string or `cellstr` vectors
+are valid, while `RecordMetadata.ID` must remain a string vector.
+`SampleLabelVariable` is not accepted with this metadata.
 It retains complete `RecordData` and supplied/not-provided QC, with native
 Scatter and horizontal Line `UserData` carrying IDs and call-entry row numbers.
 Omitting metadata preserves existing numeric/tabular calls without invented
@@ -90,10 +97,11 @@ synthetic records, all 11 scatter pairs, unplotted input values, complete masks,
 statistics, release and input hashes. Model QC and uncertainty stay
 `not_provided`: never fill them with zeros or copy observation values. Missing
 observation uncertainty does not remove otherwise accepted scatter pairs.
-The first licensed attempt, run 33996694221, reached comparison export on
-R2021a/R2024b/R2026a but failed its color-accessibility gate before producing v3.
-Synthetic consumer tests are not executed 4/4 proof, independent MATLAB
-execution or visual approval. Legacy packages without v3 remain compatible,
+Run 33997547843 produced and consumed v3 on R2021a/R2024b/R2026a. Consumer mutation
+tests are distinct from `test_comparison_native_evidence`, which this run did
+not reach after the preceding metadata label-test failure. Its 4/4 declarations
+are not native mutation-test success, independent re-execution, or visual
+approval. Legacy packages without v3 remain compatible,
 with comparison unverified; malformed or inconsistent declarations fail.
 The fixtures remain synthetic, not measurements of real ocean conditions.
 
@@ -171,23 +179,28 @@ The existing strict SVG gate remains unchanged. The points-based text test also
 exposed a row/column broadcasting bug; normalizing both extents to four-element
 rows fixes the comparison without changing its 1e-6-pixel threshold.
 
-Round-17 run 33996694221 completed with overall CI failure: 18/20 primary stages
-on each of R2021a/R2024b/R2026a, 54/60 in total.
-Both `family-b-runtime` and `evaluator-runtime` failed with
-`oi_export_figure:ColorAccessibility`: new observation-only uncertainty Lines
-had `HandleVisibility="off"` without an explicit audit role. All three original
-`evaluator-result.json` scores are 0 because `evaluator-runtime/matlab-runtime.json`
-is absent; no new comparison v3 evidence or complete report was produced. Do not reuse
-earlier 90-point scores or 3/4 coverage as this run's result. All three releases got
-past the previous FontUnits error and passed the legend-title text-bounds contracts.
-Historical older-release PDF failures, including unembedded Courier, are not
-resolved by these scoped results.
+Round-18 run 33997547843 completed 19/20 primary stages on each of
+R2021a/R2024b/R2026a, 57/60 in total. `evaluator-runtime` passed on all three;
+each original `evaluator-result.json` has score 90 and status `runtime_pending`,
+not overall CI or visual approval. `family-b-runtime` failed with
+`test_comparison_record_metadata:MissingRejection` for `SampleLabels`: the test
+incorrectly rejected matching `cellstr` labels. Round 19 corrects only that test,
+with new licensed CI still pending; the subsequent native mutation test was not
+reached. Do not change helper APIs or report that test as passed.
 
-The round-18 candidate annotates actual helper-created uncertainty Lines with
-existing appdata `OI_ColorAccessibilityRole="uncertainty"`. It does not change
-the audit algorithm, data, dimension gates or visual gates, and still awaits
-round-18 licensed CI. Hidden handles alone must not exempt finite data from
-the audit. Neither role declarations nor static tests establish visual approval.
+Existing appdata `OI_ColorAccessibilityRole="uncertainty"` annotates only actual
+helper-created uncertainty Lines. Round 18 completed the independent
+`test_comparison_uncertainty` PNG/PDF/SVG exports and manifest on all three
+releases. This does not change the audit algorithm, data, dimension gates or
+visual gates. Hidden handles or role declarations must not exempt arbitrary
+data lines or establish visual approval.
+
+Round 18 passed 12/12 external evaluator artifact checks on R2026a.
+R2021a/R2024b each retained four `pdf_font_embedding` failures, including
+unembedded Courier; the generated reports preserve those failures. The separate
+R2024b DISPLAY diagnostic still rejected an unsupported SVG `font` element with
+`oi_annotate_svg:UnsupportedNormalization`, outside the accepted normalization
+profile. Neither that diagnostic nor external declarations replace visual audit.
 
 ## Commands
 

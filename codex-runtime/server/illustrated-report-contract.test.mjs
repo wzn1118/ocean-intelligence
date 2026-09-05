@@ -84,6 +84,8 @@ test('creates an adaptive illustrated report contract', () => {
   assert.match(instructions, /R2021a, R2024b, R2026a/u);
   assert.match(instructions, /ocean_report object/u);
   assert.match(instructions, /self-contained HTML export/u);
+  assert.match(instructions, /scientific_context\.variables list must use unique names from ocean_report\.variables with exactly matching units/u);
+  assert.match(instructions, /HTML attributes must still reference a variable in that same figure/u);
 });
 
 test('injects the complete universal 15-module report profile for every report topic', () => {
@@ -471,6 +473,104 @@ test('synthetic identity rejects an extra run with no release field', (context) 
   delete run.release;
   fixture.manifest.matlab_ci.runs.push(run);
   assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', 'matlab_ci.runs[3].release');
+});
+
+for (const [field, value, violation] of [
+  ['name', 'unknown_temperature', 'name.unknown_reference'],
+  ['unit', 'K', 'unit.mismatch'],
+]) {
+  for (const additional of [false, true]) {
+    test(`synthetic variable catalog rejects ${field} mismatch, additional=${additional}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      const variables = fixture.manifest.figures[0].scientific_context.variables;
+      if (additional) {
+        fixture.manifest.ocean_report.variables.push({
+          name: 'sea_water_salinity', quantity: 'sea water salinity', unit: 'g kg-1', source_ids: ['source-1'],
+        });
+        variables.push({ name: 'sea_water_salinity', unit: 'g kg-1' });
+      }
+      const index = additional ? 1 : 0;
+      variables[index][field] = value;
+      if (!additional) setReportFigureAttribute(fixture, field === 'name' ? 'data-variable' : 'data-unit', value);
+      const result = assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk',
+        `manifest.figures[0].scientific_context.variables[${index}].${violation}`);
+      assert.equal(result.oceanReportOk, true);
+      assert.equal(result.matlabRuntimeOk, true);
+      assert.equal(result.figureLinksOk, true);
+    });
+  }
+}
+
+for (const units of [['degree_Celsius', 'degree_Celsius'], ['degree_Celsius', 'K'], ['K', 'degree_Celsius']]) {
+  test(`synthetic variable catalog rejects duplicate figure names with units ${units.join('/')}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures[0].scientific_context.variables = units.map((unit) => ({ name: 'sea_water_temperature', unit }));
+    setReportFigureAttribute(fixture, 'data-unit', units[0]);
+    const result = assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk',
+      'manifest.figures[0].scientific_context.variables[1].name.duplicate');
+    assert.equal(result.oceanReportOk, true);
+  });
+
+  test(`synthetic variable catalog rejects ambiguous directory units ${units.join('/')}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const definition = fixture.manifest.ocean_report.variables[0];
+    fixture.manifest.ocean_report.variables = units.map((unit) => ({ ...structuredClone(definition), unit }));
+    const result = assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk',
+      'manifest.figures[0].scientific_context.variables[0].name.ambiguous_reference');
+    assert.equal(result.oceanReportOk, false);
+    assert.ok(result.oceanReport.violations.includes('ocean_report.variables[1].name.duplicate'));
+  });
+}
+
+test('synthetic variable catalog rejects a missing directory entry despite internally consistent HTML', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  fixture.manifest.ocean_report.variables = [];
+  const result = assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk',
+    'manifest.figures[0].scientific_context.variables[0].name.unknown_reference');
+  assert.equal(result.figureLinksOk, true);
+  assert.equal(result.oceanReportOk, false);
+});
+
+for (const count of [1, 2]) {
+  for (const reversed of [false, true]) {
+    test(`synthetic variable catalog accepts a ${count}-variable subset with reversed=${reversed}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      fixture.manifest.ocean_report.variables.push(
+        { name: 'sea_water_salinity', quantity: 'sea water salinity', unit: 'g kg-1', source_ids: ['source-1'] },
+        { name: 'eastward_sea_water_velocity', quantity: 'eastward sea water velocity', unit: 'm s-1', source_ids: ['source-1'] },
+      );
+      fixture.manifest.figures[0].scientific_context.variables = fixture.manifest.ocean_report.variables.slice(0, count)
+        .map(({ name, unit }) => ({ name, unit }));
+      if (reversed) {
+        fixture.manifest.ocean_report.variables.reverse();
+        fixture.manifest.figures[0].scientific_context.variables.reverse();
+      }
+      writeFixtureManifest(fixture);
+      const result = inspectIllustratedReportEvidence(fixture);
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.figureEvidenceOk, true);
+      assert.equal(result.figureLinksOk, true);
+      assert.equal(result.oceanReportOk, true);
+      assert.equal(result.oceanReport.variableCount, 3);
+      assert.equal(fixture.manifest.figures[0].scientific_context.variables.length, count);
+    });
+  }
+}
+
+test('synthetic variable catalog does not let HTML borrow a variable absent from its own figure', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  fixture.manifest.ocean_report.variables.push({
+    name: 'sea_water_salinity', quantity: 'sea water salinity', unit: 'g kg-1', source_ids: ['source-1'],
+  });
+  setReportFigureAttribute(fixture, 'data-variable', 'sea_water_salinity');
+  setReportFigureAttribute(fixture, 'data-unit', 'g kg-1');
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, false);
+  assert.equal(result.figureLinksOk, false);
+  assert.ok(result.figureViolations.includes('figures[0].data-variable.mismatch'));
+  assert.equal(result.figureEvidenceOk, true);
+  assert.equal(result.oceanReportOk, true);
 });
 
 function createSyntheticIdentityFixture(context, release = 'R2026a') {

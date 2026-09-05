@@ -32,6 +32,10 @@ NOTICE = (
     "已知后处理失败优先于缺少视觉审核的 pending。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
     "分数与视觉审核仅转述评分器，缺少证据为 pending。"
     "自动产物检查 passed 也不代表人工视觉审核通过。"
+    "native-pdf-page-probe 的主阶段和 DISPLAY 回调只覆盖原三候选；"
+    "本汇总未读取 canvas-extent-experiment 的补充实验状态。"
+    "如有该实验，须另查其 canvas-extent-experiment.json、逐候选文件和错误日志；"
+    "缺失、失败或不完整实验不能从主阶段 passed 推断成功。"
 )
 
 

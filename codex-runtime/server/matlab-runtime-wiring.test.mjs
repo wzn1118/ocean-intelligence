@@ -42,6 +42,7 @@ test('production wiring keeps MATLAB evidence external and rejects Octave relabe
   assert.match(reportScript, /matlab-capability-\$\{expected_release\}\.tar\.gz/u);
   assert.match(dockerfile, /external-mathworks-only/u);
   assert.match(dockerfile, /octave-evidence-accepted="false"/u);
+  assert.match(dockerfile, /^\s+ca-certificates\s+\\$/mu);
   assert.match(compose, /OCEAN_MATLAB_RELEASE: \$\{OCEAN_MATLAB_RELEASE:-R2026a\}/u);
   assert.match(compose, /MATLAB_LICENSE_FILE: \$\{MATLAB_LICENSE_FILE:-\}/u);
 });

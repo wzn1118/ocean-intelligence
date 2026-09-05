@@ -97,6 +97,7 @@ export function illustratedReportInstructions(contract) {
     `Every figure must provide freshly hashed ${contract.requiredExportFormats.join(' and ').toUpperCase()} exports from the same snapshot. At least ${contract.minimumInteractiveFigures} point-capable figure must additionally provide a self-contained HTML export that passes complete hover/focus, stable ObservationID, scientific-context and MATLAB-evidence checks.`,
     `The manifest matlab_ci matrix must contain ${contract.requiredMatlabReleases.join(', ')} exactly once in required_releases and in runs. Each release must identify MATLAB as the authoritative runtime, record a reproducible command and toolboxes, and prove execution, artifact validation and visual inspection passed. Duplicate or conflicting release records, pending, static-only, failed or Octave evidence must not satisfy the report gate.`,
     'Manifest figure ids, data-source ids and variable names must be nonempty and unique. Every variable source_ids entry must reference a declared data source; mixed invalid entries or ambiguous identifiers do not establish an evidence link.',
+    'Each figure scientific_context.variables list must use unique names from ocean_report.variables with exactly matching units. A figure may use an ordered subset of the catalog, but an unknown variable, conflicting unit or ambiguous catalog entry must fail validation. HTML attributes must still reference a variable in that same figure.',
     'Freeze scripts, reports, and visual artifacts first, then generate the manifest last. The manifest generated_at and file mtime must not predate any referenced report or artifact, and every declared byte count and SHA-256 must match the current file.',
     'Make the HTML publication-quality and responsive: include a strong cover, executive summary, table of contents, clearly paced sections, highlighted findings, captions, source notes, methodology, limitations, and references when evidence is available.',
     `This is a deep report, not a short briefing: the Markdown must be at least ${contract.minimumMarkdownBytes} bytes, the HTML at least ${contract.minimumHtmlBytes} bytes, and the main report must contain at least ${contract.minimumHeadings} meaningful section headings and ${contract.minimumHtmlFigures} figure/visual placements. Expand the analysis with real evidence, comparisons, mechanisms, uncertainty, data tables, and an appendix; never pad with repeated sentences.`,
@@ -175,7 +176,8 @@ export function inspectIllustratedReportEvidence(options = {}) {
   });
   if (new Set(figureIds).size !== figureIds.length) figureViolations.push('figures.id.duplicate');
 
-  const figureEvidence = manifestFigures.map((figure, figureIndex) => inspectFigureScientificEvidence(figure, figureIndex));
+  const reportVariables = Array.isArray(manifest?.ocean_report?.variables) ? manifest.ocean_report.variables : [];
+  const figureEvidence = manifestFigures.map((figure, figureIndex) => inspectFigureScientificEvidence(figure, figureIndex, reportVariables));
   const figureEvidenceViolations = figureEvidence.flatMap((entry) => entry.violations);
   const nonemptyManifestFigureIds = manifestFigures.map((figure) => stringValue(figure?.id)).filter(Boolean);
   if (manifestFigureIds.size !== nonemptyManifestFigureIds.length) figureEvidenceViolations.push('manifest.figures.id.duplicate');
@@ -364,7 +366,7 @@ function inspectMatlabRuntimeMatrix(matrix) {
   return { ok: violations.length === 0, violations, releases };
 }
 
-function inspectFigureScientificEvidence(figure, index) {
+function inspectFigureScientificEvidence(figure, index, reportVariables) {
   const violations = [];
   const prefix = `manifest.figures[${index}]`;
   if (!stringValue(figure?.id)) violations.push(`${prefix}.id`);
@@ -373,9 +375,20 @@ function inspectFigureScientificEvidence(figure, index) {
   if (!stringValue(context?.snapshot_id)) violations.push(`${prefix}.scientific_context.snapshot_id`);
   const variables = Array.isArray(context?.variables) ? context.variables : [];
   if (variables.length === 0) violations.push(`${prefix}.scientific_context.variables`);
+  const variableNames = new Set();
   variables.forEach((variable, variableIndex) => {
-    if (!stringValue(variable?.name)) violations.push(`${prefix}.scientific_context.variables[${variableIndex}].name`);
-    if (!stringValue(variable?.unit)) violations.push(`${prefix}.scientific_context.variables[${variableIndex}].unit`);
+    const variablePrefix = `${prefix}.scientific_context.variables[${variableIndex}]`;
+    const name = stringValue(variable?.name);
+    const unit = stringValue(variable?.unit);
+    if (!name) violations.push(`${variablePrefix}.name`);
+    if (!unit) violations.push(`${variablePrefix}.unit`);
+    if (!name) return;
+    if (variableNames.has(name)) violations.push(`${variablePrefix}.name.duplicate`);
+    variableNames.add(name);
+    const definitions = reportVariables.filter((candidate) => stringValue(candidate?.name) === name);
+    if (definitions.length === 0) violations.push(`${variablePrefix}.name.unknown_reference`);
+    else if (definitions.length !== 1) violations.push(`${variablePrefix}.name.ambiguous_reference`);
+    else if (unit && unit !== stringValue(definitions[0]?.unit)) violations.push(`${variablePrefix}.unit.mismatch`);
   });
   inspectCoverage(context?.temporal_coverage, `${prefix}.scientific_context.temporal_coverage`, violations);
   if (!stringValue(context?.spatial_coverage?.name) || !validBounds(context?.spatial_coverage?.bounds)) violations.push(`${prefix}.scientific_context.spatial_coverage`);

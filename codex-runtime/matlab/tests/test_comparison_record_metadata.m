@@ -12,6 +12,12 @@ explicitLabels = options;
 explicitLabels.SampleLabels = options.RecordMetadata.ID;
 assert(isequaln(run_case(observations, models, explicitLabels), baselineMetrics), ...
     "test_comparison_record_metadata:Labels", "Explicit matching IDs cannot change statistics");
+for labelInput = {cellstr(options.RecordMetadata.ID), reshape(cellstr(options.RecordMetadata.ID), 1, [])}
+    explicitLabels.SampleLabels = labelInput{1};
+    assert(isequaln(run_case(observations, models, explicitLabels), baselineMetrics), ...
+        "test_comparison_record_metadata:CellLabels", ...
+        "Matching cellstr label vectors must preserve the same string record identity and statistics");
+end
 surfaceMetadata = options;
 surfaceMetadata.RecordMetadata.Depth(1) = 0;
 run_case(observations, models, surfaceMetadata);
@@ -434,7 +440,8 @@ labels = options.RecordMetadata.ID;
 wrongLabels = labels;
 wrongLabels(6) = "wrong-id";
 invalidLabels = {[], "", flipud(labels), wrongLabels, labels(1:11), ...
-    cellstr(labels), reshape(labels, 3, 4)};
+    reshape(labels, 3, 4), cell(0, 1), cellstr(wrongLabels), cellstr(flipud(labels)), ...
+    reshape(cellstr(labels), 3, 4), [cellstr(labels(1:11)); {42}], char(labels)};
 [~, axesHandle, cleanup] = make_axes();
 for caseIndex = 1:numel(invalidLabels)
     changed = options;

@@ -216,6 +216,19 @@ class SummaryTests(unittest.TestCase):
             release.pop("display_diagnostics", None)
         return result
 
+    def test_canvas_diagnostics_are_explicitly_outside_summary_scope(self) -> None:
+        self.complete_runtime()
+        baseline = ci_summary.summarize(self.root)
+        for status in ["failed", "running", "completed_diagnostics_only"]:
+            for prefix in ["native-pdf-page-probe", "display-comparison/native-pdf-page-probe"]:
+                self.write_json("R2021a", prefix + "/canvas-extent-experiment/canvas-extent-experiment.json", {
+                    "status": status, "counts_toward_stage": False, "visual_verified": False,
+                })
+            summary = ci_summary.summarize(self.root)
+            self.assertEqual(summary, baseline)
+            self.assertIn("未读取 canvas-extent-experiment", summary["notice"])
+            self.assertIn("不能从主阶段 passed 推断成功", ci_summary.markdown(summary))
+
     def test_display_missing_old_packages_are_not_run_and_have_no_table(self) -> None:
         self.complete_runtime()
         summary = ci_summary.summarize(self.root)

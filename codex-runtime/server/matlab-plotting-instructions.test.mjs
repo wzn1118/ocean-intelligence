@@ -11,6 +11,7 @@ import { matlabPlotRoutingInstructionBlock } from './matlab-plot-router.mjs';
 
 const repositorySkill = readFileSync(new URL('../matlab/SKILL.md', import.meta.url), 'utf8');
 const repositoryReadme = readFileSync(new URL('../matlab/README.md', import.meta.url), 'utf8');
+const evaluationReadme = readFileSync(new URL('../matlab/evals/README.md', import.meta.url), 'utf8');
 const matlabAssetDirectory = new URL('../matlab/assets/', import.meta.url);
 const matlabAssets = readdirSync(matlabAssetDirectory, { withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.endsWith('.m'))
@@ -280,7 +281,8 @@ test('routes an explicit Octave context to Octave templates without changing MAT
       'ObservationUncertaintyVariable', 'SourceRowOrigin', 'paired-interactive',
       'paired-observation-model', 'plot_data_evidence', 'runtime_declaration_verified',
       'legend.title', 'matlab.graphics.illustration.legend.Text', 'unmeasured_text_objects',
-      '--rendered-audit', 'pdf_font_embedding', '3/4', '4/4', '33996694221']) {
+      '--rendered-audit', 'pdf_font_embedding', '3/4', '4/4', '33997547843',
+      'test_comparison_record_metadata', 'test_comparison_native_evidence']) {
       assert.ok(!instructions.includes(matlabOnlyTerm), `MATLAB-only evidence leaked into Octave: ${matlabOnlyTerm}`);
     }
     assert.deepEqual(repositoryExportTable(instructions), []);
@@ -368,12 +370,19 @@ test('scopes tested SVG DOM normalization to XML postprocessing and retains fail
     assert.match(repositoryBlock, /runtime contract 仅剩 visual_inspection\.required 失败/u);
     assert.match(repositoryBlock, /R2026a 的十二产物外检通过也不等于视觉或整体 CI 通过/u);
     assert.match(repositoryBlock, /不代表本次会话已执行、已部署或既有会话热更新/u);
-    assert.match(repositoryBlock, /33996694221 三版各 18\/20，合计 54\/60/u);
-    assert.match(repositoryBlock, /oi_export_figure:ColorAccessibility 拒绝/u);
-    assert.match(repositoryBlock, /原始评分均为 0，不能拼接历史产物或沿用上一轮 90 分/u);
+    assert.match(repositoryBlock, /最近已完成的第18轮 33997547843/u);
+    assert.match(repositoryBlock, /R2021a\/R2024b\/R2026a 各 19\/20，合计 57\/60/u);
+    assert.match(repositoryBlock, /evaluator-runtime 三版 passed/u);
+    assert.match(repositoryBlock, /evaluator-result\.json 原始评分为 90、状态仍为 runtime_pending/u);
+    assert.match(repositoryBlock, /不是整体 CI 或视觉通过/u);
+    assert.match(repositoryBlock, /test_comparison_record_metadata:MissingRejection（SampleLabels）/u);
+    assert.match(repositoryBlock, /测试误将与 ID 一致的 cellstr 标签列为负例/u);
+    assert.match(repositoryBlock, /第19轮仅修正标签测试，仍待新 licensed CI/u);
+    assert.match(repositoryBlock, /test_comparison_native_evidence 原生篡改测试尚未进入/u);
     assert.match(repositoryBlock, /OI_ColorAccessibilityRole="uncertainty"/u);
     assert.match(repositoryBlock, /不改变数据、掩码或审计算法/u);
     assert.match(repositoryBlock, /不能用角色标记豁免任意数据线/u);
+    assert.doesNotMatch(repositoryBlock, /最近第17轮|角色修复候选仍待|原始评分均为 0/u);
   }
 });
 
@@ -391,6 +400,7 @@ test('documents observation-only uncertainty as an explicit native API without i
     assert.match(repositoryBlock, /缺观测不确定度保留有限且 QC 接受的散点和统计/u);
     assert.match(repositoryBlock, /只是不画该点的水平区间/u);
     assert.match(repositoryBlock, /默认 UncertaintySides="both" 的双侧契约不变/u);
+    assert.match(repositoryBlock, /test_comparison_uncertainty 已在三版完成 PNG\/PDF\/SVG 导出与 manifest/u);
   }
   const comparisonAsset = readFileSync(new URL('oi_plot_comparison.m', matlabAssetDirectory), 'utf8');
   assert.match(comparisonAsset, /oi_get_option\(options,"UncertaintySides","both"\)/u);
@@ -407,7 +417,10 @@ test('keeps comparison record metadata strict, row-aligned and optional', () => 
     assert.match(repositoryBlock, /Time 是逐行对齐、非 NaT 的 UTC datetime 向量/u);
     assert.match(repositoryBlock, /Depth 是逐行对齐、实数有限非负的 numeric 向量/u);
     assert.match(repositoryBlock, /DepthUnit="m"、DepthDirection="positive_down"/u);
-    assert.match(repositoryBlock, /SampleLabels 必须与全部 ID 一致，不能同时使用 SampleLabelVariable/u);
+    assert.match(repositoryBlock, /SampleLabels 必须与全部 ID 一致/u);
+    assert.match(repositoryBlock, /匹配的 string 或 cellstr 向量均合法/u);
+    assert.match(repositoryBlock, /不能同时使用 SampleLabelVariable/u);
+    assert.match(repositoryBlock, /RecordMetadata\.ID 仍必须是 string 向量/u);
     assert.match(repositoryBlock, /result\.RecordData 保留全部原始行、观测\/模型值、时间、深度和身份/u);
     assert.match(repositoryBlock, /result\.QC 保留实际提供的 flags 或 not_provided/u);
     assert.match(repositoryBlock, /Scatter\/水平 Line 的 UserData 绑定选中 RecordID、SourceRow 和 SourceRowOrigin="call_entry_order"/u);
@@ -418,22 +431,26 @@ test('keeps comparison record metadata strict, row-aligned and optional', () => 
   assert.match(comparisonAsset, /numel\(fieldnames\(metadata\)\) == numel\(requiredFields\)/u);
   assert.match(comparisonAsset, /"SourceRowOrigin","call_entry_order"/u);
   assert.match(comparisonAsset, /if ~isempty\(recordData\)\s+result\.RecordData = recordData;/u);
+  assert.match(comparisonAsset, /isstring\(labelInput\) \|\| iscellstr\(labelInput\)/u);
+  assert.match(comparisonAsset, /isequal\(explicitLabels\(:\),sampleLabels\)/u);
+  assert.match(comparisonAsset, /isstring\(recordIDs\) && isvector\(recordIDs\)/u);
 });
 
-test('separates executed native 3-of-4 coverage from the comparison v3 candidate', () => {
+test('separates archived 3-of-4 and round-18 4-of-4 declarations from unexecuted native mutation tests', () => {
   for (const repositoryBlock of repositoryInstructionBlocks()) {
-    assert.match(repositoryBlock, /最近已确认原生证据覆盖为 3\/4 图/u);
+    assert.match(repositoryBlock, /旧 v2 归档覆盖为 3\/4 图/u);
     assert.match(repositoryBlock, /第13轮三版通过的 paired-interactive v2 完整值\/QC\/不确定度\/errorbar 数组/u);
     assert.match(repositoryBlock, /旧包的比较散点仍为 not_verified/u);
-    assert.match(repositoryBlock, /paired-observation-model v3 是当前代码候选/u);
+    assert.match(repositoryBlock, /第18轮三版 report-evidence\.json 的 runtime_evidence\.figures 四图的 plot_data_evidence\.status 均为 runtime_declaration_verified/u);
+    assert.match(repositoryBlock, /最新原生证据覆盖为 4\/4；不得据此升级旧包/u);
+    assert.match(repositoryBlock, /paired-observation-model v3（schema_version=3）在第18轮首次完成三版同图原生数据绑定/u);
     assert.match(repositoryBlock, /run_matlab_gate 已接入观测侧不确定度与 RecordMetadata/u);
     assert.match(repositoryBlock, /读取原生 Scatter 坐标、水平 Line 端点、归属和 UserData 身份/u);
-    assert.match(repositoryBlock, /消费者及 mutation tests 已实现/u);
+    assert.match(repositoryBlock, /消费者 mutation tests 已实现，但不是此次未进入的原生篡改测试/u);
     assert.match(repositoryBlock, /完整 12 条合成记录、11 对散点、未绘值、QC\/不确定度掩码、统计、release 和输入哈希/u);
     assert.match(repositoryBlock, /模型 QC\/不确定度明确为 not_provided/u);
-    assert.match(repositoryBlock, /第17轮 33996694221 在导出阶段失败，尚未执行 v3 读取与原生篡改测试/u);
-    assert.match(repositoryBlock, /角色修复候选仍待下一轮 licensed CI/u);
-    assert.match(repositoryBlock, /不得把本地测试通过写成 4\/4 已实跑/u);
+    assert.match(repositoryBlock, /4\/4 声明绑定不能冒充原生篡改全过、真实海域报告或全图视觉通过/u);
+    assert.doesNotMatch(repositoryBlock, /最近已确认原生证据覆盖为 3\/4|v3 是当前代码候选|尚未执行 v3 读取/u);
     assert.match(repositoryBlock, /无 v3 的旧包保持兼容且比较图未验证/u);
     assert.match(repositoryBlock, /畸形或不匹配声明必须失败，不得绕过校验/u);
     assert.match(repositoryBlock, /不是独立重执行或视觉验证，也不是桌面交互验证/u);
@@ -470,7 +487,32 @@ test('binds explicit rendered audit declarations and never hides known older PDF
     assert.match(repositoryBlock, /pdf_font_embedding=failed（含未嵌入 Courier）必须显示/u);
     assert.match(repositoryBlock, /不能被未验证的文本或视觉项掩盖/u);
     assert.match(repositoryBlock, /报告构建成功、文本可提取都不等于字形可读或视觉通过/u);
+    assert.match(repositoryBlock, /第18轮 R2026a 外部产物检查 12\/12 通过/u);
+    assert.match(repositoryBlock, /R2021a\/R2024b 各有 4 件 PDF 的 pdf_font_embedding 失败/u);
+    assert.match(repositoryBlock, /独立 DISPLAY 诊断中，R2024b 仍以 oi_annotate_svg:UnsupportedNormalization 拒绝白名单外的 SVG font 元素/u);
+    assert.match(repositoryBlock, /不能把该诊断与 evaluator 产物混为一谈/u);
   }
+});
+
+test('repository documents agree on round-18 evidence and the pending label-test correction', () => {
+  for (const [name, document] of [['SKILL', repositorySkill], ['README', repositoryReadme],
+    ['evals README', evaluationReadme]]) {
+    for (const term of ['33997547843', '19/20', '57/60', '90', 'runtime_pending',
+      'test_comparison_record_metadata:MissingRejection', 'SampleLabels', 'cellstr',
+      'test_comparison_native_evidence', 'test_comparison_uncertainty', '3/4', '4/4',
+      'schema_version=3', 'runtime_evidence.figures', 'runtime_declaration_verified',
+      'not_provided', '12/12', 'pdf_font_embedding', 'oi_annotate_svg:UnsupportedNormalization']) {
+      assert.ok(document.includes(term), `${name} missing current evidence boundary: ${term}`);
+    }
+    assert.doesNotMatch(document, /still awaits round-18 licensed CI|仍待第18轮 CI|successful end-to-end evidence is still absent/u);
+  }
+  assert.match(repositorySkill, /earlier archived reports retain 3\/4 native-proof coverage/u);
+  assert.match(repositorySkill, /Round 19 corrects only that test and awaits new licensed CI/u);
+  assert.match(repositorySkill, /native mutation test was not reached/u);
+  assert.match(repositoryReadme, /第19轮仅修正标签测试，仍待新 licensed CI/u);
+  assert.match(repositoryReadme, /原生篡改测试尚未进入/u);
+  assert.match(evaluationReadme, /native mutation test was not\s+reached/u);
+  assert.match(evaluationReadme, /not native mutation-test success, independent re-execution, or visual\s+approval/u);
 });
 
 test('repository entry separates verified sizing and SVG contracts from pending visual validation', () => {

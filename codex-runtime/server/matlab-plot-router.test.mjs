@@ -262,7 +262,7 @@ test('routing instruction builder recommends only real MATLAB assets and native 
   assert.doesNotMatch(block, /surface_3d_native_template|oi_resolve_font|oi_configure_graphics|oi_plot_timeseries/u);
 });
 
-test('routing instructions separate native raster inches/off from vector inches/on and unverified rendering', () => {
+test('routing instructions separate historical sizing evidence from each new raster and vector export', () => {
   const block = matlabPlotRoutingInstructionBlock();
   assert.match(block, /PNG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi、Resolution=dpi 和 PreserveAspectRatio="off"/u);
   assert.match(block, /PDF\/SVG 使用相同物理尺寸的 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi 和 PreserveAspectRatio="on"/u);
@@ -271,8 +271,17 @@ test('routing instructions separate native raster inches/off from vector inches/
   assert.match(block, /runtime\.export_size_units 按实际路径记录：原生 PNG、print PNG、PDF 及请求的 SVG 均为 inches/u);
   assert.match(block, /不采用会缩小字体并增加刻度的 pixels\/off 路径/u);
   assert.match(block, /不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误/u);
-  assert.match(block, /本次 PNG inches\/off 策略尚待跨版本全量 CI 验证，不得声称尺寸偏差已经修复或视觉满分/u);
+  assert.match(block, /第12-16轮已有 R2021a\/R2024b\/R2026a 三版原生尺寸证据/u);
+  assert.match(block, /含 R2026a PNG inches\/off/u);
+  assert.match(block, /3 组 circle 局部像素宽高差不超过 2 个边缘像素/u);
+  assert.match(block, /已有尺寸和局部证据不代表本次任务实跑或整体 CI 通过/u);
+  assert.match(block, /全图视觉尚未通过/u);
+  assert.match(block, /每次新图仍须逐格式验证尺寸\/DPI、字体、刻度和裁切/u);
+  assert.doesNotMatch(block, /尚待跨版本全量 CI 验证|待首次全量验证/u);
   assert.match(block, /目标策略不能冒充运行证据/u);
+  assert.match(block, /apiPlan\.export 仅说明通用 API 可用性/u);
+  assert.match(block, /实际目标策略见 apiPlan\.exportFormats 与 headless\.exportApis/u);
+  assert.match(block, /不改写其他一般路由的通用能力/u);
   assert.match(block, /结合源图实测边界与导出器几何证据检查布局，保留未测覆盖/u);
   assert.match(block, /不得冒充 PNG\/PDF 裁剪、重叠、中文字形、灰度、色觉或字体嵌入验收/u);
   assert.doesNotMatch(block, /PNG 使用 Units="pixels"|两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
