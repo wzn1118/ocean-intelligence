@@ -97,7 +97,7 @@ wrappedDirection = mod(displayDirection(directionalMask), 360);
 validWeights = weights(directionalMask);
 binWidth = 360 / binCount;
 centeredDirection = mod(wrappedDirection + binWidth / 2, 360) - binWidth / 2;
-binEdges = (-binWidth / 2:binWidth:360 - binWidth / 2)';
+binEdges = -binWidth / 2:binWidth:360 - binWidth / 2;
 binIndex = discretize(centeredDirection, binEdges);
 assert(all(isfinite(binIndex)), "oi_plot_direction_rose:BinAssignment", ...
     "Every directional sample must map to exactly one circular bin");
