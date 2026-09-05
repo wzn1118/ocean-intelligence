@@ -162,6 +162,177 @@ test('rejects incomplete ocean context, cross-format drift, and non-MATLAB runti
   assert.match(result.matlabRuntime.violations.join('\n'), /R2024b\.runtime/u);
 });
 
+for (const key of ['raw', 'valid', 'missing', 'qc_rejected']) {
+  test(`rejects a QC ${key}=20 prefix match against manifest ${key}=2`, () => {
+    const fixture = createReportEvidenceFixture();
+    fixture.manifest.figures[0].scientific_context.qc[key] = 2;
+    const summary = Object.entries(fixture.manifest.figures[0].scientific_context.qc)
+      .map(([name, count]) => `${name}=${name === key ? 20 : count}`).join(' ');
+    setReportFigureAttribute(fixture, 'data-qc-summary', summary);
+    writeFixtureManifest(fixture);
+
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false);
+    assert.equal(result.figureLinksOk, false);
+    assert.ok(result.figureViolations.includes(`figures[0].data-qc-summary.${key}.mismatch`));
+    assert.equal(result.figureEvidenceOk, true);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.matlabRuntimeOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+
+  for (const conflicting of [false, true]) {
+    test(`rejects ${conflicting ? 'conflicting' : 'identical'} duplicate QC ${key} tokens`, () => {
+      const fixture = createReportEvidenceFixture();
+      const duplicate = fixture.manifest.figures[0].scientific_context.qc[key] + (conflicting ? 1 : 0);
+      setReportFigureAttribute(fixture, 'data-qc-summary',
+        `raw=2 valid=2 missing=0 qc_rejected=0 ${key}=${duplicate}`);
+      writeFixtureManifest(fixture);
+
+      const result = inspectIllustratedReportEvidence(fixture);
+      assert.equal(result.ok, false);
+      assert.equal(result.figureLinksOk, false);
+      assert.ok(result.figureViolations.some((violation) => violation.startsWith('figures[0].data-qc-summary.')));
+    });
+  }
+}
+
+for (const [name, summary, raw] of [
+  ['decimal', 'raw=2.0 valid=2 missing=0 qc_rejected=0'],
+  ['fraction', 'raw=2.5 valid=2 missing=0 qc_rejected=0'],
+  ['exponent', 'raw=2e0 valid=2 missing=0 qc_rejected=0'],
+  ['negative', 'raw=-2 valid=2 missing=0 qc_rejected=0'],
+  ['explicit plus sign', 'raw=+2 valid=2 missing=0 qc_rejected=0'],
+  ['leading zero', 'raw=02 valid=2 missing=0 qc_rejected=0'],
+  ['hexadecimal', 'raw=0x2 valid=2 missing=0 qc_rejected=0'],
+  ['NaN', 'raw=NaN valid=2 missing=0 qc_rejected=0'],
+  ['Infinity', 'raw=Infinity valid=2 missing=0 qc_rejected=0'],
+  ['unsafe integer', 'raw=9007199254740992 valid=2 missing=0 qc_rejected=0', 9007199254740992],
+  ['rounded unsafe integer', 'raw=9007199254740993 valid=2 missing=0 qc_rejected=0', 9007199254740992],
+  ['unknown key', 'raw=2 valid=2 missing=0 qc_rejected=0 total=2'],
+  ['trailing prose', 'raw=2 valid=2 missing=0 qc_rejected=0 verified'],
+  ['concatenated tokens', 'raw=2valid=2 missing=0 qc_rejected=0'],
+  ['semicolon separator', 'raw=2; valid=2 missing=0 qc_rejected=0'],
+  ['repeated equals sign', 'raw=2=20 valid=2 missing=0 qc_rejected=0'],
+  ['prefixed key', 'draw=2 valid=2 missing=0 qc_rejected=0'],
+  ['missing key', 'raw=2 valid=2 missing=0'],
+]) {
+  test(`rejects QC summary with ${name}`, () => {
+    const fixture = createReportEvidenceFixture();
+    if (raw !== undefined) fixture.manifest.figures[0].scientific_context.qc.raw = raw;
+    setReportFigureAttribute(fixture, 'data-qc-summary', summary);
+    writeFixtureManifest(fixture);
+
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false);
+    assert.equal(result.figureLinksOk, false);
+    assert.ok(result.figureViolations.some((violation) => violation.startsWith('figures[0].data-qc-summary.')));
+    assert.equal(result.figureEvidenceOk, true);
+    assert.equal(result.matlabRuntimeOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const [name, summary, qc] of [
+  ['zero counts', 'raw=0 valid=0 missing=0 qc_rejected=0', { raw: 0, valid: 0, missing: 0, qc_rejected: 0 }],
+  ['reordered space-separated counts', '  qc_rejected=0   missing=0 valid=2  raw=2  ', { raw: 2, valid: 2, missing: 0, qc_rejected: 0 }],
+  ['maximum safe integer without a new total constraint', 'raw=9007199254740991 valid=2 missing=0 qc_rejected=0', { raw: Number.MAX_SAFE_INTEGER, valid: 2, missing: 0, qc_rejected: 0 }],
+]) {
+  test(`accepts QC ${name}`, () => {
+    const fixture = createReportEvidenceFixture();
+    fixture.manifest.figures[0].scientific_context.qc = qc;
+    setReportFigureAttribute(fixture, 'data-qc-summary', summary);
+    writeFixtureManifest(fixture);
+
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.figureViolations, []);
+  });
+}
+
+for (const release of REQUIRED_MATLAB_REPORT_RELEASES) {
+  test(`accepts a figure whose actual ${release} release matches its passed matrix entry`, () => {
+    const fixture = createReportEvidenceFixture();
+    fixture.manifest.figures[0].runtime.matlab_release = release;
+    setReportFigureAttribute(fixture, 'data-matlab-release', release);
+    writeFixtureManifest(fixture);
+
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+}
+
+for (const release of ['R2021a', 'R2024b']) {
+  test(`rejects HTML ${release} for an actual R2026a figure even when both matrix releases passed`, () => {
+    const fixture = createReportEvidenceFixture();
+    setReportFigureAttribute(fixture, 'data-matlab-release', release);
+    writeFixtureManifest(fixture);
+
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false);
+    assert.equal(result.figureLinksOk, false);
+    assert.deepEqual(result.figureViolations, ['figures[0].data-matlab-release.mismatch']);
+    assert.equal(result.matlabRuntimeOk, true);
+    assert.equal(result.figureEvidenceOk, true);
+  });
+}
+
+test('binds each HTML figure to its own actual release rather than the report release set', () => {
+  const fixture = createReportEvidenceFixture();
+  const html = readFileSync(fixture.htmlPath, 'utf8');
+  const figureBlock = html.match(/<figure\b[\s\S]*?<\/figure>/u)[0];
+  const secondBlock = figureBlock.replace('data-figure-id="fig-1"', 'data-figure-id="fig-2"')
+    .replace('data-matlab-release="R2026a"', 'data-matlab-release="R2021a"');
+  writeFileSync(fixture.htmlPath, html.replace('</body>', `${secondBlock}</body>`));
+  const secondFigure = structuredClone(fixture.manifest.figures[0]);
+  secondFigure.id = 'fig-2';
+  secondFigure.runtime.matlab_release = 'R2021a';
+  fixture.manifest.figures.push(secondFigure);
+  writeFixtureManifest(fixture);
+  assert.equal(inspectIllustratedReportEvidence(fixture).ok, true);
+
+  writeFileSync(fixture.htmlPath, readFileSync(fixture.htmlPath, 'utf8')
+    .replace(/data-matlab-release="(R2026a|R2021a)"/gu,
+      (_, release) => `data-matlab-release="${release === 'R2026a' ? 'R2021a' : 'R2026a'}"`));
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, false);
+  assert.equal(result.matlabRuntimeOk, true);
+  assert.equal(result.figureEvidenceOk, true);
+  assert.deepEqual(result.figureViolations, [
+    'figures[0].data-matlab-release.mismatch',
+    'figures[1].data-matlab-release.mismatch',
+  ]);
+});
+
+for (const status of ['missing', 'failed', 'unknown', 'static-only']) {
+  test(`rejects a matching figure release with ${status} matrix evidence`, () => {
+    const fixture = createReportEvidenceFixture();
+    if (status === 'missing') {
+      fixture.manifest.matlab_ci.runs = fixture.manifest.matlab_ci.runs.filter((run) => run.release !== 'R2026a');
+    } else {
+      fixture.manifest.matlab_ci.runs.find((run) => run.release === 'R2026a').runtime_status = status;
+    }
+    writeFixtureManifest(fixture);
+
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false);
+    assert.equal(result.matlabRuntimeOk, false);
+    assert.equal(result.figureLinksOk, false);
+    assert.deepEqual(result.figureViolations, ['figures[0].data-matlab-release.mismatch']);
+  });
+}
+
+function setReportFigureAttribute(fixture, attribute, value) {
+  const html = readFileSync(fixture.htmlPath, 'utf8');
+  writeFileSync(fixture.htmlPath, html.replace(new RegExp(`${attribute}="[^"]*"`, 'u'), `${attribute}="${value}"`));
+}
+
+function writeFixtureManifest(fixture) {
+  fixture.manifest.generated_at = new Date().toISOString();
+  writeFileSync(fixture.manifestPath, JSON.stringify(fixture.manifest));
+}
+
 function createReportEvidenceFixture() {
   const root = mkdtempSync(path.join(os.tmpdir(), 'illustrated-report-evidence-'));
   const htmlPath = path.join(root, 'report.html');

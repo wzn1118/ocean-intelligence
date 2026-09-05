@@ -91,6 +91,15 @@ at 300 DPI, with actual dimensions and embedded DPI checked before promotion.
 These sizing changes still require a new licensed MATLAB run; no resampling or
 relaxed geometry tolerance is used.
 
+Run 33990723561 confirmed that integer pixel requests alone did not fix the
+R2026a off-by-one output. A separate native raster probe now compares pixels
+versus inches and PreserveAspectRatio on versus off on fresh figures. Its files
+are diagnostic, never promoted report artifacts or evidence of visual quality.
+The existing publication gate still rejects incorrect raster dimensions.
+The added fractional-inch case also exposed PDF physical-size metadata copied
+from the request rather than the actual MediaBox. Record the measured page size;
+the existing one-point PDF request tolerance and strict metadata checks remain.
+
 ## Commands
 
 ```bash

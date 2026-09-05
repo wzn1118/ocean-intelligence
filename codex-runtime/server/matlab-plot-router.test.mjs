@@ -25,6 +25,21 @@ function deliverable(overrides = {}) {
   };
 }
 
+function uncertaintyRequest(overrides = {}) {
+  return deliverable({
+    runtime: 'matlab', matlabAvailable: true, targetRelease: 'R2024b',
+    question: 'uncertainty', hasUncertainty: true, uncertaintyType: 'standard-uncertainty',
+    uncertaintyRepresentation: 'magnitude', uncertaintyAlignment: 'time',
+    coordinates: ['time'], dimensions: [6], dimensionOrder: ['time'], observationDimension: 'time',
+    dataType: 'datetime', timeZone: 'UTC', missing: true,
+    qcStatus: 'present', qcAlignment: 'time',
+    qc: { status: 'present', variable: 'sampleQC', accepted: ['good'], suspect: ['suspect'], rejected: ['bad'], action: 'preserve' },
+    units: { value: 'degC', uncertainty: 'degC' }, quantities: { value: 'Temperature' },
+    variableNames: { time: 'sampleTime', value: 'sampleValue', uncertainty: 'sampleUncertainty', observationId: 'sampleID', station: 'sampleStation', qcFlag: 'sampleQC' },
+    ...overrides,
+  });
+}
+
 function completePublicationContract({ chineseRequired = false, interactionMode = 'static' } = {}) {
   return {
     target: { medium: 'journal', width: 18, height: 12, units: 'cm', dpi: 300, formats: ['png', 'pdf'] },
@@ -597,6 +612,155 @@ test('interactive uncertainty routes preserve magnitude and confidence-bound sem
   assert.match(bounds.script, /sampleLower, sampleUpper, sampleID, sampleStation, sampleQC/u);
   assert.match(bounds.script, /'UncertaintyLower', 'UncertaintyUpper', 'ObservationID'/u);
   assert.match(bounds.script, /'ConfidenceLevel', 0\.95/u);
+});
+
+test('standard uncertainty remains distinct in static and interactive routes for both spellings', () => {
+  for (const uncertaintyType of ['standard-uncertainty', 'standard_uncertainty']) {
+    for (const interactive of [false, true]) {
+      const resolved = resolveMatlabPlotRequest(uncertaintyRequest({ uncertaintyType, interactive }));
+      assert.equal(resolved.status, 'ready');
+      assert.equal(resolved.plotRoute.inputContract.uncertaintyType, 'standard-uncertainty');
+      assert.equal(resolved.plotRoute.inputContract.uncertaintyRepresentation, 'magnitude');
+      assert.equal(resolved.plotRoute.inputContract.confidenceLevel, null);
+      assert.match(resolved.script, /Uncertainty semantics: standard-uncertainty; representation: magnitude; confidence level: not-applicable/u);
+      assert.doesNotMatch(resolved.script, /standard-deviation|\bstd\s*\(|\bvar\s*\(/u);
+      if (interactive) {
+        assert.equal(resolved.plotRoute.template, 'interactive_timeseries_native_template.m');
+        assert.match(resolved.script, /table\(sampleTime\(:\), sampleValue\(:\), sampleUncertainty\(:\), sampleID\(:\), sampleStation\(:\), sampleQC\(:\)/u);
+        assert.match(resolved.script, /'UncertaintyType', 'standard-uncertainty', 'UncertaintyUnit', 'degC', 'ConfidenceLevel', NaN/u);
+      } else {
+        assert.match(resolved.script, /errorbar\(axesHandle, sampleTime, sampleValue, sampleUncertainty,/u);
+        assert.match(resolved.script, /validMask = isfinite\(sampleValue\) & isfinite\(sampleUncertainty\)/u);
+      }
+    }
+  }
+  const nested = resolveMatlabPlotRequest(uncertaintyRequest({
+    interactive: true, uncertaintyType: undefined,
+    uncertainty: { status: 'present', type: 'standard_uncertainty', unit: 'degC', alignment: 'time' },
+  }));
+  assert.equal(nested.status, 'ready');
+  assert.equal(nested.plotRoute.inputContract.uncertaintyType, 'standard-uncertainty');
+});
+
+test('uncertainty routing rejects unknown types and preserves existing explicit types', () => {
+  for (const uncertaintyType of ['variance', 'stdev', 'unknown-uncertainty']) {
+    const input = uncertaintyRequest({ uncertaintyType });
+    const route = routeMatlabPlot(input);
+    assert.equal(route.readyForGeneration, false);
+    assert.ok(route.unresolvedRequirements.includes('uncertaintyType'));
+    assert.equal(route.inputContract.confidenceLevel, null);
+    assert.throws(() => generateMatlabPlotScript(input), /uncertaintyType/u);
+    assert.equal(resolveMatlabPlotRequest(input).script, null);
+  }
+  for (const uncertaintyType of ['standard-deviation', 'standard_error', 'instrument-accuracy', 'ensemble_spread']) {
+    const resolved = resolveMatlabPlotRequest(uncertaintyRequest({ uncertaintyType }));
+    assert.equal(resolved.status, 'ready');
+    assert.equal(resolved.plotRoute.inputContract.uncertaintyType, uncertaintyType.replaceAll('_', '-'));
+    assert.equal(resolved.plotRoute.inputContract.confidenceLevel, null);
+  }
+});
+
+test('legacy uncertainty aliases retain their types and confidence normalization', () => {
+  for (const interactive of [false, true]) {
+    for (const [uncertaintyType, expectedType] of [
+      ['sd', 'standard-deviation'], ['std', 'standard-deviation'], ['se', 'standard-error'],
+    ]) {
+      const resolved = resolveMatlabPlotRequest(uncertaintyRequest({ uncertaintyType, interactive }));
+      assert.equal(resolved.status, 'ready');
+      assert.equal(resolved.plotRoute.inputContract.uncertaintyType, expectedType);
+      assert.equal(resolved.plotRoute.inputContract.confidenceLevel, null);
+      if (interactive) {
+        assert.ok(resolved.script.includes(`'UncertaintyType', '${expectedType}', 'UncertaintyUnit', 'degC', 'ConfidenceLevel', NaN`));
+      }
+    }
+    for (const uncertaintyType of ['95-confidence-interval', '95%-confidence-interval', '95_confidence_interval']) {
+      for (const confidenceLevel of [undefined, 0.9]) {
+        const resolved = resolveMatlabPlotRequest(uncertaintyRequest({ uncertaintyType, interactive, confidenceLevel }));
+        assert.equal(resolved.status, 'ready');
+        assert.equal(resolved.plotRoute.inputContract.uncertaintyType, 'confidence-interval');
+        assert.equal(resolved.plotRoute.inputContract.confidenceLevel, confidenceLevel ?? 0.95);
+        if (interactive) {
+          assert.ok(resolved.script.includes(`'UncertaintyType', 'confidence-interval', 'UncertaintyUnit', 'degC', 'ConfidenceLevel', ${confidenceLevel ?? 0.95}`));
+        }
+      }
+    }
+    const explicitCI = resolveMatlabPlotRequest(uncertaintyRequest({
+      interactive, uncertaintyType: 'ci', confidenceLevel: 0.9,
+    }));
+    assert.equal(explicitCI.status, 'ready');
+    assert.equal(explicitCI.plotRoute.inputContract.uncertaintyType, 'confidence-interval');
+    assert.equal(explicitCI.plotRoute.inputContract.confidenceLevel, 0.9);
+    const implicitCI = uncertaintyRequest({ interactive, uncertaintyType: 'ci' });
+    assert.equal(routeMatlabPlot(implicitCI).inputContract.confidenceLevel, null);
+    assert.throws(() => generateMatlabPlotScript(implicitCI), /confidenceLevel between 0 and 1/u);
+    assert.throws(() => generateMatlabPlotScript(uncertaintyRequest({
+      interactive, uncertaintyType: '95-confidence-interval', confidenceLevel: 1,
+    })), /confidenceLevel between 0 and 1/u);
+  }
+});
+
+test('uncertainty routes reject confidence levels on non-CI types and invalid CI levels', () => {
+  for (const interactive of [false, true]) {
+    for (const uncertaintyType of ['standard-uncertainty', 'standard_uncertainty', 'standard_deviation', 'standard-error', 'instrument-accuracy', 'ensemble-spread', 'sd', 'std', 'se']) {
+      const input = uncertaintyRequest({ interactive, uncertaintyType, confidenceLevel: 0.95 });
+      assert.throws(() => generateMatlabPlotScript(input), /confidenceLevel omitted for non-confidence uncertainty/u);
+      assert.equal(resolveMatlabPlotRequest(input).script, null);
+    }
+    for (const confidenceLevel of [undefined, 0, 1, -0.1, 95]) {
+      const input = uncertaintyRequest({ interactive, uncertaintyType: 'confidence_interval', confidenceLevel });
+      assert.throws(() => generateMatlabPlotScript(input), /confidenceLevel between 0 and 1/u);
+    }
+    const confidence = resolveMatlabPlotRequest(uncertaintyRequest({
+      interactive, uncertaintyType: 'confidence_interval', confidenceLevel: 0.95,
+    }));
+    assert.equal(confidence.status, 'ready');
+    assert.equal(confidence.plotRoute.inputContract.uncertaintyType, 'confidence-interval');
+    assert.equal(confidence.plotRoute.inputContract.confidenceLevel, 0.95);
+  }
+  for (const confidenceLevel of [NaN, Infinity, '0.95']) {
+    assert.throws(() => generateMatlabPlotScript(uncertaintyRequest({ confidenceLevel })), /confidenceLevel|finite/u);
+  }
+  assert.throws(() => generateMatlabPlotScript(uncertaintyRequest({
+    units: { value: 'degC', uncertainty: 'K' },
+  })), /uncertainty unit compatible/u);
+  assert.throws(() => generateMatlabPlotScript(uncertaintyRequest({
+    uncertaintyRepresentation: 'bounds',
+  })), /only for a stated confidence interval/u);
+});
+
+test('interactive evaluator consumes fixture uncertainty semantics and verifies raw metadata without expanding evidence', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../matlab/evals/fixtures/crossed_time_depth_temperature.json', import.meta.url), 'utf8'));
+  const gate = readFileSync(new URL('../matlab/evals/run_matlab_gate.m', import.meta.url), 'utf8');
+  const asset = readFileSync(new URL('../matlab/assets/interactive_timeseries_native_template.m', import.meta.url), 'utf8');
+  const outputDefinition = /outputs = struct\(([\s\S]*?)\);\s*setappdata\(figure_handle, 'OceanCallerOwnsFigure'/u.exec(asset);
+  const metadataDefinition = /line_handle\.UserData = struct\(([\s\S]*?)\);/u.exec(asset);
+  assert.ok(outputDefinition);
+  assert.ok(metadataDefinition);
+  for (const [, field] of gate.matchAll(/\binteractive_output\.([A-Za-z]\w*)/gu)) {
+    assert.ok(outputDefinition[1].includes(`'${field}',`), `Missing template output field: ${field}`);
+  }
+  for (const [, field] of gate.matchAll(/\binteractive_metadata\.([A-Za-z]\w*)/gu)) {
+    assert.ok(metadataDefinition[1].includes(`'${field}',`), `Missing line metadata field: ${field}`);
+  }
+  assert.match(outputDefinition[1], /'UncertaintyUnit', uncertainty_unit/u);
+  assert.ok(asset.includes("sprintf('Uncertainty (%s, %s): %.6g'"));
+  assert.ok(asset.includes("sprintf('%s (%s): %.6g'"));
+  assert.equal(fixture.variables.temperature_standard_uncertainty.type, 'standard_uncertainty');
+  const resolved = resolveMatlabPlotRequest(uncertaintyRequest({
+    interactive: true,
+    uncertaintyType: fixture.variables.temperature_standard_uncertainty.type,
+    units: { value: fixture.variables.temperature.unit, uncertainty: fixture.variables.temperature_standard_uncertainty.unit },
+  }));
+  assert.equal(resolved.status, 'ready');
+  assert.equal(resolved.plotRoute.inputContract.uncertaintyType, 'standard-uncertainty');
+  assert.match(gate, /interactive_uncertainty_type = replace\(strtrim\(string\([\s\S]*?temperature_fixture\.variables\.temperature_standard_uncertainty\.type\)\), "_", "-"\)/u);
+  assert.match(gate, /"UncertaintyType", interactive_uncertainty_type/u);
+  assert.match(gate, /"UncertaintyUnit", interactive_uncertainty_unit/u);
+  assert.doesNotMatch(gate, /"UncertaintyType", "standard-deviation"/u);
+  assert.match(gate, /interactive_output\.UncertaintyType == interactive_uncertainty_type/u);
+  assert.match(gate, /isequaln\(interactive_metadata\.Uncertainty, uncertainty\)/u);
+  assert.match(gate, /isequaln\(interactive_metadata\.PlottedValue, observation_values\)/u);
+  assert.match(gate, /strcmp\(tip_text, expected_uncertainty_tip\)/u);
 });
 
 test('interactive generation supports the audited R2019b print fallback', () => {

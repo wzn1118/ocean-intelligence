@@ -206,6 +206,19 @@ nativeClipped = nativeBounds(1) < 0 || nativeBounds(2) < 0 ...
 evidence.native_clipped = nativeClipped;
 errorPixels = abs(bounds - nativeBounds) .* figurePixels([3 4 3 4]);
 evidence.error_pixels = errorPixels;
+evidence.data_estimate_matches_pixel_bounds = all(errorPixels <= 1e-6);
+evidence.data_estimate_scope = "diagnostic only; original linear data estimate and error retained, not the acceptance reference";
+evidence.reference_scope = "public points/pixels conversion and parent offset only; not raw data Extent reliability or artifact rendering";
+pointsReference = probe_public_api(@() measure_points_reference(xlabelHandle, figureHandle));
+evidence.points_reference = pointsReference;
+if pointsReference.succeeded
+    pointsErrorPixels = abs(bounds - pointsReference.value.bounds) .* figurePixels([3 4 3 4]);
+    pointsExtentErrorPixels = abs(evidence.pixel_extent - pointsReference.value.pixel_extent_from_points);
+    evidence.points_vs_pixel = struct("extent_points", pointsReference.value.extent_points, ...
+        "pixel_extent", evidence.pixel_extent, ...
+        "pixel_extent_from_points", pointsReference.value.pixel_extent_from_points, ...
+        "extent_error_pixels", pointsExtentErrorPixels, "bounds_error_pixels", pointsErrorPixels);
+end
 details = jsonencode(evidence);
 fprintf("MATLAB_ORIGINAL_NESTED_EVIDENCE=%s\n", details);
 renderEvidence.original_geometry_after_export = evidence;
@@ -214,10 +227,15 @@ assert(string(xlabelHandle.FontName) == fontName ...
     && string(xlabelHandle.Units) == nativeUnits, ...
     "test_text_bounds:OriginalMutation", ...
     "Measurement must preserve the selected font and original text units; geometry=%s", details);
-assert(all(errorPixels <= 1e-6), "test_text_bounds:OriginalNativeGeometry", ...
-    "Pixel bounds must match native data Extent scaled by direct public axes Position; error_pixels=%s; geometry=%s", ...
-    mat2str(errorPixels, 17), details);
-if nativeClipped
+assert(pointsReference.succeeded, "test_text_bounds:PointsReference", ...
+    "The public points reference could not be measured; geometry=%s", details);
+assert(pointsReference.value.state_restored, "test_text_bounds:OriginalMutation", ...
+    "The points probe must restore text Units, Position, PositionMode and typography; geometry=%s", details);
+assert(all(pointsErrorPixels <= 1e-6) && all(pointsExtentErrorPixels <= 1e-6), ...
+    "test_text_bounds:OriginalNativeGeometry", ...
+    "Public points conversion and parent offset must match pixel bounds; bounds_error_pixels=%s; extent_error_pixels=%s; geometry=%s", ...
+    mat2str(pointsErrorPixels, 17), mat2str(pointsExtentErrorPixels, 17), details);
+if pointsReference.value.clipped
     must_throw(@() assert_inside(bounds, "original x label", details), "UnexpectedClipping");
 else
     assert_inside(bounds, "original x label", details);
@@ -225,6 +243,59 @@ end
 
 clear figureCleanup;
 close_if_valid(figureHandle);
+end
+
+function reference = measure_points_reference(textHandle, figureHandle)
+reference = struct("before_state", reference_text_state(textHandle));
+unitsCleanup = onCleanup(@() restore_reference_text(textHandle, reference.before_state));
+textHandle.Units = "points";
+drawnow;
+reference.extent_points = double(textHandle.Extent);
+reference.points_state = reference_text_state(textHandle);
+reference.screen_pixels_per_inch = double(get(groot, "ScreenPixelsPerInch"));
+reference.parent_pixels_in_figure = double(getpixelposition(textHandle.Parent, true));
+reference.figure_pixels = double(getpixelposition(figureHandle));
+assert(string(textHandle.Units) == "points" ...
+    && all(isfinite(reference.extent_points)) && all(reference.extent_points(3:4) > 0) ...
+    && isscalar(reference.screen_pixels_per_inch) ...
+    && isfinite(reference.screen_pixels_per_inch) && reference.screen_pixels_per_inch > 0, ...
+    "test_text_bounds:PointsReference", "Expected a finite public points Extent and measured screen DPI");
+reference.points_to_pixels = reference.screen_pixels_per_inch / 72;
+relativePixels = reference.extent_points * reference.points_to_pixels;
+reference.origin_reference = "points start at zero in the axes; pixels start at one; parent offset is figure-relative";
+reference.pixel_extent_from_points = relativePixels + [1 1 0 0];
+originPixels = reference.parent_pixels_in_figure(1:2) - 1 + relativePixels(1:2);
+reference.bounds = [originPixels relativePixels(3:4)] ./ reference.figure_pixels([3 4 3 4]);
+reference.clipped = reference.bounds(1) < 0 || reference.bounds(2) < 0 ...
+    || reference.bounds(1) + reference.bounds(3) > 1 ...
+    || reference.bounds(2) + reference.bounds(4) > 1;
+clear unitsCleanup;
+reference.restored_state = reference_text_state(textHandle);
+reference.state_restored = isequaln(reference.before_state, reference.restored_state);
+end
+
+function state = reference_text_state(textHandle)
+state = struct();
+for propertyName = ["Units" "Position" "FontName" "FontSize" "FontUnits" ...
+        "String" "Interpreter" "Rotation" "HorizontalAlignment" "VerticalAlignment"]
+    state.(char(propertyName)) = get(textHandle, char(propertyName));
+end
+state.PositionMode = probe_public_api(@() get(textHandle, "PositionMode"));
+end
+
+function restore_reference_text(textHandle, state)
+if ~isgraphics(textHandle, "text")
+    return;
+end
+textHandle.Units = state.Units;
+if state.PositionMode.succeeded
+    if ~isequaln(textHandle.Position, state.Position)
+        textHandle.Position = state.Position;
+    end
+    if ~isequal(get(textHandle, "PositionMode"), state.PositionMode.value)
+        set(textHandle, "PositionMode", state.PositionMode.value);
+    end
+end
 end
 
 function fit_nested_bottom_margin(figureHandle, axesHandle, xlabelHandle)

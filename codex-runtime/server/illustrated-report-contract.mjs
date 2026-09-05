@@ -413,9 +413,9 @@ function inspectHtmlFigureCorrespondence(entry, figure, index, matlabRuntimeAudi
   if (!stringValue(attributes['data-spatial-coverage']).includes(stringValue(context.spatial_coverage?.name))) {
     violations.push(`figures[${index}].data-spatial-coverage.mismatch`);
   }
-  const qcSummary = stringValue(attributes['data-qc-summary']);
+  const qcCounts = parseQcSummary(attributes['data-qc-summary']);
   for (const key of ['raw', 'valid', 'missing', 'qc_rejected']) {
-    if (!qcSummary.includes(`${key}=${context.qc?.[key]}`)) violations.push(`figures[${index}].data-qc-summary.${key}.mismatch`);
+    if (!qcCounts || qcCounts[key] !== context.qc?.[key]) violations.push(`figures[${index}].data-qc-summary.${key}.mismatch`);
   }
   const uncertainty = stringValue(attributes['data-uncertainty']).toLowerCase();
   if (!uncertainty.includes(stringValue(context.uncertainty?.status).toLowerCase())
@@ -424,10 +424,25 @@ function inspectHtmlFigureCorrespondence(entry, figure, index, matlabRuntimeAudi
   }
   compare('data-anomaly-status', context.anomaly?.status);
   const release = stringValue(attributes['data-matlab-release']);
-  if (!matlabRuntimeAudit.releases?.[release] || matlabRuntimeAudit.releases[release].runtime_status !== 'passed') {
+  if (release !== stringValue(figure.runtime?.matlab_release)
+    || !matlabRuntimeAudit.releases?.[release] || matlabRuntimeAudit.releases[release].runtime_status !== 'passed') {
     violations.push(`figures[${index}].data-matlab-release.mismatch`);
   }
   return violations;
+}
+
+function parseQcSummary(value) {
+  const tokens = tokenList(value);
+  if (tokens.length !== 4) return undefined;
+  const counts = {};
+  for (const token of tokens) {
+    const match = /^(raw|valid|missing|qc_rejected)=(0|[1-9][0-9]*)$/u.exec(token);
+    if (!match || Object.hasOwn(counts, match[1])) return undefined;
+    const count = Number(match[2]);
+    if (!Number.isSafeInteger(count)) return undefined;
+    counts[match[1]] = count;
+  }
+  return counts;
 }
 
 function inspectExplicitAssessment(value, prefix, violations) {

@@ -53,13 +53,32 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def parse_json(content: str | bytes, source: Path) -> Any:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise EvaluationError(f"duplicate JSON key: {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str) -> None:
+        raise EvaluationError(f"non-finite JSON number: {value}")
+
+    try:
+        return json.loads(content, object_pairs_hook=unique_object, parse_constant=reject_constant)
+    except ValueError as error:
+        raise EvaluationError(f"invalid JSON {source}: {error}") from error
+
+
 def load_json(path: Path) -> Any:
     if path.is_symlink() or not path.is_file():
         raise EvaluationError(f"regular file required: {path}")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
         raise EvaluationError(f"invalid JSON {path}: {error}") from error
+    return parse_json(content, path)
 
 
 def sha256(path: Path) -> str:
@@ -460,10 +479,7 @@ def validate_runtime_input_fixtures(
         source_hash = hashlib.sha256(source_content).hexdigest()
         if actual_hash != source_hash or content != source_content:
             raise EvaluationError(f"input fixture snapshot differs from frozen fixture input: {source_file}")
-        try:
-            source_payload = json.loads(source_content)
-        except (ValueError, UnicodeError) as error:
-            raise EvaluationError(f"invalid frozen fixture JSON: {source_file}") from error
+        source_payload = parse_json(source_content, FIXTURE_ROOT / source_file)
         if not isinstance(source_payload, dict) or source_payload.get("id") != identifier:
             raise EvaluationError(f"frozen fixture id does not match input snapshot record: {source_file}")
         checked.append({"id": identifier, "file": relative, "source_file": source_file,

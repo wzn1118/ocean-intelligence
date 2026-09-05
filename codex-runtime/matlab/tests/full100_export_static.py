@@ -26,7 +26,22 @@ for name, markers in required.items():
 test_text = TEST.read_text(encoding="utf-8")
 for marker in [
     "embedded_dpi_x", "exports.pdf.width", "svgRecord.width", "assert_svg_geometry",
-    "ByteMismatch", "HashMismatch", "oi_sha256_file",
+    "ByteMismatch", "HashMismatch", "oi_sha256_file", "ActualPdfDimensions",
+    "invalidPhysicalEntry", "1 / 720",
 ]:
     assert marker in test_text, f"full100 export test missing {marker}"
+probe_text = TEST.with_name("diagnose_native_raster_sizes.m").read_text(encoding="utf-8")
+for marker in [
+    'verLessThan(\'matlab\', \'25.1\')', '"unsupported_release"',
+    '[400 300 150; 1200 675 180; 997 613 300]',
+    '["pixels" "inches"]', '["on" "off"]', '"Padding", "figure"',
+    'record.api_invoked = true', 'record.export_call_succeeded = true',
+    '"visual_verified", false', '"layout_verified", false',
+    '"figure_before_export"', '"figure_after_export"', 'imfinfo(filePath)',
+    'oi_sha256_file(filePath)', '"completed_diagnostics_only"',
+]:
+    assert marker in probe_text, f"native raster probe missing {marker}"
+assert "imresize(" not in probe_text
+runner_text = TEST.with_name("run_github_full100.m").read_text(encoding="utf-8")
+assert 'diagnose_native_raster_sizes(fullfile(export_directory, "native-raster-sizing-probe"))' in runner_text
 print("MATLAB_FULL100_EXPORT_STATIC=passed")

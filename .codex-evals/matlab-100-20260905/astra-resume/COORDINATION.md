@@ -39,6 +39,7 @@
 | [33988300354](https://github.com/wzn1118/ocean-intelligence/actions/runs/33988300354) | `0fee3c6` | 51/60 阶段通过；三版原始评分均 90/100 | 三版真实生成脚本及官方授权后处理探针通过；新增比较统计、时间轴检查及 Family B 失败，整体 CI 仍失败 |
 | [33989124823](https://github.com/wzn1118/ocean-intelligence/actions/runs/33989124823) | `7ac987c` | 51/60 阶段通过；三版原始评分均 90/100 | 比较统计三种布局的内容、字体及负例通过，最后清单排序失败；时间轴测量干扰/负例和紧凑比较布局仍失败。三版虚拟显示控制另行完成，不计入主阶段 |
 | [33989846546](https://github.com/wzn1118/ocean-intelligence/actions/runs/33989846546) | `a8d9ebc` | 54/60 阶段通过；三版原始评分均 90/100 | R21/R24 各19/20、R26 16/20；三版时间轴和报告数组绑定通过，R26 evaluator 外部12/12通过；比较统计旧行数断言、R26 PNG尺寸及独立几何参考仍失败，整体 CI 失败 |
+| [33990723561](https://github.com/wzn1118/ocean-intelligence/actions/runs/33990723561) | `9c00319` | 54/60 阶段通过；三版原始评分均 90/100 | 三版比较布局通过；旧版新增非整英寸PDF元数据错误，新版PNG及文字参考误差未修复。R26 evaluator外部12/12仍通过，整体CI失败 |
 
 阶段数不是能力分数。各轮的 90 分只是当时评分器原始输出，不能当成全量验收。33984097740 暴露的版本字段校验已加强；33984666441 尚无输入快照绑定，下一轮必须提供真实输入副本与哈希，缺失旧包不能冒充新协议通过。
 
@@ -124,3 +125,16 @@
 - R26 独立文字参考用了 getpixelposition 的整数宽高，可能丢失原生轴尺寸小数。本轮参考改为实读公开 axes.Position，并记录导出前后容器与轴几何；保留1e-6像素容差及全部既有裁切负例，尚待新原件证实。
 - 内置 MATLAB 提示此前推荐了仅存在于 Octave 的 helper。本轮按实际运行时区分API清单，MATLAB图例和布局使用原生接口；共享路由说明保持单一来源。仓库改动不等于运行服务或已安装全局技能已热更新。
 - 第十批推送前验证：185项Python、全部已跟踪服务器Node测试、8项生成器smoke和技能校验通过；54个MATLAB文件通过R2021a语法检查。冻结27个评测源文件后完整静态评分70/100、runtime_pending，未冒充真实MATLAB通过。
+
+## 第十一批接续
+
+- 第十批原件 `/tmp/matlab-run-33990723561`，汇总 `/tmp/matlab-ci-summary-33990723561/summary.md`；54/60不变但失败条件不同。三版比较统计布局完整通过，R26 PNG pixels参数及直接axes.Position参考都未解决原失败，不能把候选实现说成修复完成。
+- 997x613/300DPI旧版PDF实际页为239x147pt，导出器却将请求物理尺寸写入metadata，清单正确拒绝。本轮改记MediaBox实值，保留原1pt请求容差、1e-9元数据复核，并增加0.1pt元数据篡改负例。没有改写PDF文件。
+- 新增独立原生PNG对照：三组尺寸分别比较pixels/inches与PreserveAspectRatio on/off，采集请求、图窗/轴实际几何、输出尺寸、pHYs字段及hash。实验文件与正式交付分开，未采用未验证的off策略，也不重采样或放宽尺寸门禁。
+- 第九批十二原件视觉报告见 `evaluator-review-33989846546.md`：长标题/Ylabel裁切、统计遮挡未复现；端点误差棒贴框、近邻散点重叠和色觉验证仍有缺口，未签trusted visual或Desktop通过。
+- 旧版字体定点报告见 `legacy-font-analysis-33989846546.md`：八PDF的Courier确实绘制刻度、单位和统计文字，不是空资源；中文混合标题采用轮廓。字体更换、默认print和已有Xvfb对照均不能证明嵌入修复，不豁免此失败。
+- 下一批新增时间序列独立standard-uncertainty语义，修复基准交互图把标准不确定度硬编码成standard-deviation；逐项检查类型、单位、原值及提示文本，不修改评分或把未绑定的两图证据升级。
+- 评测JSON解析拒绝重复键和NaN/Infinity，包含输入快照同字节/同哈希但JSON歧义负例。实际海区HTML报告的QC摘要改为四键精确整数匹配，并校验逐图MATLAB release一致性，避免raw=20冒充raw=2或借用另一版本的通过记录。
+- 旧版DISPLAY的SVG失败已单独定位为native viewBox 267x200与目标400x300的比例差，详见 `svg-sizing-analysis-33990723561.md`；不是XML语法或标题错误，暂未改写视口或放宽比例检查。
+- 文字参考保留原data Extent估算及误差为异常诊断，新增公开points实测与pixels换算、父容器偏移的独立对照。保留1e-6门槛及裁切负例；不把新参考当成data Extent正确或成品视觉通过的证明。
+- 本批本地验证：192项Python、全部已跟踪服务器Node测试、8项生成器smoke、资产与技能检查通过；55个MATLAB文件通过R2021a语法检查，冻结27文件后静态评分70/100、runtime_pending。既有sd/std/se/ci及显式95置信区间路由别名保持兼容。

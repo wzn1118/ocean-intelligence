@@ -874,6 +874,9 @@ function unresolvedRequirements(spec, plotType) {
     if (spec.uncertaintyType === 'confidence-interval' && !(spec.confidenceLevel > 0 && spec.confidenceLevel < 1)) {
       unresolved.push('confidenceLevel between 0 and 1');
     }
+    if (spec.uncertaintyType !== 'confidence-interval' && spec.confidenceLevel !== null) {
+      unresolved.push('confidenceLevel omitted for non-confidence uncertainty');
+    }
     if (!spec.observationDimension) unresolved.push('observationDimension for uncertainty alignment');
     if (!spec.uncertaintyAlignment) unresolved.push('uncertaintyAlignment');
     if (spec.uncertaintyAlignment && spec.observationDimension && spec.uncertaintyAlignment !== spec.observationDimension) {
@@ -1985,7 +1988,7 @@ function allowedGridTypes() {
 }
 
 function allowedUncertaintyTypes() {
-  return ['standard-deviation', 'standard-error', 'confidence-interval', 'instrument-accuracy', 'ensemble-spread'];
+  return ['standard-uncertainty', 'standard-deviation', 'standard-error', 'confidence-interval', 'instrument-accuracy', 'ensemble-spread'];
 }
 
 function colorLimitPlotTypes() {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
 import json
 import os
 import tempfile
@@ -15,6 +16,92 @@ SPEC = importlib.util.spec_from_file_location("matlab_eval", MODULE_PATH)
 assert SPEC and SPEC.loader
 matlab_eval = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(matlab_eval)
+
+
+class JSONParsingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="matlab-evaluator-json-")
+        self.addCleanup(temporary.cleanup)
+        self.path = Path(temporary.name) / "input.json"
+
+    def test_duplicate_keys_are_rejected_at_every_depth(self) -> None:
+        for content in (
+            '{"score": 0, "score": 100}',
+            '{"checks": [{"score": 0, "score": 100}]}',
+            '{"score": 100, "score": 100}',
+            '[{"checks": {"score": 100, "score": 100}}]',
+            r'{"score": 0, "\u0073core": 100}',
+        ):
+            with self.subTest(content=content):
+                self.path.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(matlab_eval.EvaluationError, "duplicate JSON key: 'score'") as caught:
+                    matlab_eval.load_json(self.path)
+                self.assertIn(str(self.path), str(caught.exception))
+
+    def test_nonstandard_numeric_constants_are_rejected(self) -> None:
+        for token in ("NaN", "Infinity", "-Infinity"):
+            for content in (token, f"[{token}]", '{"checks": [{"value": ' + token + '}]}'):
+                with self.subTest(content=content):
+                    self.path.write_text(content, encoding="utf-8")
+                    with self.assertRaisesRegex(matlab_eval.EvaluationError, "non-finite JSON number") as caught:
+                        matlab_eval.load_json(self.path)
+                    self.assertIn(token, str(caught.exception))
+                    self.assertIn(str(self.path), str(caught.exception))
+
+    def test_valid_unicode_and_numeric_values_are_preserved(self) -> None:
+        payload = {
+            "\u6e29\u5ea6": "\u00b0C / \U0001f30a",
+            "values": [0, -12, 9007199254740993, 1.25, 6.02e23, 1e-200, True, False, None],
+            "strings": ["NaN", "Infinity", "-Infinity"],
+            "independent_objects": [{"id": 1}, {"id": 2}],
+        }
+        for ensure_ascii in (False, True):
+            with self.subTest(ensure_ascii=ensure_ascii):
+                self.path.write_text(json.dumps(payload, ensure_ascii=ensure_ascii), encoding="utf-8")
+                actual = matlab_eval.load_json(self.path)
+                self.assertEqual(actual, payload)
+                self.assertEqual([type(value) for value in actual["values"]],
+                                 [type(value) for value in payload["values"]])
+
+    def test_standard_top_level_values_remain_supported(self) -> None:
+        for content, expected in (("null", None), ("true", True), ("123", 123),
+                                  ("1.25", 1.25), ('"NaN"', "NaN"), ("[]", []), ("{}", {})):
+            with self.subTest(content=content):
+                self.path.write_text(content, encoding="utf-8")
+                actual = matlab_eval.load_json(self.path)
+                self.assertEqual(actual, expected)
+                self.assertIs(type(actual), type(expected))
+
+    def test_invalid_syntax_and_encoding_raise_evaluation_error(self) -> None:
+        for content in (b'{"value":', b'{"value": "\xff"}'):
+            with self.subTest(content=content):
+                self.path.write_bytes(content)
+                with self.assertRaisesRegex(matlab_eval.EvaluationError, "invalid JSON") as caught:
+                    matlab_eval.load_json(self.path)
+                self.assertIn(str(self.path), str(caught.exception))
+
+    def test_cli_returns_failure_for_ambiguous_json(self) -> None:
+        result_path = self.path.with_name("result.json")
+        for content, reason in (
+            ('{"gates": [], "gates": []}', "duplicate JSON key"),
+            ('{"gates": [], "value": NaN}', "non-finite JSON number"),
+            ('{"gates": [], "value": Infinity}', "non-finite JSON number"),
+            ('{"gates": [], "value": -Infinity}', "non-finite JSON number"),
+        ):
+            with self.subTest(content=content):
+                self.path.write_text(content, encoding="utf-8")
+                with mock.patch.object(matlab_eval, "RUBRIC_PATH", self.path), \
+                        mock.patch("sys.argv", [str(MODULE_PATH), "--runtime", "skip", "--skip-tests",
+                                                "--result", str(result_path)]), \
+                        mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                        mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                    self.assertEqual(matlab_eval.main(), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                failure = json.loads(stderr.getvalue())
+                self.assertEqual(failure["status"], "failed")
+                self.assertIn(reason, failure["error"])
+                self.assertIn(str(self.path), failure["error"])
+                self.assertFalse(result_path.exists())
 
 
 class FixtureValidationTests(unittest.TestCase):
@@ -431,6 +518,27 @@ class RuntimeInputFixtureTests(RuntimeFixtureTestCase):
         source.write_bytes(source.read_bytes() + b"\n")
         with self.assertRaisesRegex(matlab_eval.EvaluationError, "differs from frozen fixture input"):
             self.validate_inputs()
+
+    def test_ambiguous_source_json_rejected_with_matching_snapshot_bytes_and_hash(self) -> None:
+        record = self.runtime["input_fixtures"][0]
+        source = self.fixture_root / record["source_file"]
+        snapshot = self.output_root / record["file"]
+        original = source.read_bytes()
+        for value, reason in (
+            (b'{"value": 0, "value": 1}', "duplicate JSON key"),
+            (b'[{"value": 1, "value": 1}]', "duplicate JSON key"),
+            (b"NaN", "non-finite JSON number"),
+            (b"Infinity", "non-finite JSON number"),
+            (b"-Infinity", "non-finite JSON number"),
+        ):
+            with self.subTest(value=value):
+                content = b'{"strict_json_probe": ' + value + b"," + original.lstrip()[1:]
+                source.write_bytes(content)
+                snapshot.write_bytes(content)
+                record.update(bytes=len(content), sha256=matlab_eval.sha256(snapshot))
+                with self.assertRaisesRegex(matlab_eval.EvaluationError, reason) as caught:
+                    self.validate_inputs()
+                self.assertIn(str(source), str(caught.exception))
 
     def test_input_id_must_match_the_actual_fixture_payload(self) -> None:
         record = self.runtime["input_fixtures"][0]
