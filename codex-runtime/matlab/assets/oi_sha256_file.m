@@ -52,7 +52,7 @@ quotedPath = [singleQuote strrep(char(filePath), singleQuote, embeddedQuote) sin
 [status, output] = system(['sha256sum -- ' quotedPath]);
 assert(status == 0, "oi_sha256_file:JVMRequired", ...
     "SHA-256 requires either the MATLAB JVM or a working sha256sum command");
-tokens = regexp(strtrim(output), "^([0-9A-Fa-f]{64})\\s", "tokens", "once");
+tokens = regexp(strtrim(output), "^([0-9A-Fa-f]{64})", "tokens", "once");
 assert(~isempty(tokens), "oi_sha256_file:InvalidDigest", ...
     "sha256sum returned an invalid digest");
 digest = lower(string(tokens{1}));

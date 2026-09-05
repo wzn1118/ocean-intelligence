@@ -106,14 +106,14 @@ if exportGraphicsAvailable
         pdfDevice = "";
     else
         delete(pdfPath);
-        print(figureHandle, char(pdfPath), "-dpdf", "-painters");
+        print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches);
     end
 else
     warning("oi_export_figure:LegacyPrintFallback", ...
         "exportgraphics is unavailable; using the documented print fallback");
     resolutionOption = char("-r" + string(dpi));
     print(figureHandle, char(pngPath), "-dpng", resolutionOption);
-    print(figureHandle, char(pdfPath), "-dpdf", "-painters");
+    print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches);
 end
 if options.ExportSVG
     if directSvgAvailable
@@ -142,7 +142,8 @@ end
 assert(pdfPages == 1 && abs(pdfWidthPoints - widthPoints) <= 1 ...
     && abs(pdfHeightPoints - heightPoints) <= 1, ...
     "oi_export_figure:InvalidPdfDimensions", ...
-    "PDF MediaBox must match the requested physical figure dimensions");
+    "PDF MediaBox %.3fx%.3f pt (%d pages) must match requested %.3fx%.3f pt", ...
+    pdfWidthPoints, pdfHeightPoints, pdfPages, widthPoints, heightPoints);
 textEvidence = collect_text(figureHandle);
 axesEvidence = collect_axes(figureHandle);
 containerEvidence = collect_layout_containers(figureHandle);
@@ -508,7 +509,8 @@ end
 cjkPresent = contains_cjk(strjoin(allText, " "));
 candidates = ["Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Noto Sans CJK JP" "Noto Sans CJK KR" "Source Han Sans SC" ...
-    "Microsoft YaHei" "PingFang SC" "SimHei" "SimSun" "Arial Unicode MS"];
+    "WenQuanYi Zen Hei" "Microsoft YaHei" "PingFang SC" "SimHei" ...
+    "SimSun" "Arial Unicode MS"];
 selectedFont = "";
 if isappdata(figureHandle, "OI_OceanTheme")
     theme = getappdata(figureHandle, "OI_OceanTheme");
@@ -516,7 +518,6 @@ if isappdata(figureHandle, "OI_OceanTheme")
             && any(strcmpi(installedFonts, string(theme.FontName)))
         selectedFont = string(theme.FontName);
     end
-end
 if cjkPresent && (strlength(selectedFont) == 0 || ~is_cjk_font(selectedFont))
     match = candidates(ismember(lower(candidates), lower(installedFonts)));
     assert(~isempty(match), "oi_export_figure:CJKFontUnavailable", ...
@@ -544,6 +545,15 @@ if cjkPresent
         end
     end
 end
+end
+
+function print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches)
+figureHandle.PaperUnits = "inches";
+figureHandle.PaperOrientation = "portrait";
+figureHandle.PaperSize = [widthInches heightInches];
+figureHandle.PaperPosition = [0 0 widthInches heightInches];
+figureHandle.PaperPositionMode = "manual";
+print(figureHandle, char(pdfPath), "-dpdf", "-painters");
 end
 
 function evidence = collect_text(figureHandle)
@@ -745,7 +755,7 @@ end
 function valid = is_cjk_font(fontNames)
 normalized = lower(fontNames);
 tokens = ["noto sans cjk" "source han" "yahei" "pingfang" ...
-    "simhei" "simsun" "heiti" "songti" "arial unicode"];
+    "wenquanyi" "simhei" "simsun" "heiti" "songti" "arial unicode"];
 valid = false(size(normalized));
 for index = 1:numel(tokens)
     valid = valid | contains(normalized, tokens(index));
