@@ -46,8 +46,10 @@ test('interactive MATLAB asset preserves scientific point semantics', () => {
 
 test('interactive MATLAB asset owns callback lifecycle', () => {
   assert.match(asset, /ActionPostCallback/u);
-  assert.match(asset, /datacursormode\(axes_handles\(axes_index\)\)/u);
-  assert.match(asset, /brush\(axes_handles\(axes_index\)\)/u);
+  assert.match(asset, /datacursormode\(axes_handles\(axes_index\), 'on'\)/u);
+  assert.match(asset, /brush\(axes_handles\(axes_index\), 'on'\)/u);
+  assert.doesNotMatch(asset, /=\s*datacursormode\(axes_handles\(axes_index\)/u);
+  assert.doesNotMatch(asset, /=\s*brush\(axes_handles\(axes_index\)/u);
   assert.match(asset, /data_cursor_mode\.Enable = 'on'/u);
   assert.match(asset, /brush_mode\.ActionPostCallback/u);
   assert.match(asset, /isappdata\(figure_handle, 'OceanInteractionState'\)/u);

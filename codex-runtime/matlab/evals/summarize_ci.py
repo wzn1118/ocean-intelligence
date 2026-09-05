@@ -1,0 +1,336 @@
+"""Offline MATLAB CI summary. Exit 0 means the report was generated, not CI passed.
+
+Required stages are the historical core plus every ID observed in this download.
+This handles growing stage lists without applying today's runner to older runs.
+No score or visual approval is inferred from a runtime pass.
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+
+RELEASES = ("R2021a", "R2024b", "R2026a")
+CORE_STAGES = (
+    "plot-regression", "family-a-contracts", "family-b-runtime",
+    "family-c-contracts", "export-runtime", "interaction-headless",
+    "evaluator-runtime",
+)
+STATUSES = ("passed", "failed", "pending", "running")
+NOTICE = (
+    "仅汇总本地产物，不重新验真。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
+    "分数与视觉审核仅转述评分器，缺少证据为 pending。"
+)
+
+
+def first_line(value: Any) -> str:
+    return next((line.strip() for line in str(value).splitlines() if line.strip()), "")
+
+
+def issue(issues: list, source: str, identifier: str, message: str,
+          status: str = "failed") -> None:
+    issues.append({"source": source, "identifier": identifier,
+                   "message": first_line(message), "status": status})
+
+
+def reject_constant(value: str) -> None:
+    raise ValueError("JSON 含非有限数字: " + value)
+
+
+def read_json(path: Path, issues: list, optional: bool = False) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
+        if not isinstance(payload, dict):
+            raise ValueError("JSON 顶层必须是对象")
+        return payload
+    except FileNotFoundError:
+        if not optional:
+            issue(issues, path.name, "ci_summary:MissingFile", "缺少 " + path.name, "pending")
+    except (OSError, UnicodeError, ValueError) as error:
+        issue(issues, path.name, "ci_summary:InvalidJSON", str(error))
+    return None
+
+
+def collect_errors(record: Any, source: str, issues: list, depth: int = 0) -> None:
+    if not record:
+        return
+    if depth > 8:
+        issue(issues, source, "ci_summary:InvalidError", "错误记录嵌套过深")
+    elif isinstance(record, str):
+        try:
+            nested = json.loads(record)
+        except ValueError:
+            nested = None
+        if isinstance(nested, (dict, list)):
+            before = len(issues)
+            collect_errors(nested, source, issues, depth + 1)
+            if len(issues) > before:
+                return
+        issue(issues, source, "(无 identifier)", record)
+    elif isinstance(record, list):
+        for item in record:
+            collect_errors(item, source, issues, depth + 1)
+    elif isinstance(record, dict):
+        identifier = record.get("error_identifier") or record.get("identifier")
+        message = record.get("error_message") or record.get("message") or record.get("error_report")
+        if identifier or message:
+            issue(issues, source, first_line(identifier or "(无 identifier)"), message or "未提供错误消息")
+        for key in ("error", "errors", "causes"):
+            collect_errors(record.get(key), source, issues, depth + 1)
+    else:
+        issue(issues, source, "ci_summary:InvalidError", "错误记录格式无效")
+
+
+def normalize_status(record: dict, source: str, issues: list,
+                     evaluator: bool = False) -> str:
+    before = len(issues)
+    collect_errors(record, source, issues)
+    status = record.get("status")
+    if evaluator and status == "runtime_pending":
+        status = "pending"
+    if not isinstance(status, str) or status not in STATUSES:
+        issue(issues, source, "ci_summary:InvalidStatus", "无效状态: " + repr(status))
+        return "failed"
+    if status == "failed" and len(issues) == before:
+        issue(issues, source, "(无 identifier)", "状态为 failed，未提供错误消息")
+    return "failed" if len(issues) > before else status
+
+
+def combined_status(statuses: list[str]) -> str:
+    for status in ("failed", "running", "pending"):
+        if status in statuses:
+            return status
+    return "passed" if statuses else "pending"
+
+
+def counts(statuses: list[str]) -> dict:
+    return {"total": len(statuses), **{status: statuses.count(status) for status in STATUSES}}
+
+
+def read_stages(payload: dict | None, release: str, issues: list) -> dict:
+    if payload is None:
+        return {}
+    source = "ci-stage-status.json"
+    if payload.get("expected_release") != release:
+        issue(issues, source, "ci_summary:ReleaseMismatch", "expected_release 与目录版本不符或缺失")
+        return {}
+    if payload.get("schema_version", 1) != 1:
+        issue(issues, source, "ci_summary:InvalidSchema", "不支持的阶段文件 schema_version")
+        return {}
+    records = payload.get("stages")
+    if isinstance(records, dict) and "id" in records:
+        records = [records]
+    if not isinstance(records, list):
+        issue(issues, source, "ci_summary:InvalidStages", "stages 必须为数组或单个 MATLAB 阶段对象")
+        return {}
+    stages = {}
+    for record in records:
+        if (not isinstance(record, dict) or not isinstance(record.get("id"), str)
+                or not record["id"].strip() or record["id"] != record["id"].strip()):
+            issue(issues, source, "ci_summary:InvalidStage", "阶段缺少有效 id")
+            collect_errors(record, source, issues)
+            continue
+        identifier = record["id"]
+        status = normalize_status(record, identifier, issues)
+        if identifier in stages:
+            issue(issues, identifier, "ci_summary:DuplicateStage", "阶段 id 重复，不计为通过")
+            status = "failed"
+        stages[identifier] = {"id": identifier, "status": status, "reported_status": record.get("status")}
+    return stages
+
+
+def summarize_probe(payload: dict | None, release: str, issues: list) -> dict:
+    source = "matlab-runtime-probe.json"
+    if payload is None:
+        return {"status": combined_status([item["status"] for item in issues if item["source"] == source])}
+    before = len(issues)
+    reported_status = normalize_status(payload, source, issues) if "status" in payload else "passed"
+    if "status" not in payload:
+        collect_errors(payload, source, issues)
+    required = {"runtime": "matlab", "vendor": "MathWorks", "release": release,
+                "matlab_license_tested": True, "matlab_license_available": True}
+    for key, expected in required.items():
+        actual = payload.get(key)
+        if type(actual) is not type(expected) or actual != expected:
+            issue(issues, source, "ci_summary:InvalidProbe", f"{key}: 预期 {expected!r}，实际 {actual!r}")
+    status = combined_status([reported_status, "passed" if len(issues) == before else "failed"])
+    return {"status": status, **{key: payload.get(key) for key in (
+        "runtime", "vendor", "release", "version", "matlab_license_available",
+        "jvm_available", "desktop_available", "display_available", "headless",
+    )}}
+
+
+def summarize_evaluator(payload: dict | None, issues: list) -> dict:
+    source = "evaluator-result.json"
+    result = {"status": "pending", "reported_status": None, "reported_score": None,
+              "maximum_score": None, "visual_status": "pending"}
+    if payload is None:
+        result["status"] = combined_status([item["status"] for item in issues if item["source"] == source])
+        return result
+    before = len(issues)
+    result["reported_status"] = payload.get("status")
+    status = normalize_status(payload, source, issues, evaluator=True)
+    score, maximum = payload.get("score"), payload.get("maximum_score")
+    if score is not None or maximum is not None:
+        if (type(score) in (int, float) and type(maximum) in (int, float)
+                and math.isfinite(score) and math.isfinite(maximum) and 0 <= score <= maximum == 100):
+            result.update(reported_score=score, maximum_score=maximum)
+        else:
+            issue(issues, source, "ci_summary:InvalidScore", "评分必须为 0 到 100 的有限数字，满分为 100")
+    if status == "passed" and result["reported_score"] != 100:
+        issue(issues, source, "ci_summary:InconsistentScore", "评分器 passed 但未报告有效的 100 分")
+    gate_statuses = []
+    runtime = payload.get("runtime")
+    if runtime is not None:
+        if isinstance(runtime, dict):
+            gate_statuses.append(normalize_status(runtime, source + ":runtime", issues))
+        else:
+            issue(issues, source, "ci_summary:InvalidRuntime", "评分器 runtime 必须为对象")
+    visual_gate = "pending"
+    gates = payload.get("gates", [])
+    if not isinstance(gates, list):
+        issue(issues, source, "ci_summary:InvalidGates", "gates 必须为数组")
+        gates = []
+    seen = set()
+    for gate in gates:
+        if not isinstance(gate, dict) or not isinstance(gate.get("id"), str) or not gate["id"].strip():
+            issue(issues, source, "ci_summary:InvalidGate", "评分器关卡缺少有效 id")
+            continue
+        identifier = gate["id"]
+        gate_status = normalize_status(gate, source + ":" + identifier, issues)
+        if identifier in seen:
+            issue(issues, source, "ci_summary:DuplicateGate", "评分器关卡重复: " + identifier)
+            gate_status = "failed"
+        seen.add(identifier)
+        gate_statuses.append(gate_status)
+        if identifier == "artifact_visual_audit":
+            visual_gate = gate_status
+    visual = payload.get("visual_audit")
+    visual_status = "pending"
+    if visual is not None:
+        if isinstance(visual, dict):
+            visual_status = normalize_status(visual, source + ":visual_audit", issues)
+        else:
+            issue(issues, source, "ci_summary:InvalidVisualAudit", "visual_audit 必须为对象")
+            visual_status = "failed"
+    result["visual_status"] = combined_status([visual_gate, visual_status])
+    result["status"] = combined_status([status, *gate_statuses, *(
+        ["failed"] if len(issues) > before else []
+    )])
+    return result
+
+
+def summarize(input_root: Path) -> dict:
+    root = Path(input_root).resolve()
+    if not root.is_dir():
+        raise ValueError("输入目录不存在或不是目录: " + str(root))
+    directories = {path.name.removeprefix("matlab-full100-"): path
+                   for path in sorted(root.glob("matlab-full100-R*")) if path.is_dir()}
+    releases = list(RELEASES) + sorted(directories.keys() - set(RELEASES))
+    expected_stages = list(CORE_STAGES)
+    results = []
+    for release in releases:
+        issues = []
+        directory = directories.get(release, root / ("matlab-full100-" + release))
+        if release not in directories:
+            issue(issues, "artifact", "ci_summary:MissingRelease", "缺少版本产物 " + release, "pending")
+        stages = read_stages(read_json(directory / "ci-stage-status.json", issues), release, issues)
+        probe = summarize_probe(read_json(directory / "matlab-runtime-probe.json", issues), release, issues)
+        evaluator = summarize_evaluator(read_json(directory / "evaluator-result.json", issues, optional=True), issues)
+        expected_stages.extend(identifier for identifier in stages if identifier not in expected_stages)
+        results.append({"release": release, "artifact_present": release in directories,
+                        "stages": stages, "probe": probe, "evaluator": evaluator, "issues": issues})
+    for result in results:
+        stages = result["stages"]
+        for identifier in expected_stages:
+            if identifier not in stages:
+                stages[identifier] = {"id": identifier, "status": "pending", "reported_status": None}
+                issue(result["issues"], identifier, "ci_summary:MissingStage", "缺少阶段记录", "pending")
+        result["stages"] = [stages[identifier] for identifier in expected_stages]
+        statuses = [stage["status"] for stage in result["stages"]]
+        result["stage_counts"] = counts(statuses)
+        runtime_issues = [item["status"] for item in result["issues"]
+                          if not item["source"].startswith("evaluator-result.json")]
+        result["runtime_status"] = combined_status([*statuses, result["probe"]["status"], *runtime_issues])
+        result["status"] = combined_status([
+            result["runtime_status"], result["evaluator"]["status"],
+            result["evaluator"]["visual_status"], *[item["status"] for item in result["issues"]],
+        ])
+    statuses = [result["status"] for result in results]
+    return {"schema_version": 1, "input_root": str(root), "status": combined_status(statuses),
+            "expected_releases": list(RELEASES), "expected_stages": expected_stages,
+            "stage_policy": "历史必需阶段与本次产物阶段 ID 的并集；缺失记 pending，不使用固定分母。",
+            "release_counts": counts(statuses),
+            "stage_counts": counts([stage["status"] for result in results for stage in result["stages"]]),
+            "notice": NOTICE, "releases": results}
+
+
+def markdown(summary: dict) -> str:
+    def escaped(value: Any) -> str:
+        return html.escape(first_line(value), quote=False).replace("|", "&#124;").replace("`", "&#96;")
+
+    def count_text(values: dict) -> str:
+        return "，".join(f"{status} {values[status]}" for status in STATUSES)
+
+    lines = ["# MATLAB 三版本 CI 进度", "", f"总状态：{summary['status']}。",
+             "版本：" + count_text(summary["release_counts"]) + "。",
+             f"阶段（共 {summary['stage_counts']['total']}）：" + count_text(summary["stage_counts"]) + "。",
+             "", summary["notice"], "", summary["stage_policy"], "",
+             "| 版本 | CI 状态 | 运行阶段/环境 | 探针 | passed | failed | pending | running | 评分器（原始分数） | 视觉审核记录 |",
+             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |"]
+    for result in summary["releases"]:
+        evaluator = result["evaluator"]
+        score = (f"{evaluator['reported_score']}/{evaluator['maximum_score']}"
+                 if evaluator["reported_score"] is not None else "未提供")
+        row = [result["release"], result["status"], result["runtime_status"], result["probe"]["status"],
+               *[result["stage_counts"][status] for status in STATUSES],
+               f"{evaluator['status']} ({score})", evaluator["visual_status"]]
+        lines.append("| " + " | ".join(escaped(value) for value in row) + " |")
+    lines.extend(["", "## 阶段明细", "", "| 阶段 | " + " | ".join(
+        escaped(result["release"]) for result in summary["releases"]) + " |",
+        "| --- |" + " --- |" * len(summary["releases"])])
+    for index, identifier in enumerate(summary["expected_stages"]):
+        lines.append("| " + escaped(identifier) + " | " + " | ".join(
+            result["stages"][index]["status"] for result in summary["releases"]) + " |")
+    lines.extend(["", "## 错误与缺失", ""])
+    for result in summary["releases"]:
+        for item in result["issues"]:
+            lines.append("- " + " / ".join(escaped(value) for value in (
+                result["release"], item["source"], item["identifier"])) + ": " + escaped(item["message"]))
+    if not any(result["issues"] for result in summary["releases"]):
+        lines.append("无。")
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="离线汇总 MATLAB 三版本 CI；退出 0 仅表示汇总成功。")
+    parser.add_argument("--input-root", type=Path, required=True, help="gh run download 产物根目录（只读）")
+    parser.add_argument("--output-dir", type=Path, help="在输入目录之外写入 summary.md 和 summary.json")
+    parser.add_argument("--format", choices=("markdown", "json"), default="markdown", help="stdout 格式")
+    arguments = parser.parse_args(argv)
+    try:
+        root = arguments.input_root.resolve()
+        output = arguments.output_dir.resolve() if arguments.output_dir else None
+        if output and any(path.resolve().is_relative_to(root) for path in (
+                output, output / "summary.md", output / "summary.json")):
+            raise ValueError("输出目录和输出文件不得位于输入目录内")
+        summary = summarize(root)
+        rendered = markdown(summary)
+        encoded = json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        if output:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "summary.md").write_text(rendered, encoding="utf-8")
+            (output / "summary.json").write_text(encoded, encoding="utf-8")
+        print(encoded if arguments.format == "json" else rendered, end="")
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

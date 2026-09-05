@@ -14,10 +14,32 @@ Each lane runs:
 
 1. The full MATLAB plotting regression and release/license probe.
 2. Family A, B, and C runtime contracts.
-3. PNG, PDF, SVG, manifest, font, and export contracts.
+3. PNG, PDF, SVG, manifest, font, and export contracts, including native SVG
+   coordinate preservation, tamper rejection, and pixel-based text bounds.
 4. Headless interaction fallback and stable identity checks.
 5. The evaluator-owned real MATLAB runtime gate.
-6. An external SHA-256 inventory followed by artifact upload.
+6. A Chinese synthetic-ocean report built from the runtime artifacts and fixture
+   statistics, with missing/QC counts, paired metrics, provenance, and limitations.
+7. Independent PNG pixel, PDF structure/font, and SVG XML/geometry checks,
+   recorded in `rendered-artifact-evidence.json` without claiming a visual pass.
+8. An external SHA-256 inventory followed by artifact upload.
+
+The report and its hash-bound evidence are stored as
+`evaluator-runtime/report.md` and `evaluator-runtime/report-evidence.json` in
+each release's artifact bundle. Generate them locally from a downloaded bundle
+with `python3 codex-runtime/matlab/evals/build_ocean_report.py --runtime-output
+<bundle>/evaluator-runtime`. Missing or mismatched artifacts fail report creation.
+Synthetic fixtures do not establish real sea conditions, and the report does not
+claim desktop interaction or visual inspection passed.
+
+The regression and interactive figures use an explicit 8 by 5 inch publication
+canvas at 300 DPI (2400 by 1500 pixels). Smaller export geometries remain
+available through the export helpers and interactive publication size options.
+
+For local automated artifact inspection, install the pinned Python packages in
+`codex-runtime/matlab/evals/requirements.txt` and the `poppler-utils` system
+package. Missing dependencies are reported as unverified, not passed. The
+static CI job also parses MATLAB source with MISS_HIT at the R2021a boundary.
 
 Run the workflow from GitHub Actions with **MATLAB Full 100 Gate → Run
 workflow**. Runtime success raises the evidence-backed score from 70 to 90. The

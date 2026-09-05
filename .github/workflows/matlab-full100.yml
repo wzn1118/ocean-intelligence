@@ -39,6 +39,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: Install evaluation dependencies
+        run: python3 -m pip install -r codex-runtime/matlab/evals/requirements.txt
+      - name: MATLAB syntax at oldest runtime boundary
+        run: mh_lint --brief --input-encoding utf-8 --matlab 2021a codex-runtime/matlab/assets codex-runtime/matlab/tests codex-runtime/matlab/evals/run_matlab_gate.m
       - name: Node contracts
         run: node --test codex-runtime/server/*.test.mjs
       - name: MATLAB asset contracts
@@ -64,11 +68,13 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: Install evaluation dependencies
+        run: python3 -m pip install -r codex-runtime/matlab/evals/requirements.txt
       - name: Install publication CJK fonts
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-zenhei fonts-droid-fallback
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-zenhei fonts-droid-fallback poppler-utils
           fc-cache -f
           fc-list | grep -Ei 'Noto Sans CJK|WenQuanYi Zen Hei|Droid Sans Fallback' | head -n 12
       - name: Install and license MathWorks MATLAB

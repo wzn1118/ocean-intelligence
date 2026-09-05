@@ -177,7 +177,7 @@ assert(~cjkTextPresent || cjkFontVerified, "oi_export_figure:CJKFontUnavailable"
 altText = make_alt_text(options.Title, axesEvidence);
 svgInfo = struct([]);
 if options.ExportSVG
-    annotate_svg(svgPath, options.Title, altText, widthPoints, heightPoints, ...
+    svgViewBox = oi_annotate_svg(svgPath, options.Title, altText, widthPoints, heightPoints, ...
         widthPixels, heightPixels);
     svgInfo = verify_file(svgPath, "svg");
 end
@@ -189,7 +189,7 @@ entry.theme = options.Theme;
 entry.text_objects = textEvidence;
 entry.axes_objects = axesEvidence;
 [measuredContrast, foregroundColor, backgroundColor] = figure_contrast(figureHandle);
-[colorblindSafe, redundantEncoding, colorAudit] = color_accessibility_audit(figureHandle);
+[colorblindSafe, redundantEncoding, colorAudit] = oi_color_accessibility_audit(figureHandle);
 assert(redundantEncoding, ...
     "oi_export_figure:ColorAccessibility", ...
     "Final series require non-color redundant encoding");
@@ -270,8 +270,8 @@ if options.ExportSVG
     entry.exports.svg = struct("figure_id", figureId, "title", svgTitle, ...
         "source", options.Source, "theme", options.Theme, ...
         "file", figureId + ".svg", "width", widthPixels, ...
-        "height", heightPixels, "viewbox_width", widthPixels, ...
-        "viewbox_height", heightPixels, "bytes", svgInfo.bytes, ...
+        "height", heightPixels, "viewbox_width", svgViewBox(3), ...
+        "viewbox_height", svgViewBox(4), "bytes", svgInfo.bytes, ...
         "physical_width_in", widthInches, "physical_height_in", heightInches, ...
         "sha256", svgInfo.sha256, "export_api", entry.runtime.export_api.svg, ...
         "export_device", entry.runtime.export_device.svg, "description", altText, ...
@@ -469,79 +469,6 @@ evidence = struct("minimum_release", "R2019b", ...
     "export_device", struct("png", "", "pdf", pdfDevice, "svg", svgDevice));
 end
 
-function annotate_svg(svgPath, requestedTitle, description, widthPoints, heightPoints, widthPixels, heightPixels)
-assert(isfile(svgPath), "oi_export_figure:MissingArtifact", ...
-    "Expected SVG export does not exist: %s", svgPath);
-if ~(exist("xmlread", "file") == 2 && exist("xmlwrite", "file") == 2)
-    annotate_svg_text(svgPath, requestedTitle, description, widthPoints, ...
-        heightPoints, widthPixels, heightPixels);
-    return;
-end
-document = xmlread(char(svgPath));
-root = document.getDocumentElement();
-assert(strcmpi(char(root.getNodeName()), 'svg'), ...
-    "oi_export_figure:InvalidSvg", "SVG export has no svg root element");
-titleText = strtrim(requestedTitle);
-if strlength(titleText) == 0
-    titleText = "Scientific figure";
-end
-root.setAttribute('width', char(string(widthPixels) + "px"));
-root.setAttribute('height', char(string(heightPixels) + "px"));
-root.setAttribute('viewBox', char(compose("0 0 %d %d", widthPixels, heightPixels)));
-root.setAttribute('style', char(compose("width:%.9gin;height:%.9gin", ...
-    widthPoints / 72, heightPoints / 72)));
-root.setAttribute('data-physical-width-in', char(compose("%.9g", widthPoints / 72)));
-root.setAttribute('data-physical-height-in', char(compose("%.9g", heightPoints / 72)));
-root.setAttribute('role', 'img');
-root.setAttribute('aria-label', char(description));
-titleNode = document.createElement('title');
-titleNode.appendChild(document.createTextNode(char(titleText)));
-descriptionNode = document.createElement('desc');
-descriptionNode.appendChild(document.createTextNode(char(description)));
-firstChild = root.getFirstChild();
-root.insertBefore(descriptionNode, firstChild);
-root.insertBefore(titleNode, descriptionNode);
-xmlwrite(char(svgPath), document);
-end
-
-function annotate_svg_text(svgPath, requestedTitle, description, widthPoints, heightPoints, widthPixels, heightPixels)
-svgText = string(fileread(svgPath));
-rootStart = regexp(svgText, "<svg(?=[\s>])", "start", "once");
-assert(~isempty(rootStart), "oi_export_figure:InvalidSvg", ...
-    "SVG export has no svg root element");
-relativeEnd = regexp(extractAfter(svgText, rootStart - 1), ">", "end", "once");
-assert(~isempty(relativeEnd), "oi_export_figure:InvalidSvg", ...
-    "SVG root element is not terminated");
-rootEnd = rootStart + relativeEnd - 1;
-titleText = strtrim(requestedTitle);
-if strlength(titleText) == 0
-    titleText = "Scientific figure";
-end
-attributes = compose(" width=""%dpx"" height=""%dpx"" viewBox=""0 0 %d %d"" " ...
-    + "style=""width:%.9gin;height:%.9gin"" data-physical-width-in=""%.9g"" " ...
-    + "data-physical-height-in=""%.9g"" role=""img"" aria-label=""%s""", ...
-    widthPixels, heightPixels, widthPixels, heightPixels, widthPoints / 72, ...
-    heightPoints / 72, widthPoints / 72, heightPoints / 72, xml_escape(description));
-openingTag = extractBetween(svgText, rootStart, rootEnd - 1) + attributes + ">";
-accessibleNodes = "<title>" + xml_escape(titleText) + "</title><desc>" ...
-    + xml_escape(description) + "</desc>";
-svgText = extractBefore(svgText, rootStart) + openingTag + accessibleNodes ...
-    + extractAfter(svgText, rootEnd);
-fileHandle = fopen(svgPath, "w", "n", "UTF-8");
-assert(fileHandle >= 0, "oi_export_figure:WriteFailed", ...
-    "Cannot rewrite SVG accessibility metadata: %s", svgPath);
-cleanup = onCleanup(@() fclose(fileHandle));
-fwrite(fileHandle, unicode2native(char(svgText), "UTF-8"), "uint8");
-end
-
-function value = xml_escape(value)
-value = replace(string(value), "&", "&amp;");
-value = replace(value, "<", "&lt;");
-value = replace(value, ">", "&gt;");
-value = replace(value, '"', "&quot;");
-value = replace(value, "'", "&apos;");
-end
-
 function apply_export_font(figureHandle)
 installedFonts = string(listfonts);
 fontObjects = findall(figureHandle, "-property", "FontName");
@@ -565,14 +492,14 @@ selectedFont = "";
 if isappdata(figureHandle, "OI_OceanTheme")
     theme = getappdata(figureHandle, "OI_OceanTheme");
     if isstruct(theme) && isfield(theme, "FontName") ...
-            && publication_font_available(string(theme.FontName), installedFonts)
+            && oi_font_available(string(theme.FontName), installedFonts)
         selectedFont = string(theme.FontName);
     end
 end
 if cjkPresent && (strlength(selectedFont) == 0 || ~is_cjk_font(selectedFont))
     candidateAvailable = false(size(candidates));
     for index = 1:numel(candidates)
-        candidateAvailable(index) = publication_font_available(candidates(index), installedFonts);
+        candidateAvailable(index) = oi_font_available(candidates(index), installedFonts);
     end
     match = candidates(candidateAvailable);
     assert(~isempty(match), "oi_export_figure:CJKFontUnavailable", ...
@@ -583,7 +510,7 @@ if strlength(selectedFont) == 0
     currentFonts = string(get(fontObjects, "FontName"));
     available = false(size(currentFonts));
     for index = 1:numel(currentFonts)
-        available(index) = publication_font_available(currentFonts(index), installedFonts);
+        available(index) = oi_font_available(currentFonts(index), installedFonts);
     end
     currentFonts = currentFonts(available);
     assert(~isempty(currentFonts), "oi_export_figure:FontUnavailable", ...
@@ -641,7 +568,7 @@ for index = 1:numel(objects)
     if isprop(objects(index), "FontSize")
         evidence(visibleIndex).font_size = objects(index).FontSize;
     end
-    evidence(visibleIndex).bounds = text_bounds(objects(index), figureHandle);
+    evidence(visibleIndex).bounds = oi_text_bounds(objects(index), figureHandle);
     if isprop(objects(index), "Clipping")
         evidence(visibleIndex).clip_mode = string(objects(index).Clipping);
     end
@@ -730,18 +657,6 @@ for index = 1:numel(allObjects)
 end
 end
 
-function bounds = text_bounds(textHandle, figureHandle)
-originalUnits = textHandle.Units;
-cleanup = onCleanup(@() set(textHandle, "Units", originalUnits));
-textHandle.Units = "normalized";
-extent = double(textHandle.Extent);
-parentBounds = graphics_bounds(textHandle.Parent, figureHandle);
-bounds = [parentBounds(1) + extent(1) * parentBounds(3), ...
-    parentBounds(2) + extent(2) * parentBounds(4), ...
-    extent(3) * parentBounds(3), extent(4) * parentBounds(4)];
-clear cleanup;
-end
-
 function bounds = graphics_bounds(graphicsHandle, figureHandle)
 if graphicsHandle == figureHandle
     bounds = [0 0 1 1];
@@ -796,7 +711,7 @@ end
 installedFonts = string(listfonts);
 fontAvailable = false(size(fontNames));
 for index = 1:numel(fontNames)
-    fontAvailable(index) = publication_font_available(fontNames(index), installedFonts);
+    fontAvailable(index) = oi_font_available(fontNames(index), installedFonts);
 end
 verified = ~isempty(fontNames) && all(strlength(fontNames) > 0) ...
     && all(fontAvailable);
@@ -805,18 +720,6 @@ renderedText = strjoin([string({textEvidence.string}) ...
 cjkPresent = contains_cjk(renderedText);
 cjkVerified = ~cjkPresent || all(is_cjk_font(fontNames));
 selectedFonts = sort(unique(fontNames));
-end
-
-function available = publication_font_available(fontName, installedFonts)
-fontName = strtrim(string(fontName));
-available = strlength(fontName) > 0 ...
-    && any(strcmpi(installedFonts, fontName));
-if available || ~isunix
-    return;
-end
-command = sprintf("fc-match -f '%%{family}' '%s' 2>/dev/null", char(fontName));
-[status, output] = system(command);
-available = status == 0 && contains(lower(string(output)), lower(fontName));
 end
 
 function present = contains_cjk(textValue)
@@ -871,88 +774,6 @@ elseif strlength(fallbackProperty) > 0 && isprop(axesHandle, fallbackProperty) .
         && isnumeric(axesHandle.(fallbackProperty))
     colorValue = double(axesHandle.(fallbackProperty));
 end
-end
-
-function [safe, redundant, audit] = color_accessibility_audit(figureHandle)
-axesObjects = collect_visible_axes(figureHandle);
-redundant = true;
-paletteSafe = true;
-minimumDistance = Inf;
-seriesCount = 0;
-for axesIndex = 1:numel(axesObjects)
-    series = findall(axesObjects(axesIndex), "Type", "line", ...
-        "-or", "Type", "scatter");
-    series = flipud(series(:));
-    visibleSeries = true(size(series));
-    for seriesIndex = 1:numel(series)
-        visibleSeries(seriesIndex) = property_string( ...
-            series(seriesIndex), "HandleVisibility", "on") == "on";
-    end
-    series = series(visibleSeries);
-    seriesCount = seriesCount + numel(series);
-    if numel(series) > 1
-        encodings = strings(numel(series), 1);
-        colors = zeros(numel(series), 3);
-        validColors = true(numel(series), 1);
-        for seriesIndex = 1:numel(series)
-            lineStyle = property_string(series(seriesIndex), "LineStyle", "none");
-            marker = property_string(series(seriesIndex), "Marker", "none");
-            encodings(seriesIndex) = lineStyle + "|" + marker;
-            if isprop(series(seriesIndex), "Color") ...
-                    && isnumeric(series(seriesIndex).Color) ...
-                    && numel(series(seriesIndex).Color) == 3
-                colors(seriesIndex, :) = double(series(seriesIndex).Color);
-            else
-                validColors(seriesIndex) = false;
-            end
-        end
-        redundant = redundant && numel(unique(encodings)) == numel(encodings);
-        colors = colors(validColors, :);
-        [axesPaletteSafe, axesMinimumDistance] = simulated_palette_separation(colors);
-        paletteSafe = paletteSafe && axesPaletteSafe;
-        minimumDistance = min(minimumDistance, axesMinimumDistance);
-    end
-end
-if isinf(minimumDistance)
-    minimumDistance = NaN;
-end
-safe = paletteSafe || redundant;
-audit = struct("method", "deterministic protanopia/deuteranopia/tritanopia RGB simulation", ...
-    "simulations", ["protanopia" "deuteranopia" "tritanopia"], ...
-    "minimum_pair_distance", minimumDistance, ...
-    "minimum_required_distance", 0.08, ...
-    "palette_distinct", paletteSafe, "redundant_encoding", redundant, ...
-    "series_count", seriesCount, "visual_inspection_verified", false);
-end
-
-function value = property_string(object, propertyName, fallback)
-value = string(fallback);
-if isprop(object, propertyName)
-    value = string(object.(propertyName));
-end
-end
-
-function [safe, minimumDistance] = simulated_palette_separation(colors)
-if size(colors, 1) < 2
-    safe = true;
-    minimumDistance = Inf;
-    return;
-end
-matrices = cat(3, ...
-    [0.567 0.433 0; 0.558 0.442 0; 0 0.242 0.758], ...
-    [0.625 0.375 0; 0.700 0.300 0; 0 0.300 0.700], ...
-    [0.950 0.050 0; 0 0.433 0.567; 0 0.475 0.525]);
-minimumDistance = Inf;
-for matrixIndex = 1:size(matrices, 3)
-    transformed = colors * matrices(:, :, matrixIndex)';
-    for first = 1:size(transformed, 1)
-        for second = first + 1:size(transformed, 1)
-            minimumDistance = min(minimumDistance, ...
-                norm(transformed(first, :) - transformed(second, :), 2));
-        end
-    end
-end
-safe = minimumDistance >= 0.08;
 end
 
 function count = count_text_overlaps(textEvidence)

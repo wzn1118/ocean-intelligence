@@ -122,6 +122,14 @@ run_check evaluator-runtime python3 "$repository_root/codex-runtime/matlab/evals
   --result "$output_root/evaluator-result.json" \
   --timeout 1800
 
+run_check ocean-report python3 "$repository_root/codex-runtime/matlab/evals/build_ocean_report.py" \
+  --runtime-output "$output_root/evaluator-runtime"
+
+run_check rendered-artifacts python3 "$repository_root/codex-runtime/matlab/evals/inspect_rendered_artifacts.py" \
+  --manifest "$output_root/evaluator-runtime/figures.json" \
+  --artifact-root "$output_root/evaluator-runtime" \
+  --output "$output_root/rendered-artifact-evidence.json"
+
 if [[ ! -s "$output_root/evaluator-result.json" ]]; then
   python3 - "$output_root/evaluator-result.json" "$output_root/evaluator-runtime.log" <<'PY'
 import json

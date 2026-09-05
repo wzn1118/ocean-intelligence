@@ -41,7 +41,7 @@ candidates = ["Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Arial Unicode MS" "Helvetica" "Arial" "Liberation Sans" "DejaVu Sans"];
 candidateAvailable = false(size(candidates));
 for index = 1:numel(candidates)
-    candidateAvailable(index) = publication_font_available(candidates(index), installedFonts);
+    candidateAvailable(index) = oi_font_available(candidates(index), installedFonts);
 end
 match = candidates(candidateAvailable);
 assert(~isempty(match), "oi_ocean_theme:FontUnavailable", ...
@@ -50,18 +50,6 @@ fontName = match(1);
 cjkCapable = any(contains(lower(fontName), ["noto sans cjk" "source han" ...
     "wenquanyi" "droid sans fallback" "yahei" "pingfang" ...
     "simhei" "simsun" "arial unicode"]));
-end
-
-function available = publication_font_available(fontName, installedFonts)
-fontName = strtrim(string(fontName));
-available = strlength(fontName) > 0 ...
-    && any(strcmpi(installedFonts, fontName));
-if available || ~isunix
-    return;
-end
-command = sprintf("fc-match -f '%%{family}' '%s' 2>/dev/null", char(fontName));
-[status, output] = system(command);
-available = status == 0 && contains(lower(string(output)), lower(fontName));
 end
 
 function colors = ocean_colormap(colorCount)

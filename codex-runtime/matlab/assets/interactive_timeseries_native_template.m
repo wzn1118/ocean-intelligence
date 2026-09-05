@@ -20,6 +20,9 @@ arguments
   options.ConfidenceLevel (1,1) double = NaN
   options.SecondaryValueLabel (1,1) string = ""
   options.SecondaryValueUnit (1,1) string = ""
+  options.PublicationWidthPixels (1,1) double {mustBeInteger,mustBePositive} = 2400
+  options.PublicationHeightPixels (1,1) double {mustBeInteger,mustBePositive} = 1500
+  options.PublicationDPI (1,1) double {mustBeInteger,mustBePositive} = 300
 end
 
 assert(~ismissing(output_base) && strlength(strtrim(output_base)) > 0, ...
@@ -316,16 +319,7 @@ if interactive_enabled
       'Custom datacursormode callbacks are limited to traditional figures in this template');
     for axes_index = 1:numel(axes_handles)
       datacursormode(axes_handles(axes_index), 'on');
-      data_cursor_mode = datacursormode(axes_handles(axes_index));
-      data_cursor_mode.Enable = 'on';
       brush(axes_handles(axes_index), 'on');
-      brush_mode = brush(axes_handles(axes_index));
-      brush_mode.Enable = 'on';
-      brush_mode.ActionPostCallback = @(~, ~) capture_brushed_ids(figure_handle, line_handles);
-      interaction_state = getappdata(figure_handle, 'OceanInteractionState');
-      interaction_state.BrushModes{axes_index} = brush_mode;
-      interaction_state.DataCursorModes{axes_index} = data_cursor_mode;
-      setappdata(figure_handle, 'OceanInteractionState', interaction_state);
     end
   else
     data_cursor_mode = datacursormode(figure_handle);
@@ -374,7 +368,8 @@ if options.Export
     manifest_reason = "exportapp_interface_snapshot_not_supported_by_publication_manifest";
   else
     manifest_entry = oi_export_figure(figure_handle, output_directory, figure_id, ...
-      1200, 720, 300, 'Title', title_text, 'Source', 'interactive MATLAB asset', ...
+      options.PublicationWidthPixels, options.PublicationHeightPixels, ...
+      options.PublicationDPI, 'Title', title_text, 'Source', 'interactive MATLAB asset', ...
       'ExportSVG', options.ExportSVG, 'RequiredToolboxes', options.RequiredToolboxes);
     export_api = manifest_entry.runtime.export_api;
     manifest_available = true;
@@ -408,6 +403,11 @@ outputs = struct('Figure', figure_handle, 'Layout', layout, 'Axes', axes_handles
   'RuntimeRelease', string(version('-release')), ...
   'RequiredProducts', "MATLAB", ...
   'RequiredToolboxes', options.RequiredToolboxes(:), ...
+  'PublicationWidthPixels', options.PublicationWidthPixels, ...
+  'PublicationHeightPixels', options.PublicationHeightPixels, ...
+  'PublicationDPI', options.PublicationDPI, ...
+  'PublicationPhysicalWidthIn', options.PublicationWidthPixels / options.PublicationDPI, ...
+  'PublicationPhysicalHeightIn', options.PublicationHeightPixels / options.PublicationDPI, ...
   'PublicationExport', options.Export && export_target == "plot", ...
   'FontName', font_name, 'CJKTextPresent', cjk_text_present, ...
   'FontRenderingVerified', false, ...
@@ -783,14 +783,14 @@ if isappdata(figure_handle, 'OceanInteractionState')
             && is_live_handle(interaction_state.DataCursorModes{axes_index})
           disable_data_cursor_mode(interaction_state.DataCursorModes{axes_index});
         else
-          datacursormode(interaction_state.Axes(axes_index), 'off');
+          disable_axes_data_cursor_mode(interaction_state.Axes(axes_index));
         end
         if isfield(interaction_state, 'BrushModes') ...
             && numel(interaction_state.BrushModes) >= axes_index ...
             && is_live_handle(interaction_state.BrushModes{axes_index})
           disable_brush_mode(interaction_state.BrushModes{axes_index});
         else
-          brush(interaction_state.Axes(axes_index), 'off');
+          disable_axes_brush_mode(interaction_state.Axes(axes_index));
         end
       end
     end
@@ -804,6 +804,20 @@ if isappdata(figure_handle, 'OceanInteractionState')
   rmappdata(figure_handle, 'OceanInteractionState');
 end
 delete(figure_handle);
+end
+
+function disable_axes_brush_mode(axes_handle)
+try
+  brush(axes_handle, 'off');
+catch
+end
+end
+
+function disable_axes_data_cursor_mode(axes_handle)
+try
+  datacursormode(axes_handle, 'off');
+catch
+end
 end
 
 function disable_brush_mode(brush_mode)
@@ -871,7 +885,7 @@ assert(~isempty(installed_fonts), 'ocean:interaction:FontUnavailable', ...
 cjk_text_present = contains_cjk_text(text_values);
 requested_font = strtrim(requested_font);
 if strlength(requested_font) > 0
-  assert(publication_font_available(requested_font, installed_fonts), ...
+  assert(oi_font_available(requested_font, installed_fonts), ...
     'ocean:interaction:FontUnavailable', ...
     'The explicitly requested FontName is not installed');
   font_name = requested_font;
@@ -891,7 +905,7 @@ else
 end
 font_name = "";
 for candidate_index = 1:numel(candidates)
-  if publication_font_available(candidates(candidate_index), installed_fonts)
+  if oi_font_available(candidates(candidate_index), installed_fonts)
     font_name = candidates(candidate_index);
     break;
   end
@@ -909,18 +923,6 @@ valid = false;
 for token_index = 1:numel(tokens)
   valid = valid || contains(normalized, tokens(token_index));
 end
-end
-
-function available = publication_font_available(font_name, installed_fonts)
-font_name = strtrim(string(font_name));
-available = strlength(font_name) > 0 ...
-  && any(strcmpi(installed_fonts, font_name));
-if available || ~isunix
-  return;
-end
-command = sprintf("fc-match -f '%%{family}' '%s' 2>/dev/null", char(font_name));
-[status, output] = system(command);
-available = status == 0 && contains(lower(string(output)), lower(font_name));
 end
 
 function present = contains_cjk_text(text_values)

@@ -13,6 +13,10 @@ ROUTER_PATH = MATLAB_DIR.parent / "server" / "matlab-plot-router.mjs"
 REGRESSION_RUNNER_PATH = MATLAB_DIR.parents[1] / "scripts" / "matlab-plot-regression.sh"
 
 EXPECTED_ASSETS = {
+    "oi_annotate_svg.m",
+    "oi_text_bounds.m",
+    "oi_font_available.m",
+    "oi_color_accessibility_audit.m",
     "interactive_timeseries_native_template.m",
     "oi_apply_axes.m",
     "oi_apply_color_scale.m",
@@ -137,7 +141,11 @@ SPECIAL_REQUIREMENTS = {
     "oi_plot_direction_rose.m": ["DirectionConvention", "ThetaZeroLocation", "ThetaDir", "Weights", "Normalization", "OI_AxisLabels", "degreeUnits", "WeightsRequired", "matlab.graphics.axis.PolarAxes"],
     "oi_plot_vector_field.m": ["MaskMismatch", "quiver", "Stride", "ReferenceMagnitude", "hypot", "isnumeric(stride)", "oi_get_option(options, \"ComponentFrame\", \"\")", "oi_get_option(options, \"XLabel\", \"\")", "oi_get_option(options, \"YLabel\", \"\")"],
     "oi_plot_comparison.m": ["OneToOne", "Bias", "MAE", "RMSE", "Correlation", "DataTipTemplate", "MetricOverflow", "LimitOverflow", "oi_hold_axes"],
-    "oi_export_figure.m": ["exportgraphics", ".png", ".pdf", ".svg", "-dsvg", "bytes > 0", "oi_read_file_prefix", "oi_sha256_file", "imfinfo", "StaleArtifact", "print(", "ExportSVG", "RequiredToolboxes", "MissingToolbox", "UnsupportedRelease", "EmptyTitle", "EmptyProvenance", "InvalidArtifactSignature", "minimum_release", "R2019b", "25.1", "has_direct_svg_export", "installed_toolboxes", "toolbox_installation_verified", "toolbox_license_verified", "toolbox_invocation_verified", "export_api", "export_device", "headless_static_export", "xmlread", "aria-label", "accessibility", "ContrastRatio", "bounds_units", "normalized", "ClippedContent", "OverlappingText", "normalized_margins", "foreground_color", "background_color", "rendering_evidence", "drawnow_completed", "visual_inspection_verified", "pdf_font_embedding_verified", "entry.publication", "entry.interaction", "CJKFontUnavailable", "artifactCleanup", "delete_artifacts"],
+    "oi_export_figure.m": ["exportgraphics", ".png", ".pdf", ".svg", "-dsvg", "bytes > 0", "oi_read_file_prefix", "oi_sha256_file", "imfinfo", "StaleArtifact", "print(", "ExportSVG", "RequiredToolboxes", "MissingToolbox", "UnsupportedRelease", "EmptyTitle", "EmptyProvenance", "InvalidArtifactSignature", "minimum_release", "R2019b", "25.1", "has_direct_svg_export", "installed_toolboxes", "toolbox_installation_verified", "toolbox_license_verified", "toolbox_invocation_verified", "export_api", "export_device", "headless_static_export", "oi_annotate_svg", "accessibility", "ContrastRatio", "bounds_units", "normalized", "ClippedContent", "OverlappingText", "normalized_margins", "foreground_color", "background_color", "rendering_evidence", "drawnow_completed", "visual_inspection_verified", "pdf_font_embedding_verified", "entry.publication", "entry.interaction", "CJKFontUnavailable", "artifactCleanup", "delete_artifacts"],
+    "oi_annotate_svg.m": ["xmlread", "xmlwrite", "viewBox", "aria-label", "setAttribute"],
+    "oi_text_bounds.m": ["getpixelposition", "Extent", "onCleanup", "FigureMismatch"],
+    "oi_font_available.m": ["listfonts", "fc-match", "shellArgument", "strcmpi"],
+    "oi_color_accessibility_audit.m": ["HandleVisibility", "finite_data_count", "continuous_color_status", "categorical_status"],
     "oi_write_manifest.m": ["jsonencode", 'schema_version\", 2', "generated_at", "oi_read_file_prefix", "oi_sha256_file", "ByteMismatch", "HashMismatch", "movefile", "runtime_status", "execution_verified", "artifact_validation", "visual_inspection", "matlab_release", "minimum_matlab_release", "export_formats", "export_strategies", "runtime_contract", "octave_substitution_allowed", "installed_toolboxes", "required_toolboxes", "toolbox_verification_scope", "toolbox_license_verified", "toolbox_invocation_verified", "toolboxes", "desktop_independent", "matlab -batch", "InvalidPng", "InvalidPdf", "InvalidSvg", "xmlread", "rendering_evidence", "RenderingEvidence", "RuntimeEvidence", "ExportApiMismatch", "MetadataMismatch", "UnsafeExportPath", "canonical_path", "is_within_directory", "text_overlap_count", "normalized_margins", "pdf_font_embedding_verified", "PublicationEvidence", "InteractionEvidence"],
     "oi_ocean_theme.m": ["SequentialMap", "DivergingMap", "MissingColor", "listfonts", "Noto Sans CJK TC", "CJK-capable"],
     "oi_figure.m": ["DefaultAxesColorOrder", "Visible", "Position"],
@@ -185,7 +193,7 @@ def validate() -> list[str]:
         text = path.read_text(encoding="utf-8")
         if not text.isascii():
             fail(f"{path.name}: MATLAB source must remain ASCII", failures)
-        match = re.search(r"(?m)^function\s+(?:\w+\s*=\s*)?(\w+)\s*\(", text)
+        match = re.search(r"(?m)^function\s+(?:(?:\[[^\]]+\]|\w+)\s*=\s*)?(\w+)\s*\(", text)
         if not match:
             fail(f"{path.name}: missing top-level function", failures)
             continue

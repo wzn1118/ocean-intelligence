@@ -218,7 +218,7 @@ fprintf("MATLAB_ASSET_REGRESSION_FIGURES=%d\n", numel(entries));
 end
 
 function entry = export_one(output_directory, figure_id, title_text, theme, science_contract, plotter)
-figure_handle = oi_figure(1200, 675, "off");
+figure_handle = oi_figure(2400, 1500, "off");
 cleanup = onCleanup(@() close_if_valid(figure_handle));
 axes_handle = axes("Parent", figure_handle);
 result = plotter(axes_handle);
@@ -232,7 +232,7 @@ assert(result.ValidCount == result.valid_count ...
     "Plot helper did not preserve missing counts in both result contracts");
 oi_apply_axes(axes_handle, theme);
 drawnow;
-entry = oi_export_figure(figure_handle, output_directory, figure_id, 1200, 675, 300, ...
+entry = oi_export_figure(figure_handle, output_directory, figure_id, 2400, 1500, 300, ...
     "Title", title_text, "Source", "MATLAB ocean asset regression", ...
     "Theme", theme.Name, "ExportSVG", true);
 entry.scientific_data_contract = finalize_science_contract(science_contract, ...
