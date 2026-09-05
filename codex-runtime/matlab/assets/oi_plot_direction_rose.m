@@ -165,16 +165,16 @@ hasLayout = isprop(axesHandle, "Layout") && ~isempty(axesHandle.Layout) ...
     && isprop(axesHandle.Layout, "Tile");
 if hasLayout
     tile = axesHandle.Layout.Tile;
-    axesHandle.Layout.Tile = "none";
 end
 if isa(parent, "matlab.graphics.layout.TiledChartLayout")
+    delete(axesHandle);
     polarAxes = polaraxes(parent);
     if hasLayout
         polarAxes.Layout.Tile = tile;
     end
 else
     polarAxes = polaraxes("Parent", parent, "Position", position);
+    set(axesHandle, "Visible", "off", "HandleVisibility", "off", "HitTest", "off");
+    setappdata(axesHandle, "OI_ReplacementAxes", polarAxes);
 end
-set(axesHandle, "Visible", "off", "HandleVisibility", "off", "HitTest", "off");
-setappdata(axesHandle, "OI_ReplacementAxes", polarAxes);
 end
