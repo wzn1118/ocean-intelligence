@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 
@@ -488,6 +490,56 @@ def validate_runtime_input_fixtures(
     return sorted(checked, key=lambda item: item["id"])
 
 
+def load_report_validator() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("matlab_ocean_report_validator", EVAL_ROOT / "build_ocean_report.py")
+    if spec is None or spec.loader is None:
+        raise EvaluationError("cannot load the local ocean report validator")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_runtime_plot_data_evidence(
+    runtime_record: dict[str, Any], manifest: dict[str, Any], input_fixtures: list[dict[str, Any]],
+) -> dict[str, Any]:
+    sources = [("runtime", runtime_record), ("manifest", manifest), ("manifest.runtime", manifest["runtime"])]
+    for index, figure in enumerate(manifest["figures"]):
+        sources.extend([(f"manifest.figures[{index}]", figure),
+                        (f"manifest.figures[{index}].runtime", figure["runtime"])])
+    for field, source in sources:
+        if "plot_data_evidence" in source:
+            raise EvaluationError(f"plot_data_evidence must be nested in scientific_data_contract, not {field}")
+
+    report = load_report_validator()
+    runtime_release = normalize_matlab_release(runtime_record["matlab_release"], "runtime.matlab_release")
+    checked = []
+    try:
+        _, contexts = report.load_fixture_statistics(FIXTURE_ROOT)
+        for figure in manifest["figures"]:
+            identifier = figure.get("id")
+            contract = figure.get("scientific_data_contract", {})
+            if not isinstance(contract, dict):
+                raise EvaluationError(f"figure {identifier} scientific_data_contract must be an object")
+            context = contexts.get(identifier, {}) if isinstance(identifier, str) else {}
+            if "plot_data_evidence" in contract and not context:
+                raise EvaluationError(f"plot_data_evidence is unsupported for figure {identifier}")
+            input_bound = any(
+                item["id"] == context.get("fixture_id") and item["sha256"] == context.get("fixture_sha256")
+                for item in input_fixtures
+            )
+            proof = report.validate_plot_data_evidence(
+                {**figure, "id": identifier, "scientific_data_contract": contract}, context, input_bound, runtime_release,
+            )
+            checked.append({"figure_id": identifier, **proof})
+    except report.ReportBuildError as error:
+        raise EvaluationError(f"runtime plot_data_evidence validation failed: {error}") from error
+    return {
+        "scope": "Native plot/result declarations checked against fixture arrays and validated runtime input snapshots; "
+                 "not independent MATLAB re-execution or visual verification",
+        "figures": checked,
+    }
+
+
 def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> dict[str, Any]:
     runtime_record = load_json(output_root / "matlab-runtime.json")
     if not isinstance(runtime_record, dict) or runtime_record.get("nonce") != nonce:
@@ -498,6 +550,7 @@ def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> d
     manifest = load_json(output_root / "figures.json")
     validate_runtime_releases(runtime_record, manifest)
     input_fixtures = validate_runtime_input_fixtures(output_root, runtime_record, started_ns)
+    plot_data_evidence = validate_runtime_plot_data_evidence(runtime_record, manifest, input_fixtures)
     exports = collect_manifest_exports(manifest)
     checked: list[dict[str, Any]] = []
     for export in exports:
@@ -523,7 +576,8 @@ def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> d
     if validate_runtime_input_fixtures(output_root, runtime_record, started_ns) != input_fixtures:
         raise EvaluationError("input fixture snapshots changed during artifact validation")
     return {"status": "passed", "record": runtime_record, "input_fixtures": input_fixtures,
-            "artifacts": checked, "manifest_sha256": sha256(output_root / "figures.json")}
+            "plot_data_evidence": plot_data_evidence, "artifacts": checked,
+            "manifest_sha256": sha256(output_root / "figures.json")}
 
 
 def validate_visual_audit(path: Path | None, runtime: dict[str, Any]) -> dict[str, Any]:

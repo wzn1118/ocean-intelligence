@@ -306,9 +306,20 @@ singletonData = data(1, :);
 singletonData.Time.TimeZone = 'Asia/Shanghai';
 fixtures = {data, missingData, subsecondData, singletonData};
 caseNames = ["magnitude", "missing-linked", "subsecond-bounds", "singleton"];
-outputDirectory = tempname;
+outputRoot = string(getenv("MATLAB_FULL100_OUTPUT"));
+if strlength(outputRoot) == 0
+    outputDirectory = string(tempname);
+else
+    outputDirectory = fullfile(outputRoot, "interaction-time-padding");
+end
+assert(~isfolder(outputDirectory) && ~isfile(outputDirectory), ...
+    "test_interaction_native_compatibility:FreshPaddingOutput", ...
+    "Time padding artifacts require a fresh directory: %s", outputDirectory);
 mkdir(outputDirectory);
-directoryCleanup = onCleanup(@() rmdir(outputDirectory, 's'));
+if strlength(outputRoot) == 0
+    directoryCleanup = onCleanup(@() rmdir(outputDirectory, 's'));
+end
+fprintf("MATLAB_INTERACTION_TIME_PADDING_OUTPUT=%s\n", outputDirectory);
 for caseIndex = 1:numel(fixtures)
     source = fixtures{caseIndex};
     extraOptions = {};
@@ -348,7 +359,12 @@ for caseIndex = 1:numel(fixtures)
         nativeLimits = xlim(outputs.Axes(1));
         nativeMargin = seconds(0.04 * seconds(nativeLimits(2) - nativeLimits(1)));
         expectedLimits = [nativeLimits(1) - nativeMargin nativeLimits(2) + nativeMargin];
-        assert(all(abs(seconds(limits - expectedLimits)) < 1e-9), ...
+        limitErrorSeconds = seconds(limits - expectedLimits);
+        fprintf("MATLAB_INTERACTION_SINGLETON_LIMITS=%s\n", jsonencode(struct( ...
+            "padded_limits", string(limits), "native_auto_limits_after_export", string(nativeLimits), ...
+            "expected_limits_after_export", string(expectedLimits), "error_seconds", limitErrorSeconds, ...
+            "visual_verified", false)));
+        assert(all(abs(limitErrorSeconds) < 1e-9), ...
             "test_interaction_native_compatibility:SingletonTimeLimits", ...
             "Singleton padding must extend native auto limits without a calendar-unit guess");
         xlim(outputs.Axes(1), limits);

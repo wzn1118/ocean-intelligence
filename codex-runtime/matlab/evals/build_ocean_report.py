@@ -38,6 +38,10 @@ GRID_NATIVE_SOURCES = {
     "crossed-time-depth-temperature": "Image.CData",
     "repeat-cast-salinity-profiles": "Lines.XData",
 }
+INTERACTIVE_NATIVE_SOURCE = (
+    "Lines(1).XData/YData;"
+    "UncertaintyHandles(1).XData/YData/YNegativeDelta/YPositiveDelta"
+)
 FIXTURE_BINDING_LIMITATION = (
     "Runtime records contain fixture IDs but no fixture content hashes or coordinate values; "
     "matching metadata does not verify which numeric fixture snapshot MATLAB consumed."
@@ -99,6 +103,25 @@ def require_positive_number(value: Any, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ReportBuildError(f"{field} must be a positive finite number")
     return float(value)
+
+
+def numeric_equal(actual: Any, expected: Any) -> bool:
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return False
+    if actual is None or expected is None:
+        return actual is expected
+    if not isinstance(actual, (int, float)) or not isinstance(expected, (int, float)):
+        return False
+    try:
+        return math.isfinite(actual) and math.isfinite(expected) and actual == expected
+    except OverflowError:
+        return False
+
+
+def require_vector(value: Any, count: int, field: str) -> list[Any]:
+    if not isinstance(value, list) or len(value) != count:
+        raise ReportBuildError(f"{field} must be a JSON array of length {count}")
+    return value
 
 
 def parse_utc(value: Any, field: str) -> datetime:
@@ -488,6 +511,114 @@ def validate_layout_measurement(figure: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def validate_interactive_plot_data_evidence(
+    declaration: Any, context: dict[str, Any], input_bound: bool, runtime_release: str
+) -> dict[str, Any]:
+    fields = {
+        "schema_version", "figure_id", "fixture_id", "fixture_sha256", "matlab_release",
+        "dimension_order", "shape", "selection", "time_utc", "time_zone", "quantity_unit",
+        "missing_policy", "native_data_source", "native_values", "missing_mask",
+        "observation_ids", "source_rows", "source_row_origin", "input_match_asserted", "qc", "uncertainty",
+    }
+    if not isinstance(declaration, dict) or set(declaration) != fields:
+        raise ReportBuildError("paired-interactive plot_data_evidence fields are missing or unsupported")
+    if require_nonnegative_integer(declaration["schema_version"], "plot_data_evidence.schema_version") != 2:
+        raise ReportBuildError("paired-interactive plot_data_evidence.schema_version must be 2")
+    for field, expected in {
+        "figure_id": "paired-interactive", "fixture_id": context["fixture_id"],
+        "fixture_sha256": context["fixture_sha256"], "time_zone": "UTC",
+        "quantity_unit": context["unit"], "missing_policy": "preserve",
+        "native_data_source": INTERACTIVE_NATIVE_SOURCE, "source_row_origin": "call_entry_order",
+    }.items():
+        if not isinstance(declaration[field], str) or declaration[field] != expected:
+            raise ReportBuildError(f"paired-interactive plot_data_evidence.{field} differs from the fixture contract")
+    if normalize_matlab_release(declaration["matlab_release"], "plot_data_evidence.matlab_release") != runtime_release:
+        raise ReportBuildError("paired-interactive plot_data_evidence MATLAB release mismatch")
+    if require_bool(declaration["input_match_asserted"], "plot_data_evidence.input_match_asserted") is not True:
+        raise ReportBuildError("plot_data_evidence input match assertion must be true")
+    selection = declaration["selection"]
+    if not isinstance(selection, dict) or set(selection) != {"kind", "index_zero_based", "depth_m"}:
+        raise ReportBuildError("plot_data_evidence selection fields are missing or unsupported")
+    index = require_nonnegative_integer(selection["index_zero_based"], "plot_data_evidence.selection.index_zero_based")
+    if (selection["kind"] != context["selection"]["kind"]
+            or index != context["selection"]["index_zero_based"]
+            or not numeric_equal(selection["depth_m"], context["selection"]["depth_m"])):
+        raise ReportBuildError("plot_data_evidence selection differs from the third fixture depth row")
+
+    expected = context["plot_input"]
+    expected_values = expected["values"]
+    expected_uncertainty = expected["uncertainty_values"]
+    count = len(expected_values)
+    for field, source in (("shape", [count]), ("source_rows", list(range(1, count + 1)))):
+        vector = require_vector(declaration[field], len(source), f"plot_data_evidence.{field}")
+        for value in vector:
+            require_nonnegative_integer(value, f"plot_data_evidence.{field}")
+        if vector != source:
+            raise ReportBuildError(f"plot_data_evidence.{field} differs from fixture call-entry order/shape")
+    qc = declaration["qc"]
+    uncertainty = declaration["uncertainty"]
+    if not isinstance(qc, dict) or set(qc) != {"provided", "policy", "flags"}:
+        raise ReportBuildError("plot_data_evidence QC fields are missing or unsupported")
+    uncertainty_fields = {"present", "type", "unit", "representation", "confidence_level", "display",
+                          "values", "missing_mask", "joint_valid_mask", "errorbar"}
+    if not isinstance(uncertainty, dict) or set(uncertainty) != uncertainty_fields:
+        raise ReportBuildError("plot_data_evidence uncertainty fields are missing or unsupported")
+    if require_bool(qc["provided"], "plot_data_evidence.qc.provided") is not True or qc["policy"] != "preserve":
+        raise ReportBuildError("plot_data_evidence QC must be provided and preserved")
+    uncertainty_type = {"standard_uncertainty": "standard-uncertainty"}.get(context["uncertainty"]["type"])
+    if (require_bool(uncertainty["present"], "plot_data_evidence.uncertainty.present") is not True
+            or uncertainty_type is None or uncertainty["type"] != uncertainty_type
+            or uncertainty["unit"] != context["uncertainty"]["unit"]
+            or uncertainty["representation"] != "magnitude" or uncertainty["confidence_level"] is not None
+            or uncertainty["display"] != "errorbar"):
+        raise ReportBuildError("plot_data_evidence uncertainty must preserve fixture standard-uncertainty magnitudes as errorbar")
+    errorbar = uncertainty["errorbar"]
+    if not isinstance(errorbar, dict) or set(errorbar) != {"time_utc", "values", "negative_delta", "positive_delta"}:
+        raise ReportBuildError("plot_data_evidence errorbar fields are missing or unsupported")
+
+    for field, values, source in (
+        ("dimension_order", declaration["dimension_order"], ["time"]),
+        ("observation_ids", declaration["observation_ids"], context["observation_ids"]),
+        ("qc.flags", qc["flags"], expected["qc_flags"]),
+    ):
+        vector = require_vector(values, len(source), f"plot_data_evidence.{field}")
+        if any(not isinstance(value, str) for value in vector) or vector != source:
+            raise ReportBuildError(f"plot_data_evidence.{field} differs from complete fixture identity/order")
+    expected_times = [parse_utc(value, "fixture.time_utc") for value in context["time"]["values"]]
+    for field, values in (("time_utc", declaration["time_utc"]), ("uncertainty.errorbar.time_utc", errorbar["time_utc"])):
+        vector = require_vector(values, count, f"plot_data_evidence.{field}")
+        if [parse_utc(value, f"plot_data_evidence.{field}") for value in vector] != expected_times:
+            raise ReportBuildError(f"plot_data_evidence.{field} differs from the complete fixture time vector")
+    for field, values, source in (
+        ("native_values", declaration["native_values"], expected_values),
+        ("uncertainty.values", uncertainty["values"], expected_uncertainty),
+        ("uncertainty.errorbar.values", errorbar["values"], expected_values),
+        ("uncertainty.errorbar.negative_delta", errorbar["negative_delta"], expected_uncertainty),
+        ("uncertainty.errorbar.positive_delta", errorbar["positive_delta"], expected_uncertainty),
+    ):
+        vector = require_vector(values, count, f"plot_data_evidence.{field}")
+        if not all(numeric_equal(value, expected_value) for value, expected_value in zip(vector, source)):
+            raise ReportBuildError(f"plot_data_evidence.{field} differs from the complete fixture array")
+    for field, values, source in (
+        ("missing_mask", declaration["missing_mask"], [value is None for value in expected_values]),
+        ("uncertainty.missing_mask", uncertainty["missing_mask"], [value is None for value in expected_uncertainty]),
+        ("uncertainty.joint_valid_mask", uncertainty["joint_valid_mask"],
+         [value is not None and magnitude is not None for value, magnitude in zip(expected_values, expected_uncertainty)]),
+    ):
+        vector = require_vector(values, count, f"plot_data_evidence.{field}")
+        for value in vector:
+            require_bool(value, f"plot_data_evidence.{field}")
+        if vector != source:
+            raise ReportBuildError(f"plot_data_evidence.{field} differs from the fixture missing/joint mask")
+    return {
+        "status": "runtime_declaration_verified" if input_bound else "not_verified",
+        "provided": True, "local_arrays_match": True, "input_fixture_binding_verified": input_bound,
+        "reason": "Native Line/ErrorBar declarations match complete fixture arrays and identity; not independently re-executed"
+        if input_bound else "Arrays match local fixtures but runtime input bytes are not bound",
+        "declaration": declaration,
+    }
+
+
 def validate_plot_data_evidence(
     figure: dict[str, Any], context: dict[str, Any], input_bound: bool, runtime_release: str
 ) -> dict[str, Any]:
@@ -499,6 +630,8 @@ def validate_plot_data_evidence(
         return {"status": "not_verified", "provided": False, "declaration": None,
                 "reason": "Native plot/result array evidence not provided"}
     declaration = contract["plot_data_evidence"]
+    if figure_id == "paired-interactive" and isinstance(declaration, dict) and declaration.get("schema_version") == 2:
+        return validate_interactive_plot_data_evidence(declaration, context, input_bound, runtime_release)
     fields = {
         "schema_version", "figure_id", "fixture_id", "fixture_sha256", "matlab_release",
         "dimension_order", "shape", "time_utc", "depth_m", "depth_unit", "quantity_unit",
@@ -665,7 +798,7 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
         scientific["uncertainty"]["plot_evidence_status"] = plot_data["status"]
         if plot_data["status"] == "runtime_declaration_verified":
             scientific["qc"]["plot_filtering"] = "preserve"
-            scientific["uncertainty"]["plot_display"] = "metadata"
+            scientific["uncertainty"]["plot_display"] = plot_data["declaration"]["uncertainty"]["display"]
         layout_measurement = validate_layout_measurement(figure)
         exports = figure.get("exports")
         if not isinstance(exports, dict) or set(exports) != set(REQUIRED_FORMATS):
@@ -1081,6 +1214,8 @@ def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any
         "statistics": summarize_numbers(numeric_values(interactive_row, "interactive temperature")),
         "observation_ids": [f"temp-050m-{index + 1:03d}" for index in range(len(interactive_row))],
         "missing_time_indices": [index for index, value in enumerate(interactive_row) if value is None],
+        "plot_input": {"values": interactive_row, "qc_flags": interactive_qc,
+                       "uncertainty_values": interactive_uncertainty},
     }
     for identifier in GRID_NATIVE_SOURCES:
         variables = payloads[identifier]["variables"]
@@ -1288,7 +1423,7 @@ def render_report(evidence: dict[str, Any]) -> str:
             "- 缺测保持为 `null -> NaN` 语义，不填补、不按零值处理。",
             "- QC 保留 `good`、`suspect`、`missing` 原状态；统计未把 `suspect` 自动删除，因此有效数与严格高质量样本数含义不同。",
             "- 清单 `qc.status=present`、`uncertainty.status=present` 仅表示源 fixture 元数据存在，不能单独证明图件已接收、筛选或呈现这些字段。",
-            "- 各图应用证据见原生图元核对表；配对图和交互图未提供本项证据，不推定已核验其 QC 筛选或不确定度呈现。",
+            "- 各图应用证据见原生图元核对表；未提供或输入字节未绑定的声明不推定已核验。errorbar 表示原生误差条数值声明核对，不是视觉通过；metadata 不表示已绘制误差条。",
             "- 不确定度为 fixture 提供的标准不确定度，仅用于描述合成输入和逐记录误差覆盖；没有扩展为现实仪器误差、代表性误差或海区综合不确定度。",
             "- 三份 fixture 的时间窗不同，合并包络不代表连续采样，也不用于趋势计算。",
             "",

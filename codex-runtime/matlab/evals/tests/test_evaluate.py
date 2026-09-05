@@ -5,8 +5,11 @@ import importlib.util
 import io
 import json
 import os
+import struct
+import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -552,6 +555,287 @@ class RuntimeInputFixtureTests(RuntimeFixtureTestCase):
         record.update(bytes=len(content), sha256=matlab_eval.sha256(snapshot))
         with self.assertRaisesRegex(matlab_eval.EvaluationError, "frozen fixture id does not match"):
             self.validate_inputs()
+
+
+class RuntimePlotDataEvidenceTests(RuntimeFixtureTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        for figure, identifier in zip(self.manifest["figures"], matlab_eval.EXPECTED_INPUT_FIXTURES):
+            figure["id"] = identifier
+            for format_name in figure["exports"]:
+                artifact = self.output_root / f"{identifier}.{format_name}"
+                if format_name == "png":
+                    def png_chunk(kind: bytes, payload: bytes) -> bytes:
+                        return (struct.pack(">I", len(payload)) + kind + payload
+                                + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF))
+
+                    artifact.write_bytes(
+                        b"\x89PNG\r\n\x1a\n"
+                        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 1, 8, 2, 0, 0, 0))
+                        + png_chunk(b"IDAT", zlib.compress(b"\x00" + b"\xff" * 6))
+                        + png_chunk(b"IEND", b"")
+                    )
+                elif format_name == "pdf":
+                    artifact.write_bytes(b"%PDF-1.4\n%%EOF\n")
+                else:
+                    artifact.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"/>')
+                figure["exports"][format_name] = {
+                    "file": artifact.name, "bytes": artifact.stat().st_size,
+                    "sha256": matlab_eval.sha256(artifact), "width": 2, "height": 1,
+                }
+
+    def record_grid_evidence(self, figure_index: int = 0) -> dict:
+        figure = self.manifest["figures"][figure_index]
+        identifier = figure["id"]
+        source = self.fixture_root / matlab_eval.EXPECTED_INPUT_FIXTURES[identifier]
+        fixture = json.loads(source.read_bytes())
+        variable_name = "temperature" if identifier == "crossed-time-depth-temperature" else "salinity"
+        variable = fixture["variables"][variable_name]
+        uncertainty = fixture["variables"][f"{variable_name}_standard_uncertainty"]
+        values = variable["values"]
+        declaration = {
+            "schema_version": 1, "figure_id": identifier, "fixture_id": identifier,
+            "fixture_sha256": matlab_eval.sha256(source), "matlab_release": "R2021a",
+            "dimension_order": ["depth", "time"], "shape": [len(values), len(values[0])],
+            "time_utc": fixture["coordinates"]["time"]["values"],
+            "depth_m": fixture["coordinates"]["depth"]["values"], "depth_unit": "m",
+            "quantity_unit": variable["unit"], "missing_policy": "preserve",
+            "native_data_source": "Image.CData" if variable_name == "temperature" else "Lines.XData",
+            "native_values": values, "missing_mask": [[value is None for value in row] for row in values],
+            "input_match_asserted": True,
+            "qc": {"provided": True, "policy": "preserve", "flags": fixture["variables"]["qc"]["values"]},
+            "uncertainty": {"present": True, "type": uncertainty["type"], "unit": uncertainty["unit"],
+                            "display": "metadata", "values": uncertainty["values"]},
+        }
+        figure["scientific_data_contract"] = {"plot_data_evidence": declaration}
+        return declaration
+
+    def validate_output(self) -> dict:
+        (self.output_root / "matlab-runtime.json").write_text(json.dumps(self.runtime), encoding="utf-8")
+        (self.output_root / "figures.json").write_text(json.dumps(self.manifest), encoding="utf-8")
+        return matlab_eval.validate_runtime_output(self.output_root, self.runtime["nonce"], self.started_ns)
+
+    def test_real_grid_v1_validates_complete_arrays_without_visual_promotion(self) -> None:
+        declarations = [self.record_grid_evidence(index) for index in (0, 1)]
+        original = copy.deepcopy((self.runtime, self.manifest))
+        result = self.validate_output()
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(len(result["artifacts"]), 9)
+        self.assertEqual((self.runtime, self.manifest), original)
+        evidence = result["plot_data_evidence"]
+        self.assertIn("not independent", evidence["scope"])
+        self.assertIn("visual", evidence["scope"])
+        self.assertEqual(len(evidence["figures"]), 3)
+        for proof, declaration in zip(evidence["figures"], declarations):
+            self.assertEqual(proof["figure_id"], declaration["figure_id"])
+            self.assertEqual(proof["status"], "runtime_declaration_verified")
+            self.assertTrue(proof["input_fixture_binding_verified"])
+            self.assertTrue(proof["local_arrays_match"])
+            self.assertEqual(proof["declaration"], declaration)
+        self.assertEqual(evidence["figures"][2]["status"], "not_verified")
+        self.assertEqual(matlab_eval.validate_visual_audit(None, result)["status"], "pending")
+        self.assertNotIn("score", result)
+
+    def test_legacy_missing_declarations_stay_unverified_including_unknown_figures(self) -> None:
+        self.manifest["figures"][0]["scientific_data_contract"] = {"provided": True, "required": True}
+        self.manifest["figures"][1]["scientific_data_contract"] = {}
+        self.manifest["figures"][2]["id"] = "legacy-unknown-figure"
+        result = self.validate_output()
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(len(result["artifacts"]), 9)
+        for figure, proof in zip(self.manifest["figures"], result["plot_data_evidence"]["figures"]):
+            self.assertEqual(proof["figure_id"], figure["id"])
+            self.assertEqual(proof["status"], "not_verified")
+            self.assertFalse(proof["provided"])
+            self.assertIsNone(proof["declaration"])
+
+    def test_real_grid_array_and_hash_tampering_is_rejected_before_passed(self) -> None:
+        for figure_index in (0, 1):
+            original = copy.deepcopy(self.record_grid_evidence(figure_index))
+            for field, value, reason in (
+                ("native_values", [[0] * original["shape"][1] for _ in original["native_values"]], "complete fixture array"),
+                ("fixture_sha256", "0" * 64, "hash mismatch"),
+                ("matlab_release", "R2024b", "release mismatch"),
+                ("input_match_asserted", True, "fields are missing or unsupported"),
+            ):
+                declaration = copy.deepcopy(original)
+                declaration[field] = value
+                if field == "input_match_asserted":
+                    declaration = {field: value}
+                self.manifest["figures"][figure_index]["scientific_data_contract"]["plot_data_evidence"] = declaration
+                with self.subTest(figure_index=figure_index, field=field), \
+                        self.assertRaisesRegex(matlab_eval.EvaluationError, reason):
+                    self.validate_output()
+            self.manifest["figures"][figure_index]["scientific_data_contract"]["plot_data_evidence"] = original
+
+    def test_misplaced_declarations_are_rejected_even_when_empty_or_false(self) -> None:
+        declaration = self.record_grid_evidence()
+        sources = [("runtime", self.runtime), ("manifest", self.manifest),
+                   ("manifest.runtime", self.manifest["runtime"])]
+        for index, figure in enumerate(self.manifest["figures"]):
+            sources.extend([(f"figure[{index}]", figure), (f"figure[{index}].runtime", figure["runtime"])])
+        for field, source in sources:
+            for value in (declaration, {}, None, False):
+                source["plot_data_evidence"] = value
+                with self.subTest(field=field, value=value), \
+                        self.assertRaisesRegex(matlab_eval.EvaluationError, "plot_data_evidence must be nested"):
+                    self.validate_output()
+            del source["plot_data_evidence"]
+
+    def test_unknown_figure_cannot_supply_a_declaration(self) -> None:
+        declaration = self.record_grid_evidence()
+        self.manifest["figures"][0]["id"] = "unknown-figure"
+        declaration["figure_id"] = "unknown-figure"
+        with self.assertRaisesRegex(matlab_eval.EvaluationError, "plot_data_evidence.*unknown-figure"):
+            self.validate_output()
+
+    def test_verified_declaration_does_not_skip_artifact_checks(self) -> None:
+        self.record_grid_evidence()
+        export = self.manifest["figures"][0]["exports"]["png"]
+        artifact = self.output_root / export["file"]
+        original = export.copy()
+        content = artifact.read_bytes()
+        for fault, reason in (("signature", "signature"), ("hash", "byte/hash mismatch"),
+                              ("dimensions", "PNG dimension mismatch"), ("stale", "stale artifact")):
+            export.update(original)
+            artifact.write_bytes(content)
+            if fault == "signature":
+                artifact.write_bytes(b"not a PNG")
+                export.update(bytes=artifact.stat().st_size, sha256=matlab_eval.sha256(artifact))
+            elif fault == "hash":
+                export["sha256"] = "0" * 64
+            elif fault == "dimensions":
+                export["width"] += 1
+            else:
+                os.utime(artifact, ns=(self.started_ns - 1, self.started_ns - 1))
+            with self.subTest(fault=fault), self.assertRaisesRegex(matlab_eval.EvaluationError, reason):
+                self.validate_output()
+
+    def test_report_validator_is_loaded_from_fixed_path_without_changing_sys_path(self) -> None:
+        original_path = sys.path.copy()
+        with mock.patch.dict(sys.modules, {"build_ocean_report": mock.Mock()}):
+            report = matlab_eval.load_report_validator()
+        self.assertEqual(Path(report.__file__).resolve(), MODULE_PATH.with_name("build_ocean_report.py"))
+        self.assertEqual(sys.path, original_path)
+        self.assertTrue(callable(report.validate_plot_data_evidence))
+
+    def test_input_binding_uses_verified_snapshot_id_and_hash_not_runtime_claims(self) -> None:
+        declaration = self.record_grid_evidence()
+        validate_inputs = matlab_eval.validate_runtime_input_fixtures
+        for fault in ("id", "sha256", "missing"):
+            def change_checked_binding(*args):
+                checked = validate_inputs(*args)
+                record = next(item for item in checked if item["id"] == declaration["fixture_id"])
+                if fault == "missing":
+                    checked.remove(record)
+                else:
+                    record[fault] = "unrelated-fixture" if fault == "id" else "0" * 64
+                return checked
+
+            with self.subTest(fault=fault), \
+                    mock.patch.object(matlab_eval, "validate_runtime_input_fixtures", side_effect=change_checked_binding) as validate:
+                result = self.validate_output()
+            self.assertEqual(validate.call_count, 2)
+            proof = result["plot_data_evidence"]["figures"][0]
+            self.assertEqual(proof["status"], "not_verified")
+            self.assertTrue(proof["local_arrays_match"])
+            self.assertFalse(proof["input_fixture_binding_verified"])
+            self.assertTrue(proof["declaration"]["input_match_asserted"])
+            self.assertEqual(proof["declaration"]["fixture_sha256"], self.runtime["input_fixtures"][0]["sha256"])
+
+    def test_future_schema_is_delegated_with_figure_context_and_preserved_scope(self) -> None:
+        report = matlab_eval.load_report_validator()
+        validate_proof = report.validate_plot_data_evidence
+        figure = self.manifest["figures"][0]
+        figure["id"] = "paired-interactive"
+        declaration = {"schema_version": 2, "delegation_test_only": True}
+        figure["scientific_data_contract"] = {"plot_data_evidence": declaration}
+        delegated_result = {"status": "not_verified", "provided": True, "declaration": declaration,
+                            "scope": "mock delegation only; not real v2 runtime verification"}
+        self.runtime["matlab_release"] = "2021a"
+
+        def delegate(candidate: dict, context: dict, input_bound: bool, release: str) -> dict:
+            if candidate["id"] == "paired-interactive":
+                self.assertEqual(candidate, figure)
+                self.assertEqual(context["fixture_id"], "crossed-time-depth-temperature")
+                self.assertEqual(context["fixture_sha256"], self.runtime["input_fixtures"][0]["sha256"])
+                self.assertTrue(input_bound)
+                self.assertEqual(release, "R2021a")
+                return delegated_result
+            return validate_proof(candidate, context, input_bound, release)
+
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "load_fixture_statistics", wraps=report.load_fixture_statistics) as load_statistics, \
+                mock.patch.object(report, "validate_plot_data_evidence", side_effect=delegate) as validate:
+            result = self.validate_output()
+        load_statistics.assert_called_once_with(self.fixture_root)
+        self.assertEqual(validate.call_count, 3)
+        self.assertEqual(result["plot_data_evidence"]["figures"][0],
+                         {"figure_id": "paired-interactive", **delegated_result})
+
+    def test_shared_validator_failure_is_rejected_before_passed(self) -> None:
+        self.record_grid_evidence()
+        report = matlab_eval.load_report_validator()
+        failure = report.ReportBuildError("delegated schema validation failed")
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "validate_plot_data_evidence", side_effect=failure) as validate, \
+                mock.patch.object(matlab_eval, "collect_manifest_exports") as collect_exports:
+            with self.assertRaisesRegex(matlab_eval.EvaluationError, "delegated schema validation failed") as caught:
+                self.validate_output()
+        self.assertIs(caught.exception.__cause__, failure)
+        validate.assert_called_once()
+        collect_exports.assert_not_called()
+
+    def test_snapshot_change_during_proof_validation_is_rejected_after_artifact_checks(self) -> None:
+        self.record_grid_evidence()
+        report = matlab_eval.load_report_validator()
+        validate_proof = report.validate_plot_data_evidence
+        snapshot = self.output_root / self.runtime["input_fixtures"][0]["file"]
+
+        def mutate_snapshot(*args):
+            proof = validate_proof(*args)
+            snapshot.write_bytes(snapshot.read_bytes() + b"\n")
+            return proof
+
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "validate_plot_data_evidence", side_effect=mutate_snapshot), \
+                mock.patch.object(matlab_eval, "artifact_signature", wraps=matlab_eval.artifact_signature) as signatures, \
+                mock.patch.object(matlab_eval, "validate_runtime_input_fixtures",
+                                  wraps=matlab_eval.validate_runtime_input_fixtures) as validate_inputs:
+            with self.assertRaisesRegex(matlab_eval.EvaluationError, "input fixture snapshot byte/hash mismatch"):
+                self.validate_output()
+        self.assertEqual(signatures.call_count, 9)
+        self.assertEqual(validate_inputs.call_count, 2)
+
+    def test_false_or_empty_nested_declarations_are_not_treated_as_absent(self) -> None:
+        figure = self.manifest["figures"][0]
+        for value in (None, False, True, {}, [], "", {"input_match_asserted": True}):
+            figure["scientific_data_contract"] = {"plot_data_evidence": value}
+            with self.subTest(value=value), self.assertRaisesRegex(matlab_eval.EvaluationError, "plot_data_evidence"):
+                self.validate_output()
+
+    def test_fixture_context_errors_propagate_as_evaluation_failure(self) -> None:
+        self.record_grid_evidence()
+        report = matlab_eval.load_report_validator()
+        failure = report.ReportBuildError("invalid fixture context")
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "load_fixture_statistics", side_effect=failure):
+            with self.assertRaisesRegex(matlab_eval.EvaluationError, "invalid fixture context") as caught:
+                self.validate_output()
+        self.assertIs(caught.exception.__cause__, failure)
+
+    def test_release_and_snapshot_must_validate_before_loading_proof_validator(self) -> None:
+        self.record_grid_evidence()
+        for fault in ("release", "snapshot"):
+            if fault == "release":
+                self.manifest["figures"][0]["runtime"]["matlab_release"] = "R2024b"
+            else:
+                self.manifest["figures"][0]["runtime"]["matlab_release"] = "2021a"
+                self.runtime["input_fixtures"][0]["sha256"] = "0" * 64
+            with self.subTest(fault=fault), mock.patch.object(matlab_eval, "load_report_validator") as load_validator:
+                with self.assertRaises(matlab_eval.EvaluationError):
+                    self.validate_output()
+                load_validator.assert_not_called()
 
 
 class FreezeTests(unittest.TestCase):

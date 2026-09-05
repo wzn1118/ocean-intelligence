@@ -22,6 +22,18 @@ ocean_report = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ocean_report)
 
 
+INTERACTIVE_VECTOR_PATHS = (
+    ("time_utc",), ("native_values",), ("missing_mask",),
+    ("observation_ids",), ("source_rows",), ("qc", "flags"),
+    ("uncertainty", "values"), ("uncertainty", "missing_mask"),
+    ("uncertainty", "joint_valid_mask"),
+    ("uncertainty", "errorbar", "time_utc"),
+    ("uncertainty", "errorbar", "values"),
+    ("uncertainty", "errorbar", "negative_delta"),
+    ("uncertainty", "errorbar", "positive_delta"),
+)
+
+
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -256,6 +268,54 @@ class RuntimeBundle:
         figure["scientific_data_contract"]["plot_data_evidence"] = declaration
         return declaration
 
+    def record_interactive_plot_data_evidence(self) -> dict:
+        identifier = "paired-interactive"
+        fixture_id = "crossed-time-depth-temperature"
+        source_file = ocean_report.EXPECTED_FIXTURES[fixture_id]
+        path = self.root / "fixture-inputs" / source_file
+        if not path.is_file():
+            path = ocean_report.DEFAULT_FIXTURE_DIRECTORY / source_file
+        fixture = json.loads(path.read_bytes())
+        row_index = 2
+        variable = fixture["variables"]["temperature"]
+        uncertainty = fixture["variables"]["temperature_standard_uncertainty"]
+        values = list(variable["values"][row_index])
+        magnitudes = list(uncertainty["values"][row_index])
+        times = list(fixture["coordinates"]["time"]["values"])
+        declaration = {
+            "schema_version": 2, "figure_id": identifier, "fixture_id": fixture_id,
+            "fixture_sha256": sha256(path), "matlab_release": self.release,
+            "dimension_order": ["time"], "shape": [len(values)],
+            "selection": {"kind": "depth_row", "index_zero_based": row_index,
+                          "depth_m": fixture["coordinates"]["depth"]["values"][row_index]},
+            "time_utc": times, "time_zone": fixture["coordinates"]["time"]["timezone"],
+            "quantity_unit": variable["unit"], "missing_policy": variable["missing_policy"],
+            "native_data_source": (
+                "Lines(1).XData/YData;"
+                "UncertaintyHandles(1).XData/YData/YNegativeDelta/YPositiveDelta"
+            ),
+            "native_values": values, "missing_mask": [value is None for value in values],
+            "observation_ids": [f"temp-050m-{index + 1:03d}" for index in range(len(values))],
+            "source_rows": list(range(1, len(values) + 1)), "source_row_origin": "call_entry_order",
+            "input_match_asserted": True,
+            "qc": {"provided": True, "policy": fixture["variables"]["qc"]["policy"],
+                   "flags": list(fixture["variables"]["qc"]["values"][row_index])},
+            "uncertainty": {
+                "present": True,
+                "type": {"standard_uncertainty": "standard-uncertainty"}[uncertainty["type"]],
+                "unit": uncertainty["unit"], "representation": "magnitude",
+                "confidence_level": None, "display": "errorbar", "values": magnitudes,
+                "missing_mask": [value is None for value in magnitudes],
+                "joint_valid_mask": [value is not None and magnitude is not None
+                                     for value, magnitude in zip(values, magnitudes)],
+                "errorbar": {"time_utc": list(times), "values": list(values),
+                             "negative_delta": list(magnitudes), "positive_delta": list(magnitudes)},
+            },
+        }
+        figure = next(item for item in self.manifest["figures"] if item["id"] == identifier)
+        figure["scientific_data_contract"]["plot_data_evidence"] = declaration
+        return declaration
+
 
 class OceanReportTests(unittest.TestCase):
     def fixture_payload(self, identifier: str) -> dict[str, object]:
@@ -267,6 +327,36 @@ class OceanReportTests(unittest.TestCase):
             "role": role, "string": text, "font_name": "Noto Sans CJK SC", "font_size": 12,
             "class": "matlab.graphics.layout.Text", "geometry_status": "unverified",
         }
+
+    def assert_interactive_evidence_rejected(self, mutate, bound: bool = False) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            if bound:
+                bundle.capture_input_fixtures()
+            declaration = bundle.record_interactive_plot_data_evidence()
+            bundle.write_metadata()
+            _, contexts = ocean_report.load_fixture_statistics(ocean_report.DEFAULT_FIXTURE_DIRECTORY)
+            baseline = ocean_report.validate_runtime_bundle(root, contexts)
+            figure = next(item for item in baseline["figures"] if item["id"] == "paired-interactive")
+            proof = figure["plot_data_evidence"]
+            self.assertEqual(proof["status"], "runtime_declaration_verified" if bound else "not_verified")
+            self.assertTrue(proof["local_arrays_match"])
+            self.assertEqual(proof["declaration"], declaration)
+            mutate(declaration)
+            bundle.write_metadata()
+            with self.assertRaises(ocean_report.ReportBuildError):
+                ocean_report.build_ocean_report(root)
+            self.assertFalse((root / "report.md").exists())
+            self.assertFalse((root / "report-evidence.json").exists())
+
+    def assert_interactive_field_rejected(self, path: tuple, value, bound: bool = False) -> None:
+        def mutate(declaration):
+            target = declaration
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+        self.assert_interactive_evidence_rejected(mutate, bound)
 
     def test_reports_each_figures_layout_coverage_without_visual_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -529,6 +619,335 @@ class OceanReportTests(unittest.TestCase):
             self.assertIn("standard_uncertainty / g kg-1 / metadata", table)
             self.assertIn("不是视觉验证或独立重执行", table)
             self.assertNotIn("当前 gate 的温度场、盐度剖面和配对图调用未传", report)
+
+    def test_interactive_v2_bound_arrays_verify_three_of_four_figures_with_v1_unchanged(self) -> None:
+        for release in ("R2021a", "R2024b", "R2026a"):
+            with self.subTest(release=release), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.release = release
+                bundle.runtime["matlab_release"] = release
+                bundle.runtime["matlab_version"] = {"R2021a": "9.10.0", "R2024b": "24.2.0", "R2026a": "26.1.0"}[release]
+                bundle.manifest["matlab_release"] = release[1:]
+                for figure in bundle.manifest["figures"]:
+                    figure["runtime"]["matlab_release"] = release[1:]
+                bundle.capture_input_fixtures()
+                declarations = {identifier: bundle.record_plot_data_evidence(identifier)
+                                for identifier in ocean_report.GRID_NATIVE_SOURCES}
+                interactive = bundle.record_interactive_plot_data_evidence()
+                declarations["paired-interactive"] = interactive
+                bundle.write_metadata()
+                before = (root / "figures.json").read_bytes()
+                ocean_report.build_ocean_report(root)
+                evidence = json.loads((root / "report-evidence.json").read_bytes())
+                self.assertEqual((root / "figures.json").read_bytes(), before)
+                self.assertEqual(evidence["runtime_fixture_binding"]["status"], "verified")
+                self.assertEqual(evidence["runtime_fixture_binding"]["fixture_count"], 3)
+                figures = {item["id"]: item for item in evidence["runtime_evidence"]["figures"]}
+                verified = {identifier for identifier, figure in figures.items()
+                            if figure["plot_data_evidence"]["status"] == "runtime_declaration_verified"}
+                self.assertEqual(verified, set(declarations))
+                self.assertEqual(len(verified), 3)
+                for identifier, declaration in declarations.items():
+                    figure = figures[identifier]
+                    proof = figure["plot_data_evidence"]
+                    self.assertEqual(proof["declaration"], declaration)
+                    self.assertTrue(proof["local_arrays_match"])
+                    self.assertTrue(proof["input_fixture_binding_verified"])
+                    self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "preserve")
+                    self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"],
+                                     "errorbar" if identifier == "paired-interactive" else "metadata")
+                    self.assertEqual(declaration["schema_version"], 2 if identifier == "paired-interactive" else 1)
+                paired = figures["paired-observation-model"]
+                self.assertEqual(paired["plot_data_evidence"]["status"], "not_verified")
+                self.assertFalse(paired["plot_data_evidence"]["provided"])
+                self.assertEqual(paired["scientific_data"]["qc"]["plot_filtering"], "not_verified")
+                self.assertEqual(paired["scientific_data"]["uncertainty"]["plot_display"], "not_verified")
+                selected = figures["paired-interactive"]
+                self.assertEqual(selected["scientific_data"]["raw_count"], 6)
+                self.assertEqual(selected["scientific_data"]["valid_count"], 5)
+                self.assertEqual(selected["scientific_data"]["missing_count"], 1)
+                self.assertEqual(selected["scientific_context"]["qc"], {"good": 4, "suspect": 1, "missing": 1})
+                self.assertEqual(interactive["shape"], [6])
+                self.assertEqual(interactive["dimension_order"], ["time"])
+                self.assertEqual(interactive["native_values"], [14.75, 15.356, None, 14.75, 14.144, 14.144])
+                self.assertEqual(interactive["missing_mask"], [False, False, True, False, False, False])
+                self.assertEqual(interactive["source_rows"], [1, 2, 3, 4, 5, 6])
+                self.assertEqual(interactive["observation_ids"][4], "temp-050m-005")
+                self.assertEqual(interactive["qc"]["flags"][4], "suspect")
+                self.assertEqual(interactive["uncertainty"]["values"], [0.11, 0.11, None, 0.11, 0.11, 0.11])
+                self.assertEqual(interactive["uncertainty"]["joint_valid_mask"], [True, True, False, True, True, True])
+                self.assertEqual(interactive["uncertainty"]["errorbar"]["values"], interactive["native_values"])
+                self.assertEqual(interactive["fixture_sha256"], sha256(root / "fixture-inputs" / "crossed_time_depth_temperature.json"))
+                for figure in figures.values():
+                    self.assertEqual(figure["verification"]["visual_inspection"], "not_verified")
+                    self.assertEqual(figure["verification"]["layout_visual"], "not_verified")
+                self.assertFalse(evidence["runtime_evidence"]["visual_inspection"]["verified"])
+                self.assertFalse(evidence["data_source"]["observed_ocean_conditions"])
+                report = (root / "report.md").read_text(encoding="utf-8")
+                table = report.split("### 原生图元数据核对")[1].split("## 8.")[0]
+                self.assertIn("standard-uncertainty / degC / errorbar", table)
+                self.assertIn("standard_uncertainty / g kg-1 / metadata", table)
+                self.assertEqual(table.count("not_verified（未提供）"), 1)
+
+    def test_interactive_v2_without_input_binding_does_not_promote_matching_arrays(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            declaration = bundle.record_interactive_plot_data_evidence()
+            bundle.write_metadata()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            figure = next(item for item in evidence["runtime_evidence"]["figures"] if item["id"] == "paired-interactive")
+            proof = figure["plot_data_evidence"]
+            self.assertEqual(evidence["runtime_fixture_binding"]["status"], "unverified")
+            self.assertEqual(proof["status"], "not_verified")
+            self.assertTrue(proof["local_arrays_match"])
+            self.assertFalse(proof["input_fixture_binding_verified"])
+            self.assertEqual(proof["declaration"], declaration)
+            self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "not_verified")
+            self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"], "not_verified")
+
+    def test_interactive_missing_declaration_keeps_legacy_status_with_or_without_binding(self) -> None:
+        for bound in (False, True):
+            with self.subTest(bound=bound), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                if bound:
+                    bundle.capture_input_fixtures()
+                ocean_report.build_ocean_report(root)
+                evidence = json.loads((root / "report-evidence.json").read_bytes())
+                figure = next(item for item in evidence["runtime_evidence"]["figures"] if item["id"] == "paired-interactive")
+                self.assertEqual(figure["plot_data_evidence"]["status"], "not_verified")
+                self.assertFalse(figure["plot_data_evidence"]["provided"])
+                self.assertIsNone(figure["plot_data_evidence"]["declaration"])
+                self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"], "not_verified")
+
+    def test_interactive_v2_identity_source_version_hash_and_release_are_strict(self) -> None:
+        mutations = (
+            (("schema_version",), 1), (("schema_version",), 3), (("schema_version",), True),
+            (("schema_version",), 2.0), (("schema_version",), "2"),
+            (("figure_id",), "paired-observation-model"), (("fixture_id",), "paired-interactive"),
+            (("fixture_sha256",), "0" * 64), (("fixture_sha256",), None),
+            (("matlab_release",), "R2024b"), (("matlab_release",), "R26.1.0 (R2026a)"),
+            (("native_data_source",), "Lines(1).YData"),
+            (("native_data_source",), "fixture.variables.temperature.values"),
+            (("source_row_origin",), "fixture_flattened_order"),
+            (("quantity_unit",), "K"), (("missing_policy",), "fill_zero"),
+        )
+        for path, value in mutations:
+            with self.subTest(path=path, value=value):
+                self.assert_interactive_field_rejected(path, value)
+
+    def test_interactive_v2_shape_and_dimension_vectors_cannot_use_scalar_or_nested_forms(self) -> None:
+        for shape in (6, 6.0, "6", [6.0], [True], ["6"], [1, 6], [[6]], [5], [7], []):
+            with self.subTest(shape=shape):
+                self.assert_interactive_field_rejected(("shape",), shape)
+        for order in ("time", ["observation"], ["time", "depth"], [["time"]], []):
+            with self.subTest(order=order):
+                self.assert_interactive_field_rejected(("dimension_order",), order)
+
+    def test_interactive_v2_selection_must_be_the_third_depth_row(self) -> None:
+        for field, value in (("kind", "whole_fixture"), ("kind", "time_column"),
+                             ("index_zero_based", 1), ("index_zero_based", 3),
+                             ("index_zero_based", 2.0), ("index_zero_based", True),
+                             ("index_zero_based", "2"), ("depth_m", 25),
+                             ("depth_m", 0.05), ("depth_m", "50"), ("depth_m", True)):
+            with self.subTest(field=field, value=value):
+                self.assert_interactive_field_rejected(("selection", field), value)
+
+    def test_interactive_v2_consistent_wrong_row_arrays_cannot_rely_on_correct_selection_claim(self) -> None:
+        fixture = self.fixture_payload("crossed-time-depth-temperature")
+        for row_index in (0, 1, 3):
+            with self.subTest(row_index=row_index):
+                def mutate(declaration):
+                    values = list(fixture["variables"]["temperature"]["values"][row_index])
+                    magnitudes = list(fixture["variables"]["temperature_standard_uncertainty"]["values"][row_index])
+                    declaration["native_values"] = values
+                    declaration["missing_mask"] = [value is None for value in values]
+                    declaration["qc"]["flags"] = list(fixture["variables"]["qc"]["values"][row_index])
+                    uncertainty = declaration["uncertainty"]
+                    uncertainty["values"] = magnitudes
+                    uncertainty["missing_mask"] = [value is None for value in magnitudes]
+                    uncertainty["joint_valid_mask"] = [value is not None and magnitude is not None
+                                                       for value, magnitude in zip(values, magnitudes)]
+                    uncertainty["errorbar"].update(values=list(values), negative_delta=list(magnitudes),
+                                                  positive_delta=list(magnitudes))
+                    self.assertEqual(declaration["selection"], {"kind": "depth_row", "index_zero_based": 2, "depth_m": 50})
+                    self.assertIs(declaration["input_match_asserted"], True)
+                self.assert_interactive_evidence_rejected(mutate, bound=True)
+
+    def test_interactive_v2_all_sample_vectors_are_flat_complete_and_ordered(self) -> None:
+        for path in INTERACTIVE_VECTOR_PATHS:
+            for operation in ("scalar", "nested", "short", "long"):
+                with self.subTest(path=path, operation=operation):
+                    def mutate(declaration):
+                        target = declaration
+                        for key in path[:-1]:
+                            target = target[key]
+                        values = target[path[-1]]
+                        target[path[-1]] = {
+                            "scalar": values[0], "nested": [values],
+                            "short": values[:-1], "long": values + values[-1:],
+                        }[operation]
+                    self.assert_interactive_evidence_rejected(mutate)
+
+    def test_interactive_v2_line_and_errorbar_check_every_time_and_utc(self) -> None:
+        for path in (("time_utc",), ("uncertainty", "errorbar", "time_utc")):
+            for value in ("2026-08-01T05:00:00Z", "2026-08-01T04:00:00+08:00", None):
+                with self.subTest(path=path, value=value):
+                    self.assert_interactive_field_rejected((*path, 1), value)
+            with self.subTest(path=path, operation="interior_reorder"):
+                def mutate(declaration):
+                    values = declaration
+                    for key in path:
+                        values = values[key]
+                    values[1], values[3] = values[3], values[1]
+                self.assert_interactive_evidence_rejected(mutate)
+        self.assert_interactive_field_rejected(("time_zone",), "Asia/Shanghai")
+
+    def test_interactive_v2_source_rows_and_ids_cannot_hide_equal_value_reordering(self) -> None:
+        for path, value in (
+            (("source_rows",), [0, 1, 2, 3, 4, 5]),
+            (("source_rows",), [13, 14, 15, 16, 17, 18]),
+            (("source_rows", 0), True), (("source_rows", 0), "1"),
+            (("source_rows", 4), 6),
+            (("observation_ids", 4), "temp-050m-006"),
+            (("observation_ids", 0), "temp-025m-001"),
+            (("observation_ids", 0), None),
+        ):
+            with self.subTest(path=path, value=value):
+                self.assert_interactive_field_rejected(path, value)
+        for path in (("source_rows",), ("observation_ids",), ("qc", "flags")):
+            with self.subTest(path=path, operation="swap_equal_values"):
+                def mutate(declaration):
+                    self.assertEqual(declaration["native_values"][4], declaration["native_values"][5])
+                    values = declaration
+                    for key in path:
+                        values = values[key]
+                    values[4], values[5] = values[5], values[4]
+                self.assert_interactive_evidence_rejected(mutate)
+
+    def test_interactive_v2_suspect_cannot_be_dropped_or_relabelled(self) -> None:
+        for bound in (False, True):
+            for operation in ("drop", "copy_good"):
+                with self.subTest(bound=bound, operation=operation):
+                    def mutate(declaration):
+                        self.assertEqual(declaration["qc"]["flags"][4], "suspect")
+                        for path in INTERACTIVE_VECTOR_PATHS:
+                            values = declaration
+                            for key in path:
+                                values = values[key]
+                            if operation == "drop":
+                                values.pop(4)
+                            else:
+                                values[4] = values[5]
+                        if operation == "drop":
+                            declaration["shape"] = [5]
+                    self.assert_interactive_evidence_rejected(mutate, bound)
+        self.assert_interactive_field_rejected(("qc", "flags", 4), "good")
+        self.assert_interactive_field_rejected(("qc", "policy"), "good_only")
+
+    def test_interactive_v2_native_values_uncertainty_and_errorbar_are_exact(self) -> None:
+        numeric_paths = (
+            ("native_values",), ("uncertainty", "values"),
+            ("uncertainty", "errorbar", "values"),
+            ("uncertainty", "errorbar", "negative_delta"),
+            ("uncertainty", "errorbar", "positive_delta"),
+        )
+        for bound in (False, True):
+            for path in numeric_paths:
+                for operation in ("one_ulp", "boolean", "string", "finite_to_null", "missing_to_zero"):
+                    with self.subTest(bound=bound, path=path, operation=operation):
+                        def mutate(declaration):
+                            values = declaration
+                            for key in path:
+                                values = values[key]
+                            if operation == "missing_to_zero":
+                                self.assertIsNone(values[2])
+                                values[2] = 0
+                            else:
+                                values[0] = {"one_ulp": math.nextafter(values[0], math.inf),
+                                             "boolean": True, "string": str(values[0]),
+                                             "finite_to_null": None}[operation]
+                        self.assert_interactive_evidence_rejected(mutate, bound)
+
+    def test_interactive_v2_nonstandard_nan_and_infinity_tokens_are_rejected(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf"), "NaN"):
+            with self.subTest(value=value):
+                self.assert_interactive_field_rejected(("uncertainty", "errorbar", "positive_delta", 2), value)
+
+    def test_interactive_v2_missing_and_joint_masks_require_boolean_values_and_correct_positions(self) -> None:
+        for path in (("missing_mask",), ("uncertainty", "missing_mask"), ("uncertainty", "joint_valid_mask")):
+            for operation in ("numeric", "string", "null", "invert", "move_missing"):
+                with self.subTest(path=path, operation=operation):
+                    def mutate(declaration):
+                        values = declaration
+                        for key in path:
+                            values = values[key]
+                        if operation == "move_missing":
+                            values[1], values[2] = values[2], values[1]
+                        else:
+                            values[0] = {"numeric": int(values[0]), "string": str(values[0]).lower(),
+                                         "null": None, "invert": not values[0]}[operation]
+                    self.assert_interactive_evidence_rejected(mutate)
+
+    def test_interactive_v2_assertion_flags_cannot_replace_boolean_true(self) -> None:
+        for path in (("input_match_asserted",), ("qc", "provided"), ("uncertainty", "present")):
+            for value in (False, 1, "true", None):
+                with self.subTest(path=path, value=value):
+                    self.assert_interactive_field_rejected(path, value)
+
+    def test_interactive_v2_uncertainty_semantics_and_errorbar_deltas_cannot_be_substituted(self) -> None:
+        for field, value in (
+            ("type", "standard_uncertainty"), ("type", "standard-deviation"),
+            ("type", "confidence-interval"), ("unit", "K"),
+            ("representation", "bounds"), ("confidence_level", 0.95),
+            ("confidence_level", False), ("display", "metadata"), ("display", "band"),
+        ):
+            with self.subTest(field=field, value=value):
+                self.assert_interactive_field_rejected(("uncertainty", field), value)
+        for field in ("negative_delta", "positive_delta"):
+            with self.subTest(field=field, operation="signed_or_endpoint_delta"):
+                self.assert_interactive_field_rejected(("uncertainty", "errorbar", field, 0), -0.11 if field == "negative_delta" else 14.86)
+
+    def test_interactive_v2_filling_all_missing_arrays_and_masks_cannot_forge_joint_counts(self) -> None:
+        def mutate(declaration):
+            declaration["native_values"][2] = 0
+            declaration["missing_mask"][2] = False
+            declaration["qc"]["flags"][2] = "good"
+            uncertainty = declaration["uncertainty"]
+            uncertainty["values"][2] = 0
+            uncertainty["missing_mask"][2] = False
+            uncertainty["joint_valid_mask"][2] = True
+            for field in ("values", "negative_delta", "positive_delta"):
+                uncertainty["errorbar"][field][2] = 0
+        self.assert_interactive_evidence_rejected(mutate, bound=True)
+
+    def test_interactive_v2_field_sets_are_exact_at_every_level(self) -> None:
+        fields_by_path = {
+            (): ("schema_version", "figure_id", "fixture_id", "fixture_sha256", "matlab_release",
+                 "dimension_order", "shape", "selection", "time_utc", "time_zone", "quantity_unit",
+                 "missing_policy", "native_data_source", "native_values", "missing_mask", "observation_ids",
+                 "source_rows", "source_row_origin", "input_match_asserted", "qc", "uncertainty"),
+            ("selection",): ("kind", "index_zero_based", "depth_m"),
+            ("qc",): ("provided", "policy", "flags"),
+            ("uncertainty",): ("present", "type", "unit", "representation", "confidence_level", "display",
+                               "values", "missing_mask", "joint_valid_mask", "errorbar"),
+            ("uncertainty", "errorbar"): ("time_utc", "values", "negative_delta", "positive_delta"),
+        }
+        for path, fields in fields_by_path.items():
+            for field in (*fields, "stats_verified"):
+                with self.subTest(path=path, field=field):
+                    def mutate(declaration):
+                        target = declaration
+                        for key in path:
+                            target = target[key]
+                        if field == "stats_verified":
+                            target[field] = True
+                        else:
+                            del target[field]
+                    self.assert_interactive_evidence_rejected(mutate)
 
     def test_native_declarations_without_input_snapshots_stay_unverified(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

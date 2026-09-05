@@ -52,6 +52,8 @@ for marker in [
     '"invoked_print_options"', '"native_file_unchanged_after_xml"',
     '"exact_page_verified", false', '"visual_verified", false',
     'xmlread(', 'oi_sha256_file(', "'-dsvg', '-painters', resolutionOption",
+    '"rectangles", struct("node_name", {}, "attributes", {}, "ancestors_nearest_first", {})',
+    '"clip_paths", struct("element", {}, "descendants", {})',
 ]:
     assert marker in svg_probe, f"native SVG probe missing {marker}"
 assert "xmlwrite(" not in svg_probe

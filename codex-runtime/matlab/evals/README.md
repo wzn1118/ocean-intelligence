@@ -53,6 +53,22 @@ missing declarations remain `not_verified`, and inconsistent declarations fail.
 This is not a visual audit or independent re-execution. Other figures do not
 inherit this evidence merely because their source metadata contains QC.
 
+The interactive temperature slice now has a separate strict v2 declaration.
+After exporting, MATLAB reads every native Line and ErrorBar time/value/delta,
+checks ownership of the exported figure, and compares IDs, call-entry rows, QC,
+units, uncertainty and separate missing masks against the complete 50 m fixture
+row. The report independently reconstructs that row; single-element shape and
+dimension-order fields remain JSON arrays. Only a bound, matching declaration
+can be verified, and its uncertainty display is errorbar rather than metadata.
+The paired scatter still has no native array declaration and is not upgraded.
+This new v2 path requires another licensed MATLAB run before claiming 3/4.
+
+The evaluator reuses the same report validator for all provided native array
+declarations. It rejects misplaced, malformed or inconsistent evidence before
+returning runtime success, while preserving absent-declaration compatibility,
+artifact checks and input-snapshot integrity checks. Neither validator grants
+visual approval or additional scoring weight for a declaration alone.
+
 The GitHub postprocessing probe uses the same MathWorks `run-matlab-command`
 launcher as `matlab-actions/run-command@v3`, with online batch licensing enabled.
 It still runs the MATLAB vendor assertion and parses the actual release marker;

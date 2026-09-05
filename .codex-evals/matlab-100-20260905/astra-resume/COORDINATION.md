@@ -41,6 +41,7 @@
 | [33989846546](https://github.com/wzn1118/ocean-intelligence/actions/runs/33989846546) | `a8d9ebc` | 54/60 阶段通过；三版原始评分均 90/100 | R21/R24 各19/20、R26 16/20；三版时间轴和报告数组绑定通过，R26 evaluator 外部12/12通过；比较统计旧行数断言、R26 PNG尺寸及独立几何参考仍失败，整体 CI 失败 |
 | [33990723561](https://github.com/wzn1118/ocean-intelligence/actions/runs/33990723561) | `9c00319` | 54/60 阶段通过；三版原始评分均 90/100 | 三版比较布局通过；旧版新增非整英寸PDF元数据错误，新版PNG及文字参考误差未修复。R26 evaluator外部12/12仍通过，整体CI失败 |
 | [33991563211](https://github.com/wzn1118/ocean-intelligence/actions/runs/33991563211) | `dc0fd69` | 52/60 阶段通过；三版原始评分均 90/100 | R21/R24各18/20、R26为16/20；新不确定度语义和报告三版通过，PDF元数据修复后暴露SVG比例错误，points测试暴露行列广播错误；整体CI失败 |
+| [33992397354](https://github.com/wzn1118/ocean-intelligence/actions/runs/33992397354) | `07f4d51` | 57/60 阶段通过；三版原始评分均 90/100 | 三版各19/20，文字与交互留白通过；R26原PNG失败及三组等比例测试通过，新997x613 SVG比例失败；旧版诊断结构赋值失败遮挡出版子测试，整体CI失败 |
 
 阶段数不是能力分数。各轮的 90 分只是当时评分器原始输出，不能当成全量验收。33984097740 暴露的版本字段校验已加强；33984666441 尚无输入快照绑定，下一轮必须提供真实输入副本与哈希，缺失旧包不能冒充新协议通过。
 
@@ -152,3 +153,14 @@
 - 本机 `/root/.codex/skills/matlab-scientific-plotting/SKILL.md` 增加仅限本项目的入口，要求先读取仓库技能/README再选模板，避免同名旧全局helper混用。该文件和脚本校验通过；未覆盖其他项目全局assets，也未宣称运行服务或既有会话已经热更新。
 - 十二候选逐图复核见 `native-raster-review-33991563211.md`：inches/off保留近似字高/线宽，但400/997轴宽减少约7.1%/5.3%、底部余量下降，必须继续复核复杂布局；单位圆只能检测比例，不证明成品字号或全部布局不变。
 - 推送前本地验证：192项Python、全部已跟踪服务器Node测试、8项生成器smoke、资产和技能检查通过；56个MATLAB文件通过R2021a语法检查，冻结27文件后静态评分70/100、runtime_pending。代理审查后纠正文档on组准确率为2/6，不使用原错误的4/6。
+
+## 第十三批接续
+
+- 第十二批原件 `/tmp/matlab-run-33992397354`，汇总 `/tmp/matlab-ci-summary-33992397354/summary.md`。三版文字完整测试及交互留白案例通过，R26的plot-regression、Family B和三组原生圆形比例检查通过；PNG尺寸候选已获得这些真实正例，但不能代替全部格式视觉验收。
+- R26 evaluator四图十二产物外检仍全部通过；997x613/300DPI导出的原生SVG viewBox为240x148，与目标比例不同，严格清单继续拒绝。旧版PDF的未嵌入Courier仍未解决，整体CI继续失败。
+- 旧版SVG诊断的print均已成功；XML读取后向无字段空结构数组追加有字段记录触发异构赋值。本批明确初始化rectangles、clip_paths、descendants和ancestors的字段schema，不改原SVG或门禁。其修复仍需新MATLAB执行。
+- `svg-probe-review-33992397354.md`核对24份原始旧版SVG，十二对默认/-rDPI完全同字节；显式分辨率没有修复原生页面量化。无DISPLAY尺寸为192x144、239x147、288x162；DISPLAY为267x200、332x204、400x225，均没有原生viewBox，不把诊断完成当作精确页面通过。
+- 交互图新v2协议见 `interactive-proof-v2-protocol.md`。MATLAB在导出后读取完整Line/ErrorBar时间、主值及上下delta，核对同一图窗归属、稳定ID、调用行号、QC、缺测和标准不确定度；Python独立从绑定fixture第三深度行重建所有数组。保持旧v1和配对散点未验证，不先宣称3/4已实跑。
+- 评测入口复用报告同一原生声明验证器，阻断顶层旁路、错数组和错hash，同时保留无声明旧包、实际产物检查及末尾输入快照复核。报告只依据已验证声明区分errorbar与metadata，评分权重及视觉门禁不变。
+- 四种时间留白案例下一轮保存至CI的interaction-time-padding目录，不再随临时目录删除；单点自动范围诊断打印实际前后时间及误差，但源轴几何仍不等于成品PNG/PDF/SVG余量证明。
+- 本批本地验证：224项Python、全部已跟踪服务器Node测试、8项生成器smoke、资产/技能及导出静态检查通过；56个MATLAB文件通过R2021a语法检查。冻结27文件后静态评分70/100、runtime_pending；第十二批R21/R24原包通过新共享validator离线兼容检查，仍保留两图未验证，不算新实跑或新鲜度检查。
