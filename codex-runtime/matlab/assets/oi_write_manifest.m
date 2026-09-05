@@ -15,8 +15,6 @@ figureEntries = figureEntries(:);
 assert(~ismissing(manifestPath) && strlength(strtrim(manifestPath)) > 0, ...
     "oi_write_manifest:EmptyPath", ...
     "manifestPath must not be empty");
-assert(usejava("jvm"), "oi_write_manifest:JVMRequired", ...
-    "Canonical path and SHA-256 verification require the MATLAB JVM");
 manifestDirectory = string(fileparts(manifestPath));
 if strlength(manifestDirectory) == 0
     manifestDirectory = string(pwd);
@@ -484,7 +482,8 @@ while true
         physicalChunkSeen = true;
         pixelsPerMeterX = typecast(uint8(chunkData(1:4)), "uint32");
         pixelsPerMeterY = typecast(uint8(chunkData(5:8)), "uint32");
-        if computer("endian") == "L"
+        [~, ~, endian] = computer;
+        if endian == 'L'
             pixelsPerMeterX = swapbytes(pixelsPerMeterX);
             pixelsPerMeterY = swapbytes(pixelsPerMeterY);
         end
@@ -618,7 +617,14 @@ safe = all(strlength(segments) > 0) ...
 end
 
 function pathValue = canonical_path(pathValue)
-pathValue = string(char(java.io.File(char(pathValue)).getCanonicalPath()));
+if usejava("jvm")
+    pathValue = string(char(java.io.File(char(pathValue)).getCanonicalPath()));
+    return;
+end
+[status, attributes] = fileattrib(char(pathValue));
+assert(status, "oi_write_manifest:JVMRequired", ...
+    "Canonical path resolution failed without the MATLAB JVM: %s", pathValue);
+pathValue = string(attributes.Name);
 end
 
 function inside = is_within_directory(candidatePath, directoryPath)
@@ -653,6 +659,11 @@ end
 end
 
 function atomic_replace_file(sourcePath, targetPath)
+if ~usejava("jvm")
+    [moved, message] = movefile(sourcePath, targetPath, "f");
+    assert(moved, "oi_write_manifest:MoveFailed", "%s", message);
+    return;
+end
 sourceFile = java.io.File(char(sourcePath));
 targetFile = java.io.File(char(targetPath));
 options = javaArray('java.nio.file.CopyOption', 2);

@@ -19,6 +19,7 @@ end
 if isempty(fieldnames(theme))
     theme = oi_ocean_theme();
 end
+theme = complete_theme(theme);
 set_if_property(axesHandle, "Color", theme.AxesColor);
 set_if_property(axesHandle, "FontName", theme.FontName);
 set_if_property(axesHandle, "FontSize", theme.FontSize);
@@ -36,7 +37,6 @@ else
     set_if_property(axesHandle, "TickDir", "out");
     set_if_property(axesHandle, "TickLength", [0.008 0.008]);
     set_if_property(axesHandle, "Box", "on");
-end
 grid(axesHandle, "on");
 if isprop(axesHandle, "Layer")
     axesHandle.Layer = "top";
@@ -50,6 +50,17 @@ end
 style_axis_text(axesHandle, theme);
 apply_redundant_series_encoding(axesHandle, theme);
 setappdata(axesHandle, "OI_PublicationTheme", theme.Name);
+end
+
+function theme = complete_theme(theme)
+defaults = oi_ocean_theme();
+requiredFields = fieldnames(defaults);
+for index = 1:numel(requiredFields)
+    fieldName = requiredFields{index};
+    if ~isfield(theme, fieldName) || isempty(theme.(fieldName))
+        theme.(fieldName) = defaults.(fieldName);
+    end
+end
 end
 
 function apply_redundant_series_encoding(axesHandle, theme)

@@ -55,9 +55,7 @@ if ~isfolder(outputDirectory)
     [created, message] = mkdir(outputDirectory);
     assert(created, "oi_export_figure:CreateDirectory", "%s", message);
 end
-assert(usejava("jvm"), "oi_export_figure:JVMRequired", ...
-    "The MATLAB JVM is required for canonical paths and SHA-256 verification");
-outputDirectory = string(char(java.io.File(char(outputDirectory)).getCanonicalPath()));
+outputDirectory = canonical_path(outputDirectory);
 finalPngPath = fullfile(outputDirectory, figureId + ".png");
 finalPdfPath = fullfile(outputDirectory, figureId + ".pdf");
 finalSvgPath = fullfile(outputDirectory, figureId + ".svg");
@@ -77,8 +75,8 @@ stagedArtifactPaths = [pngPath pdfPath];
 if options.ExportSVG
     stagedArtifactPaths(end + 1) = svgPath;
 end
-exportSucceeded = false;
-artifactCleanup = onCleanup(@cleanup_failed_export);
+artifactCleanup = onCleanup(@() cleanup_staging_export( ...
+    stagedArtifactPaths, stagingDirectory));
 exportStartedAt = utc_timestamp();
 widthInches = widthPixels / dpi;
 heightInches = heightPixels / dpi;
@@ -258,20 +256,21 @@ if options.ExportSVG
         "export_device", entry.runtime.export_device.svg, "description", altText, ...
         "accessible_name", altText);
 end
-promote_artifacts(stagedArtifactPaths, finalArtifactPaths);
-verify_promoted_artifacts(finalArtifactPaths, entry.exports);
-exportSucceeded = true;
+try
+    promote_artifacts(stagedArtifactPaths, finalArtifactPaths);
+    verify_promoted_artifacts(finalArtifactPaths, entry.exports);
+catch errorRecord
+    delete_artifacts(finalArtifactPaths);
+    rethrow(errorRecord);
+end
 clear artifactCleanup;
+end
 
-    function cleanup_failed_export()
-        if ~exportSucceeded
-            delete_artifacts(finalArtifactPaths);
-            delete_artifacts(stagedArtifactPaths);
-        end
-        if isfolder(stagingDirectory)
-            rmdir(stagingDirectory, "s");
-        end
-    end
+function cleanup_staging_export(stagedArtifactPaths, stagingDirectory)
+delete_artifacts(stagedArtifactPaths);
+if isfolder(stagingDirectory)
+    rmdir(stagingDirectory, "s");
+end
 end
 
 function available = has_exportgraphics()
@@ -340,7 +339,8 @@ while true
         if chunkData(9) == 1
             pixelsPerMeterX = double(typecast(uint8(chunkData(1:4)), "uint32"));
             pixelsPerMeterY = double(typecast(uint8(chunkData(5:8)), "uint32"));
-            if computer("endian") == "L"
+            [~, ~, endian] = computer;
+            if endian == 'L'
                 pixelsPerMeterX = double(swapbytes(uint32(pixelsPerMeterX)));
                 pixelsPerMeterY = double(swapbytes(uint32(pixelsPerMeterY)));
             end
@@ -352,6 +352,17 @@ while true
     elseif strcmp(chunkType, 'IEND')
         break;
     end
+end
+
+function pathValue = canonical_path(pathValue)
+if usejava("jvm")
+    pathValue = string(char(java.io.File(char(pathValue)).getCanonicalPath()));
+    return;
+end
+[status, attributes] = fileattrib(char(pathValue));
+assert(status, "oi_export_figure:JVMRequired", ...
+    "Canonical path resolution failed without the MATLAB JVM: %s", pathValue);
+pathValue = string(attributes.Name);
 end
 clear cleanup;
 end
