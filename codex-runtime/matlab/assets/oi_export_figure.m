@@ -518,6 +518,7 @@ if isappdata(figureHandle, "OI_OceanTheme")
             && any(strcmpi(installedFonts, string(theme.FontName)))
         selectedFont = string(theme.FontName);
     end
+end
 if cjkPresent && (strlength(selectedFont) == 0 || ~is_cjk_font(selectedFont))
     match = candidates(ismember(lower(candidates), lower(installedFonts)));
     assert(~isempty(match), "oi_export_figure:CJKFontUnavailable", ...
