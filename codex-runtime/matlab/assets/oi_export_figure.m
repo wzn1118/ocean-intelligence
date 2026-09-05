@@ -153,8 +153,17 @@ assert(~isempty(textEvidence) && ~isempty(axesEvidence), ...
 allEvidence = [textEvidence(:); axes_as_layout_evidence(axesEvidence); ...
     containerEvidence(:)];
 clippedCount = sum([allEvidence.clipped]);
-assert(clippedCount == 0, "oi_export_figure:ClippedContent", ...
-    "Visible text or axes extend outside the export canvas");
+if clippedCount > 0
+    clippedEvidence = allEvidence([allEvidence.clipped]);
+    clippedDetails = strings(numel(clippedEvidence), 1);
+    for clippedIndex = 1:numel(clippedEvidence)
+        clippedDetails(clippedIndex) = string(clippedEvidence(clippedIndex).role) ...
+            + "=" + string(mat2str(clippedEvidence(clippedIndex).bounds, 5));
+    end
+    error("oi_export_figure:ClippedContent", ...
+        "Visible text or axes extend outside the export canvas: %s", ...
+        strjoin(clippedDetails, "; "));
+end
 textOverlapCount = count_text_overlaps(textEvidence);
 assert(textOverlapCount == 0, "oi_export_figure:OverlappingText", ...
     "Visible text objects overlap in the final export layout");
@@ -874,6 +883,12 @@ for axesIndex = 1:numel(axesObjects)
     series = findall(axesObjects(axesIndex), "Type", "line", ...
         "-or", "Type", "scatter");
     series = flipud(series(:));
+    visibleSeries = true(size(series));
+    for seriesIndex = 1:numel(series)
+        visibleSeries(seriesIndex) = property_string( ...
+            series(seriesIndex), "HandleVisibility", "on") == "on";
+    end
+    series = series(visibleSeries);
     seriesCount = seriesCount + numel(series);
     if numel(series) > 1
         encodings = strings(numel(series), 1);
