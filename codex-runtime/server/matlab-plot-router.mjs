@@ -8,6 +8,7 @@ import {
   normalizeMatlabRelease,
   selectMatlabApi,
   selectMatlabExportStrategy,
+  selectMatlabRuntimeValidationLane,
 } from './matlab-release-capabilities.mjs';
 
 export const MATLAB_PLOT_ROUTER_SCHEMA_VERSION = 5;
@@ -103,6 +104,7 @@ function buildMatlabPlotRoute(spec) {
     format,
     selectMatlabExportStrategy(spec.targetRelease, format),
   ]));
+  const runtimeValidation = selectMatlabRuntimeValidationLane(spec.targetRelease);
   const route = {
     schemaVersion: MATLAB_PLOT_ROUTER_SCHEMA_VERSION,
     runtime: 'matlab',
@@ -127,6 +129,7 @@ function buildMatlabPlotRoute(spec) {
       export: exportApi,
       exportFormats,
       colorLimits: colorLimitApi,
+      runtimeValidation,
     },
     prohibitedTransforms: ['silent sort', 'silent squeeze/transpose', 'silent interpolation', 'silent smoothing', 'NaN-to-zero replacement'],
   };

@@ -1581,12 +1581,12 @@ test('exposes runtime/export compatibility through the generator-facing plan', (
   assert.match(instruction, /执行证据 已核验/u);
 });
 
-test('defines R2020a, R2024b and production MATLAB CI lanes with archival evidence', () => {
+test('defines R2021a, R2024b and production MATLAB CI lanes with archival evidence', () => {
   const matrix = buildMatlabRuntimeCiMatrix({ productionRelease: 'R2026a', artifactRoot: 'evidence' });
   assert.equal(matrix.schemaVersion, MATLAB_CI_EVIDENCE_SCHEMA_VERSION);
   assert.deepEqual(matrix.statusVocabulary, ['unavailable', 'skipped', 'failed', 'passed']);
   assert.deepEqual(matrix.exitCodes, MATLAB_CI_EXIT_CODES);
-  assert.deepEqual(matrix.jobs.map((job) => job.targetRelease), ['R2020a', 'R2024b', 'R2026a']);
+  assert.deepEqual(matrix.jobs.map((job) => job.targetRelease), ['R2021a', 'R2024b', 'R2026a']);
   for (const job of matrix.jobs) {
     assert.equal(job.exactReleaseRequired, true);
     assert.match(job.command, new RegExp(`--expected-release ${job.targetRelease}`, 'u'));

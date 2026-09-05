@@ -16,6 +16,8 @@ function writePng(filePath, width, height, bytes = 12_000) {
   png.write('IHDR', 12, 'ascii');
   png.writeUInt32BE(width, 16);
   png.writeUInt32BE(height, 20);
+  png.writeUInt32BE(0, bytes - 12);
+  png.write('IEND', bytes - 8, 'ascii');
   writeFileSync(filePath, png);
 }
 
@@ -61,7 +63,7 @@ print(figure_handle, fullfile(output_directory, 'sst-overview.pdf'), '-dpdf', '-
     theme: 'Ocean Intelligence',
   };
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
     generated_at: new Date().toISOString(),
     generator: 'Ocean Intelligence MATLAB/Octave plotting',
     figures: [{
@@ -378,5 +380,51 @@ test('requires fresh manifest timestamps even when artifact hashes still match',
   assert.equal(quality.manifestFreshnessOk, false);
   assert.match(quality.manifestFreshness.violations.join('\n'), /evidence\.newer_than_generated_at/u);
   assert.equal(quality.plotQualityScore, 0);
+  assert.equal(quality.matlabPlotQualityOk, false);
+});
+
+test('never awards an auditable score to prohibited or non-themed source', () => {
+  const fixture = createValidFixture();
+  writeFileSync(fixture.sourcePath, `
+fig = figure('Visible','off'); ax = axes('Parent',fig,'FontSize',12,'LineWidth',1.5);
+plot(ax,1:10,1:10,'LineWidth',1.5,'Marker','o');
+xlabel(ax,'Time (h)'); ylabel(ax,'SST (deg C)');
+legend(ax,'SST','Location','eastoutside'); cb=colorbar(ax); cb.Label.String='SST (deg C)';
+colormap(ax,parula(256)); saveas(fig,'forbidden.png');
+exportgraphics(fig,'plot.png','Resolution',180); exportgraphics(fig,'plot.pdf');
+`);
+  fixture.manifest.generated_at = new Date().toISOString();
+  writeFileSync(fixture.manifestPath, JSON.stringify(fixture.manifest, null, 2));
+
+  const quality = scoreMatlabPlotQuality({
+    sourcePath: fixture.sourcePath,
+    manifestPath: fixture.manifestPath,
+    outputDirectory: fixture.root,
+    minimumPlotQualityScore: 100,
+  });
+
+  assert.equal(quality.plotQualityScore, 0);
+  assert.equal(quality.plotQualitySourceEvidenceOk, false);
+  assert.equal(quality.plotQualityScoreOk, false);
+});
+
+test('rejects duplicate figure evidence and manifest-only PDF text claims', () => {
+  const fixture = createValidFixture();
+  fixture.manifest.figures.push(structuredClone(fixture.manifest.figures[0]));
+  fixture.manifest.figures[1].id = 'sst-overview';
+  writePdf(fixture.pdfPath, '');
+  fixture.manifest.figures[0].exports.pdf.bytes = statSync(fixture.pdfPath).size;
+  fixture.manifest.figures[0].exports.pdf.sha256 = sha256(fixture.pdfPath);
+  fixture.manifest.figures[0].exports.pdf.text = 'fabricated ocean evidence';
+  fixture.manifest.figures[1].exports.pdf = structuredClone(fixture.manifest.figures[0].exports.pdf);
+  fixture.manifest.generated_at = new Date().toISOString();
+  writeFileSync(fixture.manifestPath, JSON.stringify(fixture.manifest, null, 2));
+
+  const quality = inspectMatlabPlotQuality(fixture.sourcePath, fixture.manifestPath, fixture.root);
+
+  assert.equal(quality.manifestIntegrityOk, false);
+  assert.match(quality.manifestIntegrity.violations.join('\n'), /duplicate/u);
+  assert.equal(quality.pdfArtifactsOk, false);
+  assert.equal(quality.artifacts.find((artifact) => artifact.format === 'pdf').textOk, false);
   assert.equal(quality.matlabPlotQualityOk, false);
 });

@@ -276,6 +276,38 @@ function headlessInteractionContract() {
   };
 }
 
+function desktopInteractionContract(fixture, overrides = {}) {
+  const evidencePath = path.join(fixture.root, 'interaction-evidence.json');
+  const payload = {
+    runtime: 'matlab',
+    execution_verified: true,
+    matlab_release: 'R2024b',
+    nonce: 'interaction-run-20260905',
+    events: [
+      { type: 'datatip', observation_id: 'obs-001' },
+      { type: 'brush', observation_ids: ['obs-001', 'obs-002'] },
+    ],
+    ...overrides,
+  };
+  writeFileSync(evidencePath, JSON.stringify(payload));
+  return {
+    requested: true,
+    enabled: true,
+    desktop_available: true,
+    data_tips: true,
+    brush_selection: true,
+    keyboard_accessible: true,
+    observation_id_mapping: true,
+    cleanup_verified: true,
+    evidence: {
+      file: path.basename(evidencePath),
+      bytes: statSync(evidencePath).size,
+      sha256: createHash('sha256').update(readFileSync(evidencePath)).digest('hex'),
+      generated_at: new Date().toISOString(),
+    },
+  };
+}
+
 function addRuntimeContract(fixture, {
   release = 'R2024b',
   exportApis = { png: 'exportgraphics', pdf: 'exportgraphics', svg: 'print' },
@@ -758,19 +790,14 @@ test('validates headless static fallback without claiming interaction succeeded'
 
 test('requires interaction accessibility and cleanup evidence on desktop', () => {
   const fixture = createFixture();
-  fixture.manifest.figures[0].interaction = {
-    requested: true,
-    enabled: true,
-    desktop_available: true,
-    data_tips: true,
-    brush_selection: true,
-    keyboard_accessible: true,
-    observation_id_mapping: true,
-    cleanup_verified: true,
-  };
+  fixture.manifest.figures[0].interaction = desktopInteractionContract(fixture);
   writeManifest(fixture);
-  const valid = inspect(fixture, { requireInteractionContract: true });
+  const valid = inspect(fixture, {
+    requireInteractionContract: true,
+    expectedInteractionNonce: 'interaction-run-20260905',
+  });
   assert.equal(valid.interactionOk, true);
+  assert.equal(valid.figures[0].interaction.evidence.ok, true);
 
   fixture.manifest.figures[0].interaction.keyboard_accessible = false;
   fixture.manifest.figures[0].interaction.cleanup_verified = false;
@@ -778,6 +805,26 @@ test('requires interaction accessibility and cleanup evidence on desktop', () =>
   const invalid = inspect(fixture, { requireInteractionContract: true });
   assert.ok(invalid.figures[0].interaction.violations.includes('keyboard_accessible'));
   assert.ok(invalid.figures[0].interaction.violations.includes('cleanup_verified'));
+});
+
+test('rejects forged, cross-runtime, or tampered interaction evidence', () => {
+  const fixture = createFixture();
+  fixture.manifest.figures[0].interaction = desktopInteractionContract(fixture, { runtime: 'octave' });
+  writeManifest(fixture);
+  const crossRuntime = inspect(fixture, {
+    requireInteractionContract: true,
+    requireInteractionEvidence: true,
+    expectedInteractionNonce: 'interaction-run-20260905',
+  });
+  assert.equal(crossRuntime.interactionOk, false);
+  assert.ok(crossRuntime.figures[0].interaction.violations.includes('evidence.payload.runtime'));
+
+  const evidencePath = path.join(fixture.root, 'interaction-evidence.json');
+  writeFileSync(evidencePath, JSON.stringify({ runtime: 'matlab', execution_verified: true }));
+  const tampered = inspect(fixture, { requireInteractionContract: true, requireInteractionEvidence: true });
+  assert.equal(tampered.interactionOk, false);
+  assert.ok(tampered.figures[0].interaction.violations.includes('evidence.bytes.mismatch'));
+  assert.ok(tampered.figures[0].interaction.violations.includes('evidence.sha256.mismatch'));
 });
 
 test('rejects duplicate and non-deterministically ordered figure ids', () => {

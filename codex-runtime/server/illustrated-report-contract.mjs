@@ -11,6 +11,7 @@ import { EDITORIAL_STYLE_SPEC } from './editorial-style-spec.mjs';
 import { PHYSICAL_INTERPRETATION_IMPACT_SPEC } from './physical-interpretation-impact-spec.mjs';
 import { ANOMALY_LINKAGE_REPORT_SPEC } from './anomaly-linkage-report-spec.mjs';
 import { POINT_TEMPERATURE_INTERACTION_SPEC } from './point-temperature-interaction-spec.mjs';
+import { inspectPointInteractionQuality } from './point-interaction-quality.mjs';
 
 const REPORT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{7,79}$/u;
 export const MINIMUM_REPORT_VISUALS = 20;
@@ -23,6 +24,10 @@ export const MINIMUM_ANALYTICAL_CLAIMS = 15;
 export const MINIMUM_COMPARISONS = 9;
 export const MINIMUM_EVIDENCE_MARKERS = 15;
 export const REQUIRED_REPORT_ZONES = 9;
+export const REQUIRED_REPORT_ZONE_NAMES = Object.freeze(['西北', '北', '东北', '西', '中间', '东', '西南', '南', '东南']);
+export const REQUIRED_MATLAB_REPORT_RELEASES = Object.freeze(['R2021a', 'R2024b', 'R2026a']);
+export const REQUIRED_REPORT_EXPORT_FORMATS = Object.freeze(['png', 'pdf']);
+export const MINIMUM_INTERACTIVE_FIGURES = 1;
 export const FULL_OCEAN_OBSERVATION_REPORT_SPEC_PROMPT = [
   OCEAN_REPORT_SPEC,
   UNIVERSAL_OCEAN_REPORT_SPEC,
@@ -59,6 +64,10 @@ export function createIllustratedReportContract(generatedRoot, requestedId = '')
     minimumComparisons: MINIMUM_COMPARISONS,
     minimumEvidenceMarkers: MINIMUM_EVIDENCE_MARKERS,
     requiredZoneCount: REQUIRED_REPORT_ZONES,
+    requiredZoneNames: REQUIRED_REPORT_ZONE_NAMES,
+    requiredMatlabReleases: REQUIRED_MATLAB_REPORT_RELEASES,
+    requiredExportFormats: REQUIRED_REPORT_EXPORT_FORMATS,
+    minimumInteractiveFigures: MINIMUM_INTERACTIVE_FIGURES,
     requiresPointInventory: true,
     requiresWindAnalysis: true,
     requiresVariableAnalysis: true,
@@ -83,6 +92,10 @@ export function illustratedReportInstructions(contract) {
     'Visuals must carry real explanatory value and be grounded in the report evidence. Do not use empty placeholders, repeated decorative graphics, or meaningless stock-like imagery.',
     'Every scientific conclusion must be encoded on a real HTML element with a unique data-claim-id, space-separated data-evidence-ids, and a substantive data-limitations value. Report prose, comments, hidden text, self-ratings, or statements that a check passed are not evidence.',
     'Every analytical <figure> must declare a unique data-figure-id matching a figure id in the freshly generated manifest, and its figcaption must state what is shown, the evidence window/sample/QC context, the supported conclusion, and limitations. A filename mention without a matching checked artifact does not establish correspondence.',
+    'Every analytical <figure> must also declare data-snapshot-id, data-variable, data-unit, data-time-start, data-time-end, data-spatial-coverage, data-qc-summary, data-uncertainty, data-anomaly-status and data-matlab-release. These values must agree with the figure scientific_context and runtime evidence in figures.json.',
+    `The manifest ocean_report object must record the named sea area, numeric bounds, all ${contract.requiredZoneCount} named zones, requested and effective UTC coverage, data sources with versions/access times, variables with quantities/units/source ids, and explicit anomaly, uncertainty and conclusion limitations. Unknown or unavailable evidence must remain explicit rather than fabricated.`,
+    `Every figure must provide freshly hashed ${contract.requiredExportFormats.join(' and ').toUpperCase()} exports from the same snapshot. At least ${contract.minimumInteractiveFigures} point-capable figure must additionally provide a self-contained HTML export that passes complete hover/focus, stable ObservationID, scientific-context and MATLAB-evidence checks.`,
+    `The manifest matlab_ci matrix must contain ${contract.requiredMatlabReleases.join(', ')}. Each release must identify MATLAB as the authoritative runtime, record a reproducible command and toolboxes, and prove execution, artifact validation and visual inspection passed. pending, static-only, failed or Octave evidence must not satisfy the report gate.`,
     'Freeze scripts, reports, and visual artifacts first, then generate the manifest last. The manifest generated_at and file mtime must not predate any referenced report or artifact, and every declared byte count and SHA-256 must match the current file.',
     'Make the HTML publication-quality and responsive: include a strong cover, executive summary, table of contents, clearly paced sections, highlighted findings, captions, source notes, methodology, limitations, and references when evidence is available.',
     `This is a deep report, not a short briefing: the Markdown must be at least ${contract.minimumMarkdownBytes} bytes, the HTML at least ${contract.minimumHtmlBytes} bytes, and the main report must contain at least ${contract.minimumHeadings} meaningful section headings and ${contract.minimumHtmlFigures} figure/visual placements. Expand the analysis with real evidence, comparisons, mechanisms, uncertainty, data tables, and an appendix; never pad with repeated sentences.`,
@@ -118,6 +131,8 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const figures = extractFigureBlocks(sanitizedHtml);
   const claims = extractAttributedTags(sanitizedHtml, 'data-claim-id');
   const manifestFigures = Array.isArray(manifest?.figures) ? manifest.figures : [];
+  const oceanReportAudit = inspectOceanReportMetadata(manifest?.ocean_report);
+  const matlabRuntimeAudit = inspectMatlabRuntimeMatrix(manifest?.matlab_ci);
   const manifestFigureIds = new Set(manifestFigures.map((figure) => stringValue(figure?.id)).filter(Boolean));
   const declaredEvidenceIds = new Set([
     ...manifestFigureIds,
@@ -140,22 +155,34 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const figureIds = figures.map((entry) => stringValue(entry.attributes['data-figure-id'])).filter(Boolean);
   const figureViolations = figures.flatMap((entry, index) => {
     const id = stringValue(entry.attributes['data-figure-id']);
+    const manifestFigure = manifestFigures.find((figure) => stringValue(figure?.id) === id);
     const caption = entry.body.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/iu)?.[1]
       ?.replace(/<[^>]+>/gu, ' ').replace(/\s+/gu, ' ').trim() || '';
     const violations = [];
     if (!id) violations.push(`figures[${index}].id`);
     else if (!manifestFigureIds.has(id)) violations.push(`figures[${index}].manifest_link`);
     if (caption.length < 40) violations.push(`figures[${index}].caption`);
+    for (const attribute of [
+      'data-snapshot-id', 'data-variable', 'data-unit', 'data-time-start', 'data-time-end',
+      'data-spatial-coverage', 'data-qc-summary', 'data-uncertainty', 'data-anomaly-status',
+      'data-matlab-release',
+    ]) {
+      if (!stringValue(entry.attributes[attribute])) violations.push(`figures[${index}].${attribute}`);
+    }
+    if (manifestFigure) violations.push(...inspectHtmlFigureCorrespondence(entry, manifestFigure, index, matlabRuntimeAudit));
     return violations;
   });
   if (new Set(figureIds).size !== figureIds.length) figureViolations.push('figures.id.duplicate');
 
+  const figureEvidence = manifestFigures.map((figure, figureIndex) => inspectFigureScientificEvidence(figure, figureIndex));
+  const figureEvidenceViolations = figureEvidence.flatMap((entry) => entry.violations);
   const artifactChecks = manifestFigures.flatMap((figure, figureIndex) => normalizeReportExports(figure?.exports)
     .map((artifact, artifactIndex) => inspectReportArtifact({
       artifact,
       outputDirectory,
       id: `figures[${figureIndex}].exports[${artifactIndex}]`,
     })));
+  const interactiveChecks = artifactChecks.filter((artifact) => artifact.format === 'html');
   const reportFiles = [htmlPath, markdownPath].filter(Boolean).map((file) => ({ file, ...fileInfo(file) }));
   const freshness = inspectReportFreshness({
     generatedAt: manifest?.generated_at,
@@ -170,9 +197,12 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const contentOk = html.length > 0 && markdown.length > 0;
   const claimsOk = claims.length > 0 && claimViolations.length === 0;
   const figureLinksOk = figures.length > 0 && figureViolations.length === 0;
-  const artifactsOk = artifactChecks.length > 0 && artifactChecks.every((artifact) => artifact.ok);
+  const figureEvidenceOk = manifestFigures.length > 0 && figureEvidenceViolations.length === 0;
+  const artifactsOk = artifactChecks.length > 0 && artifactChecks.every((artifact) => artifact.ok)
+    && interactiveChecks.length >= MINIMUM_INTERACTIVE_FIGURES;
   return {
-    ok: contentOk && manifestRead.ok && claimsOk && figureLinksOk && artifactsOk && freshness.ok,
+    ok: contentOk && manifestRead.ok && claimsOk && figureLinksOk && figureEvidenceOk
+      && artifactsOk && freshness.ok && oceanReportAudit.ok && matlabRuntimeAudit.ok,
     contentOk,
     manifestOk: manifestRead.ok,
     claimsOk,
@@ -181,8 +211,16 @@ export function inspectIllustratedReportEvidence(options = {}) {
     figureLinksOk,
     figureCount: figures.length,
     figureViolations,
+    figureEvidenceOk,
+    figureEvidence,
+    figureEvidenceViolations,
     artifactsOk,
     artifactChecks,
+    interactiveFigureCount: interactiveChecks.length,
+    oceanReportOk: oceanReportAudit.ok,
+    oceanReport: oceanReportAudit,
+    matlabRuntimeOk: matlabRuntimeAudit.ok,
+    matlabRuntime: matlabRuntimeAudit,
     manifestFreshnessOk: freshness.ok,
     freshness,
   };
@@ -211,21 +249,206 @@ function parseAttributes(tag) {
 }
 
 function normalizeReportExports(exportsValue) {
-  if (Array.isArray(exportsValue)) return exportsValue.filter((entry) => entry && typeof entry === 'object');
+  if (Array.isArray(exportsValue)) return exportsValue.filter((entry) => entry && typeof entry === 'object')
+    .map((entry) => ({ ...entry, format: stringValue(entry.format) || extensionFormat(entry.file) }));
   if (!exportsValue || typeof exportsValue !== 'object') return [];
-  return Object.values(exportsValue).filter((entry) => entry && typeof entry === 'object');
+  return Object.entries(exportsValue).filter(([, entry]) => entry && typeof entry === 'object')
+    .map(([format, entry]) => ({ ...entry, format: stringValue(entry.format) || format.toLowerCase() }));
 }
 
 function inspectReportArtifact({ artifact, outputDirectory, id }) {
   const relative = stringValue(artifact?.file);
-  const safeRelative = relative && !path.isAbsolute(relative)
-    && path.normalize(relative) !== '..' && !path.normalize(relative).startsWith(`..${path.sep}`);
-  const file = safeRelative ? path.resolve(outputDirectory, relative) : undefined;
+  const file = relative ? path.resolve(outputDirectory, relative) : undefined;
+  const safeRelative = relative && !path.isAbsolute(relative) && file && pathInside(outputDirectory, file);
   const info = fileInfo(file);
+  const format = (stringValue(artifact?.format) || extensionFormat(relative)).toLowerCase();
   const bytesOk = info.present && Number.isInteger(artifact?.bytes) && artifact.bytes === info.bytes;
   const hashOk = info.present && /^[a-f\d]{64}$/iu.test(String(artifact?.sha256 || ''))
     && sha256(file) === String(artifact.sha256).toLowerCase();
-  return { id, file, ...info, pathOk: Boolean(safeRelative), bytesOk, hashOk, ok: Boolean(safeRelative) && bytesOk && hashOk };
+  const metadataViolations = inspectArtifactMetadata(artifact, format);
+  const interactionQuality = format === 'html' && info.present ? inspectPointInteractionQuality({
+    htmlPath: file,
+    requireScientificEvidence: true,
+    requireMatlabEvidence: true,
+  }) : undefined;
+  const interactionOk = format !== 'html' || interactionQuality?.pointInteractionQualityOk === true;
+  return {
+    id, file, format, ...info, pathOk: Boolean(safeRelative), bytesOk, hashOk,
+    metadataOk: metadataViolations.length === 0, metadataViolations,
+    interactionOk, interactionQuality,
+    ok: Boolean(safeRelative) && bytesOk && hashOk && metadataViolations.length === 0 && interactionOk,
+  };
+}
+
+function inspectOceanReportMetadata(report) {
+  const violations = [];
+  if (!report || typeof report !== 'object') return { ok: false, violations: ['ocean_report.missing'] };
+  if (!stringValue(report.area?.name)) violations.push('ocean_report.area.name');
+  if (!validBounds(report.area?.bounds)) violations.push('ocean_report.area.bounds');
+  const zones = Array.isArray(report.area?.zones) ? report.area.zones.map(stringValue).filter(Boolean) : [];
+  for (const zone of REQUIRED_REPORT_ZONE_NAMES) if (!zones.includes(zone)) violations.push(`ocean_report.area.zones.${zone}`);
+  inspectCoverage(report.requested_coverage, 'ocean_report.requested_coverage', violations, true);
+  inspectCoverage(report.effective_coverage, 'ocean_report.effective_coverage', violations, true);
+  const sources = Array.isArray(report.data_sources) ? report.data_sources : [];
+  if (sources.length === 0) violations.push('ocean_report.data_sources');
+  sources.forEach((source, index) => {
+    for (const key of ['id', 'name', 'version', 'accessed_at']) if (!stringValue(source?.[key])) violations.push(`ocean_report.data_sources[${index}].${key}`);
+    if (stringValue(source?.accessed_at) && !Number.isFinite(Date.parse(source.accessed_at))) violations.push(`ocean_report.data_sources[${index}].accessed_at.invalid`);
+  });
+  const variables = Array.isArray(report.variables) ? report.variables : [];
+  if (variables.length === 0) violations.push('ocean_report.variables');
+  variables.forEach((variable, index) => {
+    for (const key of ['name', 'quantity', 'unit']) if (!stringValue(variable?.[key])) violations.push(`ocean_report.variables[${index}].${key}`);
+    if (!Array.isArray(variable?.source_ids) || variable.source_ids.filter(stringValue).length === 0) violations.push(`ocean_report.variables[${index}].source_ids`);
+  });
+  inspectExplicitAssessment(report.anomaly, 'ocean_report.anomaly', violations);
+  inspectExplicitAssessment(report.uncertainty, 'ocean_report.uncertainty', violations);
+  if (report.conclusion?.status !== 'audited') violations.push('ocean_report.conclusion.status');
+  if (stringValue(report.conclusion?.limitations).length < 12) violations.push('ocean_report.conclusion.limitations');
+  return { ok: violations.length === 0, violations, zoneCount: zones.length, sourceCount: sources.length, variableCount: variables.length };
+}
+
+function inspectMatlabRuntimeMatrix(matrix) {
+  const violations = [];
+  if (!matrix || typeof matrix !== 'object') return { ok: false, violations: ['matlab_ci.missing'], releases: {} };
+  const required = Array.isArray(matrix.required_releases) ? matrix.required_releases.map(stringValue) : [];
+  for (const release of REQUIRED_MATLAB_REPORT_RELEASES) if (!required.includes(release)) violations.push(`matlab_ci.required_releases.${release}`);
+  const runs = Array.isArray(matrix.runs) ? matrix.runs : [];
+  const releases = {};
+  for (const release of REQUIRED_MATLAB_REPORT_RELEASES) {
+    const run = runs.find((entry) => stringValue(entry?.release) === release);
+    releases[release] = run;
+    if (!run) { violations.push(`matlab_ci.runs.${release}.missing`); continue; }
+    if (run.authoritative_runtime !== 'MATLAB') violations.push(`matlab_ci.runs.${release}.runtime`);
+    if (run.runtime_status !== 'passed') violations.push(`matlab_ci.runs.${release}.status`);
+    if (run.execution_verified !== true) violations.push(`matlab_ci.runs.${release}.execution_verified`);
+    if (!stringValue(run.command)) violations.push(`matlab_ci.runs.${release}.command`);
+    if (!Array.isArray(run.toolboxes) || run.toolboxes.filter(stringValue).length === 0) violations.push(`matlab_ci.runs.${release}.toolboxes`);
+    if (run.artifact_validation?.status !== 'passed') violations.push(`matlab_ci.runs.${release}.artifact_validation`);
+    if (run.visual_inspection?.status !== 'passed') violations.push(`matlab_ci.runs.${release}.visual_inspection`);
+    if (!stringValue(run.evidence_id)) violations.push(`matlab_ci.runs.${release}.evidence_id`);
+  }
+  return { ok: violations.length === 0, violations, releases };
+}
+
+function inspectFigureScientificEvidence(figure, index) {
+  const violations = [];
+  const prefix = `manifest.figures[${index}]`;
+  if (!stringValue(figure?.source)) violations.push(`${prefix}.source`);
+  const context = figure?.scientific_context;
+  if (!stringValue(context?.snapshot_id)) violations.push(`${prefix}.scientific_context.snapshot_id`);
+  const variables = Array.isArray(context?.variables) ? context.variables : [];
+  if (variables.length === 0) violations.push(`${prefix}.scientific_context.variables`);
+  variables.forEach((variable, variableIndex) => {
+    if (!stringValue(variable?.name)) violations.push(`${prefix}.scientific_context.variables[${variableIndex}].name`);
+    if (!stringValue(variable?.unit)) violations.push(`${prefix}.scientific_context.variables[${variableIndex}].unit`);
+  });
+  inspectCoverage(context?.temporal_coverage, `${prefix}.scientific_context.temporal_coverage`, violations);
+  if (!stringValue(context?.spatial_coverage?.name) || !validBounds(context?.spatial_coverage?.bounds)) violations.push(`${prefix}.scientific_context.spatial_coverage`);
+  for (const key of ['raw', 'valid', 'missing', 'qc_rejected']) if (!Number.isInteger(context?.qc?.[key]) || context.qc[key] < 0) violations.push(`${prefix}.scientific_context.qc.${key}`);
+  inspectExplicitAssessment(context?.uncertainty, `${prefix}.scientific_context.uncertainty`, violations);
+  inspectExplicitAssessment(context?.anomaly, `${prefix}.scientific_context.anomaly`, violations);
+  const exports = normalizeReportExports(figure?.exports);
+  const formats = exports.map((artifact) => artifact.format);
+  for (const format of REQUIRED_REPORT_EXPORT_FORMATS) if (!formats.includes(format)) violations.push(`${prefix}.exports.${format}`);
+  exports.forEach((artifact, artifactIndex) => {
+    if (stringValue(artifact?.snapshot_id) !== stringValue(context?.snapshot_id)) violations.push(`${prefix}.exports[${artifactIndex}].snapshot_id`);
+  });
+  const runtime = figure?.runtime;
+  if (runtime?.authoritative_runtime !== 'MATLAB') violations.push(`${prefix}.runtime.authoritative_runtime`);
+  if (!REQUIRED_MATLAB_REPORT_RELEASES.includes(stringValue(runtime?.matlab_release))) violations.push(`${prefix}.runtime.matlab_release`);
+  if (runtime?.runtime_status !== 'passed') violations.push(`${prefix}.runtime.runtime_status`);
+  if (runtime?.execution_verified !== true) violations.push(`${prefix}.runtime.execution_verified`);
+  if (runtime?.artifact_validation?.status !== 'passed') violations.push(`${prefix}.runtime.artifact_validation`);
+  if (runtime?.visual_inspection?.status !== 'passed') violations.push(`${prefix}.runtime.visual_inspection`);
+  if (figure?.interaction?.required === true) {
+    if (!formats.includes('html')) violations.push(`${prefix}.exports.html`);
+    if (figure.interaction.self_contained !== true) violations.push(`${prefix}.interaction.self_contained`);
+    if (figure.interaction.validation_status !== 'passed') violations.push(`${prefix}.interaction.validation_status`);
+    if (stringValue(figure.interaction.snapshot_id) !== stringValue(context?.snapshot_id)) violations.push(`${prefix}.interaction.snapshot_id`);
+  }
+  return { id: stringValue(figure?.id), ok: violations.length === 0, violations };
+}
+
+function inspectArtifactMetadata(artifact, format) {
+  const violations = [];
+  if (!['png', 'pdf', 'html'].includes(format)) violations.push('format.unsupported');
+  if (format === 'png') {
+    for (const key of ['width', 'height', 'dpi']) if (!Number.isFinite(artifact?.[key]) || artifact[key] <= 0) violations.push(`png.${key}`);
+  }
+  if (format === 'pdf') {
+    for (const key of ['width', 'height']) if (!Number.isFinite(artifact?.[key]) || artifact[key] <= 0) violations.push(`pdf.${key}`);
+    if (!stringValue(artifact?.text) && !stringValue(artifact?.text_file)) violations.push('pdf.text_evidence');
+  }
+  if (format === 'html' && artifact?.self_contained !== true) violations.push('html.self_contained');
+  return violations;
+}
+
+function inspectCoverage(coverage, prefix, violations, requireScope = false) {
+  const start = Date.parse(stringValue(coverage?.start));
+  const end = Date.parse(stringValue(coverage?.end));
+  if (!Number.isFinite(start)) violations.push(`${prefix}.start`);
+  if (!Number.isFinite(end)) violations.push(`${prefix}.end`);
+  if (Number.isFinite(start) && Number.isFinite(end) && end < start) violations.push(`${prefix}.reversed`);
+  if (!/^UTC(?:[+-]00(?::?00)?)?$/iu.test(stringValue(coverage?.timezone))) violations.push(`${prefix}.timezone`);
+  if (requireScope && !stringValue(coverage?.spatial)) violations.push(`${prefix}.spatial`);
+  if (requireScope && !stringValue(coverage?.depth)) violations.push(`${prefix}.depth`);
+}
+
+function inspectHtmlFigureCorrespondence(entry, figure, index, matlabRuntimeAudit) {
+  const violations = [];
+  const context = figure?.scientific_context || {};
+  const attributes = entry.attributes;
+  const variable = Array.isArray(context.variables)
+    ? context.variables.find((candidate) => stringValue(candidate?.name) === stringValue(attributes['data-variable']))
+    : undefined;
+  const compare = (attribute, expected) => {
+    if (stringValue(attributes[attribute]) !== stringValue(expected)) violations.push(`figures[${index}].${attribute}.mismatch`);
+  };
+  compare('data-snapshot-id', context.snapshot_id);
+  if (!variable) violations.push(`figures[${index}].data-variable.mismatch`);
+  else compare('data-unit', variable.unit);
+  compare('data-time-start', context.temporal_coverage?.start);
+  compare('data-time-end', context.temporal_coverage?.end);
+  if (!stringValue(attributes['data-spatial-coverage']).includes(stringValue(context.spatial_coverage?.name))) {
+    violations.push(`figures[${index}].data-spatial-coverage.mismatch`);
+  }
+  const qcSummary = stringValue(attributes['data-qc-summary']);
+  for (const key of ['raw', 'valid', 'missing', 'qc_rejected']) {
+    if (!qcSummary.includes(`${key}=${context.qc?.[key]}`)) violations.push(`figures[${index}].data-qc-summary.${key}.mismatch`);
+  }
+  const uncertainty = stringValue(attributes['data-uncertainty']).toLowerCase();
+  if (!uncertainty.includes(stringValue(context.uncertainty?.status).toLowerCase())
+    || !uncertainty.includes(stringValue(context.uncertainty?.method).toLowerCase())) {
+    violations.push(`figures[${index}].data-uncertainty.mismatch`);
+  }
+  compare('data-anomaly-status', context.anomaly?.status);
+  const release = stringValue(attributes['data-matlab-release']);
+  if (!matlabRuntimeAudit.releases?.[release] || matlabRuntimeAudit.releases[release].runtime_status !== 'passed') {
+    violations.push(`figures[${index}].data-matlab-release.mismatch`);
+  }
+  return violations;
+}
+
+function inspectExplicitAssessment(value, prefix, violations) {
+  if (!['present', 'absent', 'unknown', 'not-evaluated'].includes(stringValue(value?.status))) violations.push(`${prefix}.status`);
+  if (!stringValue(value?.method)) violations.push(`${prefix}.method`);
+  if (stringValue(value?.limitations).length < 12) violations.push(`${prefix}.limitations`);
+}
+
+function validBounds(value) {
+  return Array.isArray(value) && value.length === 4 && value.every(Number.isFinite)
+    && value[0] < value[2] && value[1] < value[3]
+    && value[0] >= -180 && value[2] <= 180 && value[1] >= -90 && value[3] <= 90;
+}
+
+function extensionFormat(file) {
+  return path.extname(stringValue(file)).slice(1).toLowerCase();
+}
+
+function pathInside(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 function inspectReportFreshness({ generatedAt, manifestPath, files, toleranceMs }) {

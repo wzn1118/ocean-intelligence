@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Node contracts
@@ -60,33 +60,65 @@ jobs:
       matrix:
         release: [R2021a, R2024b, R2026a]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install and license MathWorks MATLAB
         uses: matlab-actions/setup-matlab@v3
         with:
           release: ${{ matrix.release }}
+          cache: true
       - name: Prepare isolated evidence directory
         shell: bash
         run: |
           output="${RUNNER_TEMP}/ocean-matlab-full100-${{ matrix.release }}"
           rm -rf "$output"
           mkdir -p "$output/evaluator-runtime"
-          touch "$output/runtime-start.marker"
+          nonce="$(openssl rand -hex 32)"
+          nonce_sha256="$(printf '%s' "$nonce" | sha256sum | cut -d' ' -f1)"
+          python3 - "$output/runtime-start.marker" "${{ matrix.release }}" "$nonce_sha256" <<'PY'
+          import json
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          marker = {
+              "schema_version": 1,
+              "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "expected_release": sys.argv[2],
+              "nonce_sha256": sys.argv[3],
+          }
+          Path(sys.argv[1]).write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+          PY
           echo "MATLAB_FULL100_OUTPUT=$output" >> "$GITHUB_ENV"
-          echo "MATLAB_EVAL_NONCE=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          echo "MATLAB_EVAL_NONCE=$nonce" >> "$GITHUB_ENV"
       - name: Run licensed MATLAB plotting, reporting and interaction gates
+        id: matlab-runtime
+        continue-on-error: true
         uses: matlab-actions/run-command@v3
         with:
           command: addpath('codex-runtime/matlab/tests'); run_github_full100('${{ matrix.release }}', getenv('MATLAB_FULL100_OUTPUT'), getenv('MATLAB_EVAL_NONCE'))
       - name: Validate MATLAB evidence and compute runtime score
+        id: runtime-score
+        if: always()
+        continue-on-error: true
         shell: bash
         run: bash scripts/matlab-github-full100.sh "${{ matrix.release }}" "$MATLAB_FULL100_OUTPUT" "$MATLAB_EVAL_NONCE" "$MATLAB_FULL100_OUTPUT/runtime-start.marker"
+      - name: Enforce MATLAB runtime and score gate
+        if: always()
+        shell: bash
+        env:
+          MATLAB_STEP_OUTCOME: ${{ steps.matlab-runtime.outcome }}
+          SCORE_STEP_OUTCOME: ${{ steps.runtime-score.outcome }}
+        run: |
+          printf 'MATLAB_STEP_OUTCOME=%s\n' "$MATLAB_STEP_OUTCOME"
+          printf 'SCORE_STEP_OUTCOME=%s\n' "$SCORE_STEP_OUTCOME"
+          test "$MATLAB_STEP_OUTCOME" = success
+          test "$SCORE_STEP_OUTCOME" = success
       - name: Upload MATLAB evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: matlab-full100-${{ matrix.release }}
           path: ${{ runner.temp }}/ocean-matlab-full100-${{ matrix.release }}

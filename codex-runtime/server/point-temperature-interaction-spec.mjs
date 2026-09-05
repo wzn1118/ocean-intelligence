@@ -6,6 +6,26 @@ export const POINT_TEMPERATURE_TOOLTIP_FIELDS = Object.freeze([
   'QC 状态或质量标志',
 ]);
 
+export const POINT_TEMPERATURE_EVIDENCE_ATTRIBUTES = Object.freeze([
+  'data-snapshot-id',
+  'data-source',
+  'data-variable',
+  'data-unit',
+  'data-time-start',
+  'data-time-end',
+  'data-timezone',
+  'data-spatial-coverage',
+  'data-qc-summary',
+  'data-uncertainty',
+  'data-anomaly-status',
+  'data-authoritative-runtime',
+  'data-matlab-release',
+  'data-runtime-status',
+  'data-execution-verified',
+  'data-artifact-validation',
+  'data-visual-inspection',
+]);
+
 export const POINT_TEMPERATURE_INTERACTION_SPEC = String.raw`
 【点位温度图交互与交付强制规范】
 
@@ -35,12 +55,15 @@ export const POINT_TEMPERATURE_INTERACTION_SPEC = String.raw`
 - 在交付静态 PNG 和/或 PDF 之外，必须同时交付一个自包含交互 HTML；静态文件不能替代交互 HTML。
 - 自包含交互 HTML 必须内嵌运行所需的数据、样式和脚本，离线打开即可使用，不得依赖 CDN、远程接口、本机服务、外部 JavaScript/CSS 文件或绝对文件路径。
 - 交互 HTML 必须保留全部逐点 hover/focus 提示、键盘导航、多系列图例和必要的无障碍语义；PNG/PDF 与 HTML 必须使用同一数据快照、单位、时间口径、QC 口径和系列编码。
+- 交互 HTML 的 html、body、main 或顶层 section 必须声明 data-snapshot-id、data-source、data-variable、data-unit、data-time-start、data-time-end、data-timezone="UTC"、data-spatial-coverage、data-qc-summary、data-uncertainty 和 data-anomaly-status，且 snapshot id 必须与 PNG/PDF 清单一致。
+- 只有真实 MATLAB 验证通过时，才可声明 data-authoritative-runtime="MATLAB"、data-matlab-release、data-runtime-status="passed"、data-execution-verified="true"、data-artifact-validation="passed" 和 data-visual-inspection="passed"；Octave、static-only、runtime_pending 或未审图状态不得伪装成通过。
 
 六、交付前验收
 - 枚举渲染数据中的全部温度点，验证每一点均可通过 hover 和 focus 打开提示，并逐项核对点位、温度单位、时间、经纬度和 QC。
 - 对过滤和排序后的数据逐点核对 data-point-index、ObservationID 与源键；模拟 brush/选择并确认返回的稳定 ID 不随显示顺序改变。
 - 重复触发回调，关闭图窗并制造一次预期异常，确认无残留图窗、回调或交互模式；分别记录 desktop 与 headless 的真实执行状态。
 - 对每张多系列图验证图例存在且系列集合完整；对交互 HTML 断网加载，确认无外部资源请求且交互仍可使用。
+- 核对交互 HTML 顶层科学上下文、MATLAB release、执行状态、制品校验和视觉检查字段，并与 figures.json、PNG、PDF 的 SHA-256、时间窗、空间范围、变量单位及 snapshot id 逐项一致。
 - 任一温度点缺少 hover/focus 提示、任一必填字段缺失、任一多系列图缺少图例，或未交付自包含交互 HTML，均视为绘图交付不合格。
 `;
 

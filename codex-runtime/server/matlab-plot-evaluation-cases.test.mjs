@@ -29,7 +29,10 @@ const QUALITY_WEIGHTS = {
   colorbarLabels: 10, clippingRisk: 12, outputResolution: 16, accessibility: 12,
 };
 const QUALITY_CRITERIA = Object.keys(QUALITY_WEIGHTS);
-const QUALITY_SIGNALS = ['matlabPlotQualityOk', 'manifestOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk'];
+const QUALITY_SIGNALS = [
+  'matlabPlotQualityOk', 'manifestOk', 'manifestIntegrityOk', 'artifactsOk',
+  'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk', 'plotQualitySourceEvidenceOk',
+];
 const ROUND_6_CASE_IDS = [
   'invalid-section-dimension-order', 'invalid-timeseries-missing-timezone', 'user-en-nonutc-zoned-timeseries',
   'invalid-uncertainty-unit-mismatch', 'invalid-vector-component-units', 'invalid-positive-up-depth-template',
@@ -543,6 +546,27 @@ test('rejects missing runtime evidence, wrong candidate routes, and raw quality 
   assert.equal(evaluateMatlabPlotCase(entry, rawScore).passed, false);
 });
 
+test('rejects quality evidence when declared source or manifest hashes are forged', () => {
+  const fixture = createManifestQualityFixture();
+  try {
+    const entry = getMatlabPlotEvaluationCase('time-series-datetime-gaps');
+    const candidate = candidateFor(entry);
+    const evidence = qualityEvidenceFor(fixture);
+    const forgedSource = {
+      ...candidate,
+      qualityEvidence: { ...evidence, sourceSha256: '0'.repeat(64) },
+    };
+    const forgedManifest = {
+      ...candidate,
+      qualityEvidence: { ...evidence, manifestSha256: 'f'.repeat(64) },
+    };
+    assert.equal(evaluateMatlabPlotCase(entry, forgedSource).passed, false);
+    assert.equal(evaluateMatlabPlotCase(entry, forgedManifest).passed, false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('does not count MATLAB comments as executable feature evidence', () => {
   const entry = getMatlabPlotEvaluationCase('adversarial-comment-feature-stuffing');
   for (const prefix of ['plot(value);', "transposed = value';", "nonconjugate = value.';"]) {
@@ -746,6 +770,8 @@ function createManifestQualityFixture() {
   png.write('IHDR', 12, 'ascii');
   png.writeUInt32BE(1400, 16);
   png.writeUInt32BE(800, 20);
+  png.writeUInt32BE(0, png.length - 12);
+  png.write('IEND', png.length - 8, 'ascii');
   writeFileSync(pngPath, png);
   writeFileSync(pdfPath, [
     '%PDF-1.4',
@@ -794,6 +820,8 @@ function qualityEvidenceFor(fixture) {
     sourcePath: fixture.sourcePath,
     manifestPath: fixture.manifestPath,
     outputDirectory: fixture.root,
+    sourceSha256: fileSha256(fixture.sourcePath),
+    manifestSha256: fileSha256(fixture.manifestPath),
     minimumPngBytes: 1,
     minimumPdfBytes: 1,
   };

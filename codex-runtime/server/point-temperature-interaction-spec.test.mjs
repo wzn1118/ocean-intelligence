@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   POINT_TEMPERATURE_INTERACTION_SPEC,
+  POINT_TEMPERATURE_EVIDENCE_ATTRIBUTES,
   POINT_TEMPERATURE_TOOLTIP_FIELDS,
   pointTemperatureInteractionInstructions,
 } from './point-temperature-interaction-spec.mjs';
@@ -48,6 +49,11 @@ test('requires a self-contained interactive HTML alongside static exports', () =
   assert.match(POINT_TEMPERATURE_INTERACTION_SPEC, /在交付静态 PNG 和\/或 PDF 之外，必须同时交付一个自包含交互 HTML/u);
   assert.match(POINT_TEMPERATURE_INTERACTION_SPEC, /离线打开即可使用/u);
   assert.match(POINT_TEMPERATURE_INTERACTION_SPEC, /不得依赖 CDN、远程接口、本机服务、外部 JavaScript\/CSS 文件或绝对文件路径/u);
+  for (const attribute of POINT_TEMPERATURE_EVIDENCE_ATTRIBUTES) {
+    assert.match(POINT_TEMPERATURE_INTERACTION_SPEC, new RegExp(attribute, 'u'));
+  }
+  assert.equal(Object.isFrozen(POINT_TEMPERATURE_EVIDENCE_ATTRIBUTES), true);
+  assert.match(POINT_TEMPERATURE_INTERACTION_SPEC, /Octave、static-only、runtime_pending 或未审图状态不得伪装成通过/u);
 });
 
 test('exposes deterministic side-effect-free integration instructions', () => {

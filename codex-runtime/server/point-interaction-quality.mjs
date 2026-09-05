@@ -8,6 +8,22 @@ export const POINT_INTERACTION_CHECK_IDS = Object.freeze([
   'tooltip-fields',
   'legend-series',
   'self-contained',
+  'scientific-context',
+  'matlab-evidence',
+]);
+
+const REQUIRED_SCIENTIFIC_CONTEXT = Object.freeze([
+  ['snapshotId', 'data-snapshot-id'],
+  ['source', 'data-source'],
+  ['variable', 'data-variable'],
+  ['unit', 'data-unit'],
+  ['timeStart', 'data-time-start'],
+  ['timeEnd', 'data-time-end'],
+  ['timezone', 'data-timezone'],
+  ['spatialCoverage', 'data-spatial-coverage'],
+  ['qcSummary', 'data-qc-summary'],
+  ['uncertainty', 'data-uncertainty'],
+  ['anomalyStatus', 'data-anomaly-status'],
 ]);
 
 const FIELD_DEFINITIONS = Object.freeze({
@@ -116,6 +132,24 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     externalResources,
   });
 
+  const scientificAudit = inspectScientificContext(html);
+  const scientificContextRequired = options.requireScientificEvidence === true;
+  const scientificCheck = makeCheck(
+    'scientific-context',
+    htmlRead.ok && (!scientificContextRequired || scientificAudit.ok),
+    scientificContextRequired ? scientificAudit.violations : [],
+    { context: scientificAudit.context, required: scientificContextRequired },
+  );
+
+  const matlabAudit = inspectMatlabEvidence(html);
+  const matlabEvidenceRequired = options.requireMatlabEvidence === true;
+  const matlabCheck = makeCheck(
+    'matlab-evidence',
+    htmlRead.ok && (!matlabEvidenceRequired || matlabAudit.ok),
+    matlabEvidenceRequired ? matlabAudit.violations : [],
+    { evidence: matlabAudit.evidence, required: matlabEvidenceRequired },
+  );
+
   const composed = composePointInteractionQuality([
     readableCheck,
     pointCountCheck,
@@ -124,6 +158,8 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     tooltipCheck,
     legendCheck,
     selfContainedCheck,
+    scientificCheck,
+    matlabCheck,
   ]);
 
   return {
@@ -146,6 +182,10 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     legendSeriesOk: legendCheck.ok,
     externalResources,
     selfContainedOk: selfContainedCheck.ok,
+    scientificContextOk: scientificCheck.ok,
+    scientificContext: scientificAudit.context,
+    matlabEvidenceOk: matlabCheck.ok,
+    matlabEvidence: matlabAudit.evidence,
     pointInteractionQualityOk: composed.qualityOk,
   };
 }
@@ -417,6 +457,53 @@ function inspectExternalResources(html) {
     }
   }
   return deduplicateViolations(violations);
+}
+
+function inspectScientificContext(html) {
+  const attributes = extractEvidenceAttributes(html);
+  const context = Object.fromEntries(REQUIRED_SCIENTIFIC_CONTEXT.map(([field, attribute]) => [field, normalizedValue(attributes[attribute])]));
+  const violations = REQUIRED_SCIENTIFIC_CONTEXT.flatMap(([field, attribute]) => context[field] ? [] : [{
+    rule: 'scientific-context-field-missing',
+    field,
+    attribute,
+  }]);
+  const start = Date.parse(context.timeStart);
+  const end = Date.parse(context.timeEnd);
+  if (context.timeStart && !Number.isFinite(start)) violations.push({ rule: 'scientific-time-invalid', field: 'timeStart' });
+  if (context.timeEnd && !Number.isFinite(end)) violations.push({ rule: 'scientific-time-invalid', field: 'timeEnd' });
+  if (Number.isFinite(start) && Number.isFinite(end) && end < start) violations.push({ rule: 'scientific-time-reversed' });
+  if (context.timezone && !/^utc(?:[+-]00(?::?00)?)?$/iu.test(context.timezone)) {
+    violations.push({ rule: 'scientific-timezone-not-utc', value: context.timezone });
+  }
+  if (context.anomalyStatus && !/^(?:present|absent|unknown|not-evaluated)$/u.test(context.anomalyStatus)) {
+    violations.push({ rule: 'scientific-anomaly-status-invalid', value: context.anomalyStatus });
+  }
+  return { ok: violations.length === 0, context, violations };
+}
+
+function inspectMatlabEvidence(html) {
+  const attributes = extractEvidenceAttributes(html);
+  const evidence = {
+    authoritativeRuntime: normalizedValue(attributes['data-authoritative-runtime']),
+    matlabRelease: normalizedValue(attributes['data-matlab-release']),
+    runtimeStatus: normalizedValue(attributes['data-runtime-status']),
+    executionVerified: normalizedValue(attributes['data-execution-verified']),
+    artifactValidation: normalizedValue(attributes['data-artifact-validation']),
+    visualInspection: normalizedValue(attributes['data-visual-inspection']),
+  };
+  const violations = [];
+  if (evidence.authoritativeRuntime !== 'MATLAB') violations.push({ rule: 'authoritative-runtime-not-matlab', value: evidence.authoritativeRuntime });
+  if (!/^R20\d{2}[ab]$/u.test(evidence.matlabRelease)) violations.push({ rule: 'matlab-release-invalid', value: evidence.matlabRelease });
+  if (evidence.runtimeStatus !== 'passed') violations.push({ rule: 'matlab-runtime-not-passed', value: evidence.runtimeStatus });
+  if (evidence.executionVerified !== 'true') violations.push({ rule: 'matlab-execution-unverified', value: evidence.executionVerified });
+  if (evidence.artifactValidation !== 'passed') violations.push({ rule: 'matlab-artifact-validation-not-passed', value: evidence.artifactValidation });
+  if (evidence.visualInspection !== 'passed') violations.push({ rule: 'matlab-visual-inspection-not-passed', value: evidence.visualInspection });
+  return { ok: violations.length === 0, evidence, violations };
+}
+
+function extractEvidenceAttributes(html) {
+  const match = stripHtmlComments(html).match(/<(?:html|body|main|section)\b([^>]*\bdata-snapshot-id\b[^>]*)>/iu);
+  return match ? parseAttributes(match[1]) : {};
 }
 
 function splitResourceReferences(value, attribute) {

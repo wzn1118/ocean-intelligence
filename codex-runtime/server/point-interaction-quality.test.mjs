@@ -71,6 +71,41 @@ test('accepts complete standalone point-temperature interaction HTML', () => {
   assert.equal(quality.pointInteractionQualityOk, true);
 });
 
+test('strict mode audits scientific context and real MATLAB evidence', () => {
+  const scientificAttributes = [
+    'data-snapshot-id="snapshot-20260905"',
+    'data-source="source-1"',
+    'data-variable="sea_water_temperature"',
+    'data-unit="degree_Celsius"',
+    'data-time-start="2026-09-03T00:00:00Z"',
+    'data-time-end="2026-09-03T01:00:00Z"',
+    'data-timezone="UTC"',
+    'data-spatial-coverage="Test Sea 120-121E 30-31N"',
+    'data-qc-summary="raw=2 valid=2 missing=0 qc_rejected=0"',
+    'data-uncertainty="instrument accuracy; calibration evidence limited"',
+    'data-anomaly-status="not-evaluated"',
+    'data-authoritative-runtime="MATLAB"',
+    'data-matlab-release="R2026a"',
+    'data-runtime-status="passed"',
+    'data-execution-verified="true"',
+    'data-artifact-validation="passed"',
+    'data-visual-inspection="passed"',
+  ].join(' ');
+  const html = validHtml().replace('<body>', `<body ${scientificAttributes}>`);
+  const quality = inspectPointInteractionQuality({ html, requireScientificEvidence: true, requireMatlabEvidence: true });
+  assert.equal(quality.scientificContextOk, true, JSON.stringify(quality.checkResults['scientific-context']));
+  assert.equal(quality.matlabEvidenceOk, true, JSON.stringify(quality.checkResults['matlab-evidence']));
+  assert.equal(quality.pointInteractionQualityOk, true);
+
+  const octave = inspectPointInteractionQuality({
+    html: html.replace('data-authoritative-runtime="MATLAB"', 'data-authoritative-runtime="Octave"'),
+    requireScientificEvidence: true,
+    requireMatlabEvidence: true,
+  });
+  assert.equal(octave.matlabEvidenceOk, false);
+  assert.equal(octave.checkResults['matlab-evidence'].violations[0].rule, 'authoritative-runtime-not-matlab');
+});
+
 test('rejects duplicate, missing and mismatched stable observation identities', () => {
   const duplicatePoints = validPoints();
   duplicatePoints[1].id = 'P1';

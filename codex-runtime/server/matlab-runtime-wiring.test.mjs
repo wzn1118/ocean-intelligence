@@ -27,7 +27,7 @@ test('runtime composition exposes release-aware exports and manifest without a p
   assert.equal(route.outputContract.exportStrategies.svg.api, 'print');
   assert.equal(route.outputContract.manifest.schemaVersion, 2);
   assert.equal(route.outputContract.manifest.path, 'artifacts/figures.json');
-  assert.deepEqual(route.runtimeCiMatrix.jobs.map((job) => job.targetRelease), ['R2020a', 'R2024b', 'R2026a']);
+  assert.deepEqual(route.runtimeCiMatrix.jobs.map((job) => job.targetRelease), ['R2021a', 'R2024b', 'R2026a']);
 });
 
 test('production wiring keeps MATLAB evidence external and rejects Octave relabeling', () => {

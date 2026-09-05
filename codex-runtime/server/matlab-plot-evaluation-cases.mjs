@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,7 +50,8 @@ const REQUIRED_PLOT_QUALITY_CRITERIA = Object.freeze([
 ]);
 
 const REQUIRED_PLOT_QUALITY_SIGNALS = Object.freeze([
-  'matlabPlotQualityOk', 'manifestOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk',
+  'matlabPlotQualityOk', 'manifestOk', 'manifestIntegrityOk', 'artifactsOk',
+  'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk', 'plotQualitySourceEvidenceOk',
 ]);
 
 export const MATLAB_PLOT_EVALUATION_CASES = Object.freeze([
@@ -644,7 +646,7 @@ export const MATLAB_PLOT_EVALUATION_CASES = Object.freeze([
       pdf: ['dual-print-export', 'artifact-verification'], manifest: ['manifest-after-artifacts'],
     },
     requiredQualityCriteria: ['clippingRisk', 'outputResolution'],
-    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk'],
+    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'manifestIntegrityOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk', 'plotQualitySourceEvidenceOk'],
   }),
   defineCase({
     id: 'invalid-mapping-toolbox-unavailable', category: '错误输入', runtime: 'matlab', release: 'R2024b', outcome: 'blocked',
@@ -707,7 +709,7 @@ export const MATLAB_PLOT_EVALUATION_CASES = Object.freeze([
     },
     adversarialFeatures: { 'release-api-drift': ['svg-release-plan', 'true-svg-print'], 'artifact-spoofing': ['three-artifact-verification', 'manifest-export-api'] },
     requiredQualityCriteria: ['clippingRisk', 'outputResolution'],
-    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk'],
+    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'manifestIntegrityOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk', 'plotQualitySourceEvidenceOk'],
   }),
   defineCase({
     id: 'user-zh-r2025a-native-svg', category: '导出失败修复', runtime: 'matlab', release: 'R2025a',
@@ -733,7 +735,7 @@ export const MATLAB_PLOT_EVALUATION_CASES = Object.freeze([
     },
     adversarialFeatures: { 'release-api-drift': ['native-svg-capability', 'native-three-format-export'], 'artifact-spoofing': ['three-artifact-verification', 'manifest-native-api'] },
     requiredQualityCriteria: ['clippingRisk', 'outputResolution'],
-    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk'],
+    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'manifestIntegrityOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk', 'plotQualitySourceEvidenceOk'],
   }),
   defineCase({
     id: 'user-zh-stale-manifest-repair', category: '导出失败修复', runtime: 'matlab', release: 'R2026a',
@@ -760,7 +762,7 @@ export const MATLAB_PLOT_EVALUATION_CASES = Object.freeze([
     },
     adversarialFeatures: { 'artifact-spoofing': ['artifact-derived-metadata', 'cross-format-provenance', 'relative-manifest-paths'], 'quality-score-spoofing': ['quality-inspection'] },
     requiredQualityCriteria: ['clippingRisk', 'outputResolution'],
-    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk'],
+    requiredQualitySignals: ['matlabPlotQualityOk', 'manifestOk', 'manifestIntegrityOk', 'artifactsOk', 'crossFormatMetadataOk', 'pngArtifactsOk', 'pdfArtifactsOk', 'plotQualitySourceEvidenceOk'],
   }),
   defineCase({
     id: 'adversarial-zh-section-shape-injection', category: '对抗输入', runtime: 'matlab', release: 'R2026a', outcome: 'reject',
@@ -1398,7 +1400,9 @@ function evaluateQuality(caseDefinition, candidate, taskRoute) {
     && artifactInspectionResult.manifestPresent === true
     && artifactInspectionResult.manifestParseOk === true
     && artifactInspectionResult.manifestFieldsOk === true
+    && artifactInspectionResult.manifestIntegrityOk === true
     && artifactInspectionResult.manifestFreshnessOk === true
+    && artifactInspectionResult.plotQualitySourceEvidenceOk === true
     && artifactInspectionResult.artifactPairsOk === true
     && Array.isArray(artifactInspectionResult.artifacts)
     && ['png', 'pdf'].every((format) => artifactInspectionResult.artifacts.some((artifact) => (
@@ -1410,11 +1414,14 @@ function evaluateQuality(caseDefinition, candidate, taskRoute) {
       && artifact.dimensionsOk === true
       && artifact.bytesOk === true
       && artifact.checksumOk === true
+      && artifact.pathOk === true
+      && (artifact.format !== 'png' || artifact.structureOk === true)
       && artifact.dpiOk === true
       && artifact.textOk === true
     )))
     && artifactInspectionResult.manifestOk === (
       artifactInspectionResult.manifestFieldsOk
+      && artifactInspectionResult.manifestIntegrityOk
       && artifactInspectionResult.artifactPairsOk
       && artifactInspectionResult.crossFormatMetadataOk
     )
@@ -1465,7 +1472,7 @@ function evaluateQuality(caseDefinition, candidate, taskRoute) {
 function inspectCandidateQualityEvidence(candidate) {
   const evidence = candidate?.qualityEvidence;
   if (!evidence || typeof evidence !== 'object') return undefined;
-  if (![evidence.sourcePath, evidence.manifestPath, evidence.outputDirectory].every(nonEmptyString)) return undefined;
+  if (!qualityEvidenceFilesMatch(evidence)) return undefined;
   try {
     return inspectMatlabPlotQuality({
       sourcePath: evidence.sourcePath,
@@ -1483,7 +1490,7 @@ function inspectCandidateQualityEvidence(candidate) {
 function scoreCandidateQualityEvidence(candidate) {
   const evidence = candidate?.qualityEvidence;
   if (!evidence || typeof evidence !== 'object') return undefined;
-  if (![evidence.sourcePath, evidence.manifestPath, evidence.outputDirectory].every(nonEmptyString)) return undefined;
+  if (!qualityEvidenceFilesMatch(evidence)) return undefined;
   try {
     return scoreMatlabPlotQuality({
       sourcePath: evidence.sourcePath,
@@ -1497,6 +1504,23 @@ function scoreCandidateQualityEvidence(candidate) {
   } catch {
     return undefined;
   }
+}
+
+function qualityEvidenceFilesMatch(evidence) {
+  if (![evidence.sourcePath, evidence.manifestPath, evidence.outputDirectory].every(nonEmptyString)) return false;
+  if (![evidence.sourceSha256, evidence.manifestSha256].every((value) => /^[a-f\d]{64}$/iu.test(String(value || '')))) {
+    return false;
+  }
+  try {
+    return fileSha256(evidence.sourcePath) === evidence.sourceSha256.toLowerCase()
+      && fileSha256(evidence.manifestPath) === evidence.manifestSha256.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function fileSha256(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
 function scoreFeatureDimensions(dimensions, featureIdsByDimension, requiredFeatures) {

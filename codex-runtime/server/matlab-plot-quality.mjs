@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_MINIMUM_WIDTH = 1200;
@@ -35,18 +36,12 @@ export function inspectMatlabPlotQuality(sourceOrOptions, manifestPath, outputDi
     text: readText(sourcePath),
   }));
   const sourceText = sources.map((source) => source.text).join('\n');
-  const executableSourceText = matlabExecutableText(sourceText);
   const sourceFilesPresent = sourcePaths.length > 0 && sources.every((source) => source.text !== '');
-  const sourceViolations = inspectSourceViolations(sources);
-  const prohibitedPatternsOk = sourceFilesPresent && sourceViolations.length === 0;
-  const themeUsageOk = sourceFilesPresent
-    && /\boi_ocean_theme\s*\(/iu.test(executableSourceText)
-    && /\boi_figure\s*\(/iu.test(executableSourceText)
-    && /\boi_apply_axes\s*\(/iu.test(executableSourceText);
-  const pngExportOk = sourceFilesPresent && hasPngExport(sourceText);
-  const pdfExportOk = sourceFilesPresent && hasPdfExport(sourceText);
-  const exportUsageOk = pngExportOk && pdfExportOk;
-  const sourceQualityOk = prohibitedPatternsOk && themeUsageOk && exportUsageOk;
+  const sourceContract = inspectSourceContract(sources, sourceText, sourceFilesPresent);
+  const {
+    sourceViolations, prohibitedPatternsOk, themeUsageOk, pngExportOk, pdfExportOk,
+    exportUsageOk, sourceQualityOk,
+  } = sourceContract;
 
   const resolvedManifestPath = resolveOptionalPath(options.manifestPath || options.figureManifestPath);
   const manifestRead = readManifest(resolvedManifestPath);
@@ -55,6 +50,7 @@ export function inspectMatlabPlotQuality(sourceOrOptions, manifestPath, outputDi
   const artifactRoot = resolveOptionalPath(options.outputDirectory || options.artifactDirectory)
     || manifestRoot;
   const figures = normalizeFigures(manifest?.figures);
+  const manifestIntegrity = inspectManifestIntegrity(manifest, figures);
   const manifestTopLevelMissingFields = missingFields(manifest, ['schema_version', 'generated_at', 'generator', 'figures']);
   const manifestEntries = figures.map((figure, index) => inspectManifestFigure(figure, index));
   const manifestMissingFields = manifestEntries.flatMap((entry) => entry.missingFields.map((field) => `${entry.id}.${field}`));
@@ -62,6 +58,7 @@ export function inspectMatlabPlotQuality(sourceOrOptions, manifestPath, outputDi
     && manifestTopLevelMissingFields.length === 0
     && figures.length > 0
     && manifestMissingFields.length === 0;
+  const manifestIntegrityOk = manifestRead.ok && manifestIntegrity.ok;
 
   const minimumWidth = positiveInteger(options.minimumWidth, DEFAULT_MINIMUM_WIDTH);
   const minimumHeight = positiveInteger(options.minimumHeight, DEFAULT_MINIMUM_HEIGHT);
@@ -95,7 +92,7 @@ export function inspectMatlabPlotQuality(sourceOrOptions, manifestPath, outputDi
     ))));
   const crossFormatMetadataOk = figures.length > 0
     && figures.every((figure, index) => inspectCrossFormatMetadata(figure, artifacts, index));
-  const manifestOk = manifestFieldsOk && artifactPairsOk && crossFormatMetadataOk;
+  const manifestOk = manifestFieldsOk && manifestIntegrityOk && artifactPairsOk && crossFormatMetadataOk;
   const artifactsOk = pngArtifactsOk && pdfArtifactsOk;
   const manifestFreshness = inspectManifestFreshness({
     manifest,
@@ -105,15 +102,17 @@ export function inspectMatlabPlotQuality(sourceOrOptions, manifestPath, outputDi
     toleranceMs: positiveInteger(options.freshnessToleranceMs, 2_000),
   });
   const manifestFreshnessOk = manifestFieldsOk && manifestFreshness.ok;
-  const plotQualityScore = scoreMatlabPlotQuality({
+  const plotQualityScore = buildPlotQualityScore({
     sourceText,
     sourceFilesPresent,
+    sourceQualityOk,
     manifest,
     artifacts,
     options,
     minimumWidth,
     minimumHeight,
-    artifactEvidenceOk: manifestOk && artifactsOk && manifestFreshnessOk,
+    sourceQualityOk,
+    artifactEvidenceOk: sourceQualityOk && manifestOk && artifactsOk && manifestFreshnessOk,
   });
 
   return {
@@ -128,6 +127,8 @@ export function inspectMatlabPlotQuality(sourceOrOptions, manifestPath, outputDi
     manifestPresent: manifestRead.present,
     manifestParseOk: manifestRead.parseOk,
     manifestFieldsOk,
+    manifestIntegrityOk,
+    manifestIntegrity,
     manifestOk,
     manifestFreshnessOk,
     manifestFreshness,
@@ -164,14 +165,17 @@ export function scoreMatlabPlotQuality(sourceOrOptions, manifestPath, outputDire
     options.matlabPath,
     options.scriptPath,
   ]).map((value) => path.resolve(value));
-  const sources = sourcePaths.map((sourcePath) => readText(sourcePath));
-  const sourceText = sources.join('\n');
+  const sources = sourcePaths.map((sourcePath) => ({ path: sourcePath, text: readText(sourcePath) }));
+  const sourceText = sources.map((source) => source.text).join('\n');
+  const sourceFilesPresent = sourcePaths.length > 0 && sources.every((source) => source.text !== '');
+  const sourceContract = inspectSourceContract(sources, sourceText, sourceFilesPresent);
   const resolvedManifestPath = resolveOptionalPath(options.manifestPath || options.figureManifestPath);
   const manifestRead = readManifest(resolvedManifestPath);
   const manifest = manifestRead.value;
   const artifactRoot = resolveOptionalPath(options.outputDirectory || options.artifactDirectory)
     || (resolvedManifestPath ? path.dirname(resolvedManifestPath) : process.cwd());
   const figures = normalizeFigures(manifest?.figures);
+  const manifestIntegrity = inspectManifestIntegrity(manifest, figures);
   const minimumWidth = positiveInteger(options.minimumWidth, DEFAULT_MINIMUM_WIDTH);
   const minimumHeight = positiveInteger(options.minimumHeight, DEFAULT_MINIMUM_HEIGHT);
   const artifacts = figures.flatMap((figure, index) => inspectFigureArtifacts({
@@ -206,19 +210,22 @@ export function scoreMatlabPlotQuality(sourceOrOptions, manifestPath, outputDire
   const artifactsOk = artifacts.length === figures.length * 2 && artifacts.every((artifact) => artifact.ok);
   return buildPlotQualityScore({
     sourceText,
-    sourceFilesPresent: sourcePaths.length > 0 && sources.every((source) => source !== ''),
+    sourceFilesPresent,
+    sourceQualityOk: sourceContract.sourceQualityOk,
     manifest,
     artifacts,
     options,
     minimumWidth,
     minimumHeight,
-    artifactEvidenceOk: manifestFieldsOk && artifactPairsOk && artifactsOk && manifestFreshness.ok,
+    artifactEvidenceOk: sourceContract.sourceQualityOk && manifestFieldsOk && manifestIntegrity.ok
+      && artifactPairsOk && artifactsOk && manifestFreshness.ok,
   });
 }
 
 function buildPlotQualityScore({
   sourceText,
   sourceFilesPresent,
+  sourceQualityOk,
   manifest,
   artifacts,
   options,
@@ -291,11 +298,35 @@ function buildPlotQualityScore({
     plotQualityScore: score,
     plotQualityScoreMax: 100,
     plotQualityGrade: score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F',
-    plotQualityScoreOk: sourceFilesPresent && score >= positiveInteger(options.minimumPlotQualityScore, 70),
+    plotQualityScoreOk: sourceFilesPresent && sourceQualityOk
+      && score >= positiveInteger(options.minimumPlotQualityScore, 70),
     plotQualityCriteria: criteria,
     plotQualityIssues: failedCriteria.flatMap((name) => criteria[name].issues.map((issue) => `${name}: ${issue}`)),
     plotQualityEvidence: Object.fromEntries(SCORE_CRITERIA.map((name) => [name, criteria[name].evidence])),
     plotQualityArtifactEvidenceOk: artifactEvidenceOk,
+    plotQualitySourceEvidenceOk: sourceQualityOk,
+  };
+}
+
+function inspectSourceContract(sources, sourceText, sourceFilesPresent) {
+  const executableSourceText = matlabExecutableText(sourceText);
+  const sourceViolations = inspectSourceViolations(sources);
+  const prohibitedPatternsOk = sourceFilesPresent && sourceViolations.length === 0;
+  const themeUsageOk = sourceFilesPresent
+    && /\boi_ocean_theme\s*\(/iu.test(executableSourceText)
+    && /\boi_figure\s*\(/iu.test(executableSourceText)
+    && /\boi_apply_axes\s*\(/iu.test(executableSourceText);
+  const pngExportOk = sourceFilesPresent && hasPngExport(sourceText);
+  const pdfExportOk = sourceFilesPresent && hasPdfExport(sourceText);
+  const exportUsageOk = pngExportOk && pdfExportOk;
+  return {
+    sourceViolations,
+    prohibitedPatternsOk,
+    themeUsageOk,
+    pngExportOk,
+    pdfExportOk,
+    exportUsageOk,
+    sourceQualityOk: prohibitedPatternsOk && themeUsageOk && exportUsageOk,
   };
 }
 
@@ -410,6 +441,31 @@ function inspectManifestFigure(figure, index) {
   };
 }
 
+function inspectManifestIntegrity(manifest, figures) {
+  const violations = [];
+  if (manifest?.schema_version !== 2) violations.push('schema_version.expected_2');
+  const ids = new Set();
+  const artifactFiles = new Set();
+  let previousId = '';
+  figures.forEach((figure, index) => {
+    const id = nonEmptyString(figure?.id) ? figure.id : '';
+    if (!id) return;
+    if (ids.has(id)) violations.push(`figures[${index}].id.duplicate`);
+    if (previousId && id < previousId) violations.push(`figures[${index}].id.order`);
+    ids.add(id);
+    previousId = id;
+    const formats = normalizeExports(figure.exports);
+    for (const format of ['png', 'pdf']) {
+      const file = formats[format]?.file;
+      if (!validArtifactReference(file)) continue;
+      const normalized = path.normalize(file);
+      if (artifactFiles.has(normalized)) violations.push(`figures[${index}].exports.${format}.file.duplicate`);
+      artifactFiles.add(normalized);
+    }
+  });
+  return { ok: violations.length === 0, violations };
+}
+
 function missingExportFields(exportsValue) {
   const formats = normalizeExports(exportsValue);
   const missing = [];
@@ -457,12 +513,14 @@ function inspectFigureArtifacts({
     const metadata = formats[format];
     if (!metadata) return [];
     const filePath = resolveArtifactPath(metadata.file, artifactRoot);
+    const location = inspectArtifactLocation(filePath, artifactRoot);
     if (format === 'png') {
       return [inspectPngArtifact({
         figureIndex: index,
         id,
         metadata,
         filePath,
+        location,
         minimumWidth,
         minimumHeight,
         minimumPngBytes,
@@ -473,6 +531,7 @@ function inspectFigureArtifacts({
       id,
       metadata,
       filePath,
+      location,
       artifactRoot,
       minimumPdfBytes,
       minimumPdfTextCharacters,
@@ -485,6 +544,7 @@ function inspectPngArtifact({
   id,
   metadata,
   filePath,
+  location,
   minimumWidth,
   minimumHeight,
   minimumPngBytes,
@@ -515,9 +575,13 @@ function inspectPngArtifact({
     dimensionsOk,
     bytesOk,
     checksumOk,
+    pathOk: location.ok,
+    pathViolations: location.violations,
+    structureOk: dimensions?.structureOk === true,
     dpiOk,
     textOk: true,
-    ok: fileInfo.present && dimensionsOk && bytesOk && checksumOk && dpiOk,
+    ok: fileInfo.present && location.ok && dimensions?.structureOk === true
+      && dimensionsOk && bytesOk && checksumOk && dpiOk,
   };
 }
 
@@ -526,6 +590,7 @@ function inspectPdfArtifact({
   id,
   metadata,
   filePath,
+  location,
   artifactRoot,
   minimumPdfBytes,
   minimumPdfTextCharacters,
@@ -556,10 +621,12 @@ function inspectPdfArtifact({
     dimensionsOk,
     bytesOk,
     checksumOk,
+    pathOk: location.ok,
+    pathViolations: location.violations,
     dpiOk: true,
     textOk,
     text: normalizedText,
-    ok: fileInfo.present && dimensionsOk && bytesOk && checksumOk && textOk,
+    ok: fileInfo.present && location.ok && dimensionsOk && bytesOk && checksumOk && textOk,
   };
 }
 
@@ -673,6 +740,25 @@ function inspectFile(filePath) {
   }
 }
 
+function inspectArtifactLocation(filePath, artifactRoot) {
+  const violations = [];
+  if (!filePath || !artifactRoot) return { ok: false, violations: ['path.missing'] };
+  try {
+    const root = realpathSync(artifactRoot);
+    const stats = lstatSync(filePath);
+    if (stats.isSymbolicLink()) violations.push('path.symlink');
+    if (!stats.isFile()) violations.push('path.not_regular_file');
+    const resolved = realpathSync(filePath);
+    const relative = path.relative(root, resolved);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      violations.push('path.outside_output_directory');
+    }
+  } catch {
+    violations.push('path.unresolvable');
+  }
+  return { ok: violations.length === 0, violations };
+}
+
 function inspectManifestFreshness({ manifest, manifestPath, sourcePaths, artifacts, toleranceMs }) {
   const violations = [];
   const generatedAtMs = Date.parse(String(manifest?.generated_at || ''));
@@ -711,14 +797,21 @@ function inspectManifestFreshness({ manifest, manifestPath, sourcePaths, artifac
 
 function readPngDimensions(filePath) {
   try {
-    const header = readFileSync(filePath).subarray(0, 24);
+    const data = readFileSync(filePath);
+    const header = data.subarray(0, 24);
     const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
     if (header.length < 24 || !header.subarray(0, 8).equals(signature) || header.toString('ascii', 12, 16) !== 'IHDR') {
       return undefined;
     }
+    const ihdrLengthOk = header.readUInt32BE(8) === 13;
+    const iend = data.subarray(Math.max(0, data.length - 12));
+    const iendOk = iend.length === 12
+      && iend.readUInt32BE(0) === 0
+      && iend.toString('ascii', 4, 8) === 'IEND';
     return {
       width: header.readUInt32BE(16),
       height: header.readUInt32BE(20),
+      structureOk: ihdrLengthOk && iendOk,
     };
   } catch {
     return undefined;
@@ -752,9 +845,13 @@ function approximatelyEqual(actual, expected) {
 }
 
 function pdfAuditText(metadata, filePath, artifactRoot) {
-  if (nonEmptyString(metadata.text)) return metadata.text;
-  if (nonEmptyString(metadata.text_file)) return readText(resolveArtifactPath(metadata.text_file, artifactRoot));
   if (!filePath || !existsSync(filePath)) return '';
+  const extracted = spawnSync('pdftotext', ['-enc', 'UTF-8', filePath, '-'], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    timeout: 5_000,
+  });
+  if (extracted.status === 0 && nonEmptyString(extracted.stdout)) return extracted.stdout;
   try {
     const pdfText = readFileSync(filePath, 'latin1');
     return [...pdfText.matchAll(/\(([^()]*)\)\s*Tj/gu), ...pdfText.matchAll(/\[(.*?)\]\s*TJ/gsu)]

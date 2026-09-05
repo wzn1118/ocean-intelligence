@@ -63,19 +63,89 @@ probe = struct( ...
     "products", product_records(ver));
 write_json(fullfile(output_root, "matlab-runtime-probe.json"), probe);
 
-run_plot_regression(regression_directory);
-full100_family_a_contracts;
-full100_family_b_runtime(family_b_directory);
-full100_family_c_contracts;
-cd(export_directory);
-run(fullfile(tests_directory, "full100_export_runtime_gate.m"));
-cd(repository_root);
-run_interaction_acceptance("headless", interaction_output);
-run_matlab_gate(fixture_directory, evaluator_output, nonce);
+stage_status_path = fullfile(output_root, "ci-stage-status.json");
+stage_records = repmat(struct( ...
+    "id", "", ...
+    "status", "pending", ...
+    "started_at", "", ...
+    "completed_at", "", ...
+    "error_identifier", "", ...
+    "error_message", "", ...
+    "error_report", ""), 0, 1);
+
+[stage_records, ~] = run_stage(stage_records, "plot-regression", ...
+    @() run_plot_regression(regression_directory), stage_status_path, expected_release);
+[stage_records, ~] = run_stage(stage_records, "family-a-contracts", ...
+    @() full100_family_a_contracts, stage_status_path, expected_release);
+[stage_records, ~] = run_stage(stage_records, "family-b-runtime", ...
+    @() full100_family_b_runtime(family_b_directory), stage_status_path, expected_release);
+[stage_records, ~] = run_stage(stage_records, "family-c-contracts", ...
+    @() full100_family_c_contracts, stage_status_path, expected_release);
+[stage_records, ~] = run_stage(stage_records, "export-runtime", ...
+    @() run_export_gate(export_directory, tests_directory), stage_status_path, expected_release);
+[stage_records, ~] = run_stage(stage_records, "interaction-headless", ...
+    @() run_interaction_acceptance("headless", interaction_output), stage_status_path, expected_release);
+[stage_records, ~] = run_stage(stage_records, "evaluator-runtime", ...
+    @() run_matlab_gate(fixture_directory, evaluator_output, nonce), stage_status_path, expected_release);
+
+failed_stages = stage_records([stage_records.status] == "failed");
+if ~isempty(failed_stages)
+    failed_ids = strjoin([failed_stages.id], ", ");
+    error("run_github_full100:StagesFailed", ...
+        "MATLAB full-score stages failed: %s. See %s", failed_ids, stage_status_path);
+end
 
 clear visibility_cleanup directory_cleanup;
 fprintf("MATLAB_FULL100_RELEASE=%s\n", expected_release);
 fprintf("MATLAB_FULL100_OUTPUT=%s\n", output_root);
+end
+
+function [records, passed] = run_stage(records, stage_id, callback, status_path, expected_release)
+record = struct( ...
+    "id", string(stage_id), ...
+    "status", "running", ...
+    "started_at", utc_timestamp(), ...
+    "completed_at", "", ...
+    "error_identifier", "", ...
+    "error_message", "", ...
+    "error_report", "");
+records(end + 1, 1) = record;
+write_stage_status(status_path, expected_release, records);
+try
+    callback();
+    records(end).status = "passed";
+    passed = true;
+catch stage_error
+    records(end).status = "failed";
+    records(end).error_identifier = string(stage_error.identifier);
+    records(end).error_message = string(stage_error.message);
+    records(end).error_report = string(getReport(stage_error, "extended", "hyperlinks", "off"));
+    passed = false;
+end
+records(end).completed_at = utc_timestamp();
+write_stage_status(status_path, expected_release, records);
+end
+
+function run_export_gate(export_directory, tests_directory)
+old_directory = pwd;
+cleanup = onCleanup(@() cd(old_directory));
+cd(export_directory);
+run(fullfile(tests_directory, "full100_export_runtime_gate.m"));
+clear cleanup;
+end
+
+function write_stage_status(path, expected_release, stages)
+payload = struct( ...
+    "schema_version", 1, ...
+    "generated_at", utc_timestamp(), ...
+    "expected_release", string(expected_release), ...
+    "stages", stages);
+write_json(path, payload);
+end
+
+function value = utc_timestamp()
+value = string(datetime("now", "TimeZone", "UTC", ...
+    "Format", "yyyy-MM-dd'T'HH:mm:ss'Z'"));
 end
 
 function records = product_records(products)

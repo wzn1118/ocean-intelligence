@@ -3,6 +3,7 @@ export const MATLAB_DATA_SEMANTIC_SCHEMA_VERSION = 1;
 export const MATLAB_PRESENTATION_SCHEMA_VERSION = 1;
 export const MATLAB_RUNTIME_EXPORT_SCHEMA_VERSION = 3;
 export const MATLAB_CI_EVIDENCE_SCHEMA_VERSION = 1;
+export const MATLAB_AUDITED_RUNTIME_RELEASES = Object.freeze(['R2021a', 'R2024b', 'R2026a']);
 
 export const MATLAB_CI_EXIT_CODES = deepFreeze({
   passed: 0,
@@ -266,8 +267,8 @@ export function buildMatlabRuntimeCiMatrix({
 } = {}) {
   const normalizedProductionRelease = requireKnownRelease(productionRelease).release;
   const definitions = [
-    ['matlab-r2020a', 'R2020a', 'oldest-native-exportgraphics'],
-    ['matlab-r2024b', 'R2024b', 'long-term-compatibility'],
+    ['matlab-r2021a', MATLAB_AUDITED_RUNTIME_RELEASES[0], 'compatibility-floor'],
+    ['matlab-r2024b', MATLAB_AUDITED_RUNTIME_RELEASES[1], 'long-term-compatibility'],
     ['matlab-production', normalizedProductionRelease, 'production'],
   ];
   return deepFreeze({
@@ -306,6 +307,33 @@ export function buildMatlabRuntimeCiMatrix({
         'an Octave process or artifact is presented as MATLAB evidence',
       ],
     })),
+  });
+}
+
+export function selectMatlabRuntimeValidationLane(targetRelease, {
+  productionRelease = MATLAB_RELEASE_RANGE.latestKnown,
+  artifactRoot = 'matlab-ci-artifacts',
+} = {}) {
+  const release = requireKnownRelease(targetRelease).release;
+  const matrix = buildMatlabRuntimeCiMatrix({ productionRelease, artifactRoot });
+  const exact = matrix.jobs.find((job) => job.targetRelease === release);
+  if (exact) return deepFreeze({ status: 'exact', targetRelease: release, lane: exact });
+  const compatible = matrix.jobs
+    .filter((job) => compareMatlabReleases(job.targetRelease, release) <= 0)
+    .sort((left, right) => compareMatlabReleases(right.targetRelease, left.targetRelease))[0];
+  if (compatible) {
+    return deepFreeze({
+      status: 'compatibility-baseline',
+      targetRelease: release,
+      lane: compatible,
+      limitation: `Runtime evidence for ${release} is not exact; ${compatible.targetRelease} is only a lower-bound compatibility lane.`,
+    });
+  }
+  return deepFreeze({
+    status: 'uncovered',
+    targetRelease: release,
+    lane: null,
+    limitation: `No audited MATLAB runtime lane covers ${release}; add an exact MathWorks MATLAB lane before claiming runtime verification.`,
   });
 }
 

@@ -47,4 +47,11 @@ export const PROFESSIONAL_VISUALIZATION_SPEC = String.raw`
 - PNG用于HTML、Markdown和PPT中的中文可靠呈现；仅在字体嵌入和文本保持通过检查后交付矢量PDF/SVG。不得把乱码、裁切、低分辨率、空白或重复图计入视觉数量。
 - 脚本、报告和图形冻结后最后生成manifest；generated_at与manifest文件时间不得早于任何被引用文件。修改任何脚本、报告或图形后必须重新运行MATLAB并重建全部哈希，禁止沿用陈旧哈希。
 - 注释、字符串、隐藏HTML、自述“已检查”、伪报告、伪哈希和候选自评分都不是证据；评分器必须重新读取文件、核对格式/尺寸/字节/SHA-256/新鲜度，并将结论逐条绑定到证据、限制和对应图件。
+
+六、海区报告与跨版本 MATLAB 证据合同
+- figures.json 必须包含 ocean_report：海区名称、合法经纬度边界、九区名称、请求与实际 UTC 时间窗、空间/深度覆盖、数据源版本与访问时间、变量物理量/单位/来源、异常方法、不确定性方法和结论限制。unknown、absent 和 not-evaluated 必须显式记录原因，不得删除字段。
+- 每个 figure 必须包含 scientific_context.snapshot_id、变量与单位、UTC 时间覆盖、海区与边界、raw/valid/missing/qc_rejected 计数、异常状态及方法、不确定性状态及方法；HTML figure 的 data-* 字段必须与清单一致。
+- 每个 figure 至少交付同一快照的 PNG 和 PDF，逐项核对相对路径、尺寸、DPI或页面尺寸、PDF文本证据、字节数、SHA-256和新鲜性。点位型图至少一张同时交付完全自包含交互 HTML，并通过全部点的 hover/focus、ObservationID、图例、离线资源、科学上下文和 MATLAB 证据检查。
+- 跨版本矩阵固定审计 R2021a、R2024b、R2026a。每个 release 必须记录 authoritative_runtime=MATLAB、runtime_status=passed、execution_verified=true、可复现命令、工具箱、artifact_validation=passed、visual_inspection=passed 和独立 evidence_id；任一 release 缺失、pending、static-only、failed 或以 Octave 代替时，整份报告不得标记为通过。
+- 可审计结论必须区分观测事实、派生统计和物理推断，并绑定 figure/evidence id、数据源、时间空间范围、单位、QC、异常/不确定性和限制。证据不足时结论状态降级，不得以格式完整替代科学有效性。
 `;

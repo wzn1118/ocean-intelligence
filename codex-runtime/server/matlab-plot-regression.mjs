@@ -461,7 +461,7 @@ function inspectFigure({ figure, index, outputDirectory, baselineDirectory, requ
   const accessibility = inspectAccessibility(figure.accessibility, options);
   const science = inspectScienceContract(figure, options);
   const publication = inspectPublicationContract(figure, options);
-  const interaction = inspectInteractionContract(figure, options);
+  const interaction = inspectInteractionContract(figure, options, outputDirectory);
   const artifacts = {};
   let artifactsOk = true;
   let pixelDiffOk = true;
@@ -778,7 +778,7 @@ function inspectPublicationContract(figure, options) {
   };
 }
 
-function inspectInteractionContract(figure, options) {
+function inspectInteractionContract(figure, options, outputDirectory) {
   const contract = figure.interaction || figure.interactive_contract;
   const required = options.requireInteractionContract === true;
   if (!contract || typeof contract !== 'object') {
@@ -806,6 +806,11 @@ function inspectInteractionContract(figure, options) {
     if (contract.observation_id_mapping !== true) violations.push('observation_id_mapping');
     if (contract.cleanup_verified !== true) violations.push('cleanup_verified');
   }
+  const evidence = inspectInteractionEvidence(contract.evidence, outputDirectory, options);
+  const evidenceRequired = options.requireInteractionEvidence === true || enabled;
+  if (evidenceRequired && !evidence.ok) {
+    violations.push(...evidence.violations.map((violation) => `evidence.${violation}`));
+  }
   if (requested && !desktopAvailable) {
     if (enabled) violations.push('headless.enabled');
     if (headless.supported !== true) violations.push('headless.supported');
@@ -824,6 +829,54 @@ function inspectInteractionContract(figure, options) {
     requested,
     enabled,
     desktopAvailable,
+    evidenceRequired,
+    evidence,
+    violations,
+  };
+}
+
+function inspectInteractionEvidence(metadata, outputDirectory, options) {
+  const violations = [];
+  if (!metadata || typeof metadata !== 'object') {
+    return { present: false, ok: false, violations: ['missing'] };
+  }
+  if (!relativeFile(metadata.file)) violations.push('file');
+  if (!positiveInteger(metadata.bytes)) violations.push('bytes');
+  if (!/^[a-f\d]{64}$/iu.test(String(metadata.sha256 || ''))) violations.push('sha256');
+  if (!validUtcTimestamp(metadata.generated_at)) violations.push('generated_at');
+  const filePath = resolveArtifactPath(metadata.file, outputDirectory);
+  const fileInfo = inspectFile(filePath);
+  if (!fileInfo.present) violations.push('file.missing');
+  if (fileInfo.present && fileInfo.bytes !== metadata.bytes) violations.push('bytes.mismatch');
+  if (fileInfo.present && sha256(filePath) !== String(metadata.sha256 || '').toLowerCase()) {
+    violations.push('sha256.mismatch');
+  }
+  const payloadRead = readJson(filePath, positiveInteger(options.maximumInteractionEvidenceBytes, 1024 * 1024));
+  if (!payloadRead.parseOk) violations.push('payload.invalid_json');
+  const payload = payloadRead.value || {};
+  if (normalizeStatus(payload.runtime) !== 'matlab') violations.push('payload.runtime');
+  if (payload.execution_verified !== true) violations.push('payload.execution_verified');
+  if (!/^R\d{4}[ab]$/u.test(String(payload.matlab_release || ''))) violations.push('payload.matlab_release');
+  if (!nonEmptyString(payload.nonce)) violations.push('payload.nonce');
+  if (nonEmptyString(options.expectedInteractionNonce) && payload.nonce !== options.expectedInteractionNonce) {
+    violations.push('payload.nonce.mismatch');
+  }
+  const events = objectList(payload.events);
+  const dataTip = events.some((event) => normalizeStatus(event.type) === 'datatip'
+    && nonEmptyString(event.observation_id));
+  const brush = events.some((event) => normalizeStatus(event.type) === 'brush'
+    && Array.isArray(event.observation_ids) && event.observation_ids.length > 0
+    && event.observation_ids.every(nonEmptyString));
+  if (!dataTip) violations.push('payload.events.datatip');
+  if (!brush) violations.push('payload.events.brush');
+  return {
+    present: true,
+    ok: violations.length === 0,
+    file: filePath,
+    runtime: payload.runtime,
+    matlabRelease: payload.matlab_release,
+    nonce: payload.nonce,
+    eventCount: events.length,
     violations,
   };
 }

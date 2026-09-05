@@ -58,17 +58,28 @@ end
 assert(usejava("jvm"), "oi_export_figure:JVMRequired", ...
     "The MATLAB JVM is required for canonical paths and SHA-256 verification");
 outputDirectory = string(char(java.io.File(char(outputDirectory)).getCanonicalPath()));
-pngPath = fullfile(outputDirectory, figureId + ".png");
-pdfPath = fullfile(outputDirectory, figureId + ".pdf");
-svgPath = fullfile(outputDirectory, figureId + ".svg");
-artifactPaths = [pngPath pdfPath];
+finalPngPath = fullfile(outputDirectory, figureId + ".png");
+finalPdfPath = fullfile(outputDirectory, figureId + ".pdf");
+finalSvgPath = fullfile(outputDirectory, figureId + ".svg");
+finalArtifactPaths = [finalPngPath finalPdfPath];
 if options.ExportSVG
-    artifactPaths(end + 1) = svgPath;
+    finalArtifactPaths(end + 1) = finalSvgPath;
 end
-assert(~any(isfile(artifactPaths)), "oi_export_figure:StaleArtifact", ...
+assert(~any(isfile(finalArtifactPaths)), "oi_export_figure:StaleArtifact", ...
     "Refusing to overwrite an existing export artifact");
+stagingDirectory = string(tempname(outputDirectory));
+[stagingCreated, stagingMessage] = mkdir(stagingDirectory);
+assert(stagingCreated, "oi_export_figure:CreateStagingDirectory", "%s", stagingMessage);
+pngPath = fullfile(stagingDirectory, figureId + ".png");
+pdfPath = fullfile(stagingDirectory, figureId + ".pdf");
+svgPath = fullfile(stagingDirectory, figureId + ".svg");
+stagedArtifactPaths = [pngPath pdfPath];
+if options.ExportSVG
+    stagedArtifactPaths(end + 1) = svgPath;
+end
 exportSucceeded = false;
 artifactCleanup = onCleanup(@cleanup_failed_export);
+exportStartedAt = utc_timestamp();
 widthInches = widthPixels / dpi;
 heightInches = heightPixels / dpi;
 widthPoints = widthInches * 72;
@@ -183,10 +194,22 @@ entry.rendering_evidence = struct("drawnow_completed", true, ...
     "normalized_margins", normalizedMargins, ...
     "font_selection_verified", fontSelectionVerified, ...
     "cjk_font_candidate_verified", cjkFontVerified, ...
+    "cjk_font_evidence", struct("text_present", cjkTextPresent, ...
+        "candidate_verified", cjkFontVerified, ...
+        "selected_fonts", selectedFonts, ...
+        "verification_method", "installed font-name allowlist", ...
+        "glyph_rendering_verified", false), ...
     "png_embedded_dpi_verified", isfinite(embeddedDpiX) && isfinite(embeddedDpiY), ...
     "physical_dimensions_verified", true, ...
     "visual_inspection_verified", false, ...
     "pdf_font_embedding_verified", false);
+entry.artifact_freshness = struct( ...
+    "export_started_at", exportStartedAt, ...
+    "export_completed_at", utc_timestamp(), ...
+    "created_in_unique_staging_directory", true, ...
+    "preexisting_destination_rejected", true, ...
+    "content_verified_before_promotion", true, ...
+    "promotion_strategy", "same-filesystem rename");
 entry.publication = struct( ...
     "layout", struct("stable", true, "overlap_count", textOverlapCount, ...
         "clipped_count", clippedCount, "margins", normalizedMargins), ...
@@ -235,12 +258,18 @@ if options.ExportSVG
         "export_device", entry.runtime.export_device.svg, "description", altText, ...
         "accessible_name", altText);
 end
+promote_artifacts(stagedArtifactPaths, finalArtifactPaths);
+verify_promoted_artifacts(finalArtifactPaths, entry.exports);
 exportSucceeded = true;
 clear artifactCleanup;
 
     function cleanup_failed_export()
         if ~exportSucceeded
-            delete_artifacts(artifactPaths);
+            delete_artifacts(finalArtifactPaths);
+            delete_artifacts(stagedArtifactPaths);
+        end
+        if isfolder(stagingDirectory)
+            rmdir(stagingDirectory, "s");
         end
     end
 end
@@ -877,4 +906,38 @@ for pathIndex = 1:numel(artifactPaths)
         delete(artifactPaths(pathIndex));
     end
 end
+end
+
+function promote_artifacts(stagedPaths, finalPaths)
+assert(numel(stagedPaths) == numel(finalPaths), ...
+    "oi_export_figure:PromotionMismatch", ...
+    "Staged and final artifact sets must have the same size");
+for pathIndex = 1:numel(stagedPaths)
+    assert(~isfile(finalPaths(pathIndex)), "oi_export_figure:StaleArtifact", ...
+        "A destination artifact appeared during export: %s", finalPaths(pathIndex));
+    [moved, message] = movefile(stagedPaths(pathIndex), finalPaths(pathIndex));
+    assert(moved, "oi_export_figure:PromotionFailed", ...
+        "Cannot atomically promote %s: %s", finalPaths(pathIndex), message);
+end
+end
+
+function verify_promoted_artifacts(finalPaths, exports)
+formats = ["png" "pdf"];
+if isfield(exports, "svg")
+    formats(end + 1) = "svg";
+end
+for pathIndex = 1:numel(finalPaths)
+    info = verify_file(finalPaths(pathIndex), formats(pathIndex));
+    record = exports.(char(formats(pathIndex)));
+    assert(info.bytes == record.bytes ...
+        && strcmpi(string(info.sha256), string(record.sha256)), ...
+        "oi_export_figure:PromotionVerification", ...
+        "Promoted artifact differs from the verified staged artifact: %s", ...
+        finalPaths(pathIndex));
+end
+end
+
+function value = utc_timestamp()
+value = char(datetime("now", "TimeZone", "UTC", ...
+    "Format", "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"));
 end
