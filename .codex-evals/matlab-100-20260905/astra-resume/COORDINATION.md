@@ -34,6 +34,7 @@
 | [33984097740](https://github.com/wzn1118/ocean-intelligence/actions/runs/33984097740) | `9adb2a5` | 33/42 阶段通过；三版本原始评分均 90/100 | 四图十二产物及无桌面交互完成；R2024b/R2026a 已产报告，R2021a 因版本字段错误被报告拒绝；视觉未通过 |
 | [33984666441](https://github.com/wzn1118/ocean-intelligence/actions/runs/33984666441) | `562ba87` | 39/42 阶段通过；三版本原始评分均 90/100 | R2021a/R2024b 14/14，R2026a 11/14；三版本均生成报告，新版原生三格式与外部检查通过，但整体 CI 仍失败 |
 | [33985570222](https://github.com/wzn1118/ocean-intelligence/actions/runs/33985570222) | `12897f2` | 35/45 阶段通过；原始评分为 0/90/0 | 严格裁切检查拦截真实轻微越界；R2024b 完成四图、输入快照绑定及中文报告，PDF 字体仍失败；三版字体后端探针完成 |
+| [33986526345](https://github.com/wzn1118/ocean-intelligence/actions/runs/33986526345) | `8eed9d6` | 39/45 阶段通过；原始评分为 0/90/0 | 三版主回归、manifest 完整性和交互兼容均通过；紧凑图图例、评测页边距/长图例及 R2026a 字号刷新仍阻塞；全部 CI 仍失败 |
 
 阶段数不是能力分数。各轮的 90 分只是当时评分器原始输出，不能当成全量验收。33984097740 暴露的版本字段校验已加强；33984666441 尚无输入快照绑定，下一轮必须提供真实输入副本与哈希，缺失旧包不能冒充新协议通过。
 
@@ -58,9 +59,20 @@
 - 汇总器已纳入外部 PDF 字体与 CI 后处理失败，明确标注本地证据推断；旧包的视觉 pending 不再掩盖已知失败。
 - R2024b 新报告的三份输入快照与 MATLAB 消费字节、统计输入哈希一致，仍仅为合成基准，不代表真实海区。
 
+## 第六批接续
+
+- 直接修复内置脚本生成器：绘图前固定真实英寸、交互模板传递尺寸与 DPI、使用精确字体匹配、同步显式主题，导出后读取真实几何证据。
+- 新增两个由真实服务器路由生成并由 MATLAB 执行的脚本 smoke，覆盖静态和 headless 交互时间序列。它们不是全部路由实跑，也不新增评分权重。
+- 出版小图与 evaluator 使用原生 tiledlayout 为图例/色条分配独立区域，保留原尺寸、文字、字体大小和严格页边距。
+- 三版公开探针确认 layout.Text 无 Units/Extent/Position，getpixelposition 返回零矩形。记录未测量文字与覆盖缺口，不能制造几何或把零矩形算作通过。
+- R2026a 字体改变后仅 drawnow 仍返回占位尺寸；独立几何测试必须先实际原生渲染每个状态，再测量，保留真实裁切负例。
+- 旧版默认 print 与 painters 对照均仍出现未嵌入 Courier。后处理额外 MATLAB 探针失败的具体原因尚未取证，新增有限诊断，不绕过运行时或人工视觉门禁。
+- 第五批另有 12 个原件的限定视觉复查，见 `visual-review-33986526345.md`：R26 长 Ylabel、比较图统计区和完整日期刻度仍有问题，R24 PDF 仍有裁切和图例越框。不能将第五批 39/45 当成视觉通过。
+- 推送前本地检查：49 个 MATLAB 文件通过 R2021a 语法检查，144 个 Python 测试、全部已跟踪服务器 Node 测试、8 个新生成器 smoke 测试和资产静态检查通过。新 MATLAB 路由脚本尚待第六批真实运行。
+
 ## 证据位置
 
-- 下载根目录：`/tmp/matlab-run-33981675642`、`/tmp/matlab-run-33983591040`、`/tmp/matlab-run-33984097740`、`/tmp/matlab-run-33984666441`、`/tmp/matlab-run-33985570222`。
-- 最新阶段汇总：`/tmp/matlab-ci-summary-33985570222/summary.md`；上一轮后处理修正汇总为 `/tmp/matlab-ci-summary-33984666441-postprocessing/summary.md`。权威远端状态仍以对应 GitHub 运行结论为准。
+- 下载根目录：`/tmp/matlab-run-33981675642`、`/tmp/matlab-run-33983591040`、`/tmp/matlab-run-33984097740`、`/tmp/matlab-run-33984666441`、`/tmp/matlab-run-33985570222`、`/tmp/matlab-run-33986526345`。
+- 最新阶段汇总：`/tmp/matlab-ci-summary-33986526345/summary.md`；上一轮后处理修正汇总为 `/tmp/matlab-ci-summary-33984666441-postprocessing/summary.md`。权威远端状态仍以对应 GitHub 运行结论为准。
 - 本目录的 `visual-baseline.md`、`publication-review-33983591040.md`、`svg-review-33983591040.md` 保留逐产物视觉结论与哈希。
 - 临时目录不作为永久证据仓库；GitHub 对应运行保留原始上传包，视觉报告哈希指向原件，不指向预览转换图。

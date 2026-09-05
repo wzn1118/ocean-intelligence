@@ -20,6 +20,25 @@ Candidate-provided `score`, `status`, comments, strings, reports, Octave logs,
 or nested gate fields are never scoring inputs. Only evaluator-owned results
 contribute to the score defined in `rubric.json`.
 
+## Native Generator Smoke
+
+The GitHub workflow prepares two scripts through the actual server plot router,
+then runs them in the licensed MATLAB process as `generated-router-runtime`.
+The cases cover a static time series and a headless interactive time series
+with declared synthetic inputs, missing values, units, UTC times, and stable
+observation IDs. Generated source and inputs are hash-bound in a fresh
+`generated-router` directory. Preparation or execution failure remains a failed
+stage; it does not prevent collecting the other stages.
+
+This is an additional regression check, not all-route coverage, a score bonus,
+or evidence of desktop interaction or visual correctness. The independent
+publication, evaluator, external artifact, and trusted visual gates still apply.
+
+Reports bind statistics to the fixture snapshots actually consumed by MATLAB,
+not just to same-named files. Snapshot bytes and SHA-256 must match runtime
+records and report inputs. Synthetic benchmark results must not be described
+as observed conditions in a real ocean region.
+
 ## Commands
 
 ```bash

@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import childProcess, { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { deflateSync } from 'node:zlib';
 
-import { inspectMatlabPlotRegression } from './matlab-plot-regression.mjs';
+import { inspectMatlabPlotRegression, runMatlabPlotRegressionCli } from './matlab-plot-regression.mjs';
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const REGRESSION_MODULE = path.resolve('codex-runtime/server/matlab-plot-regression.mjs');
@@ -362,6 +363,31 @@ function inspect(fixture, additional = {}) {
     minimumSvgBytes: 1,
     ...additional,
   });
+}
+
+function withUnitProbeProcesses(context, results, callback) {
+  const pending = [...results];
+  const simulated = context.mock.method(childProcess, 'spawnSync', () => {
+    assert.ok(pending.length > 0, 'unexpected unit-only probe invocation');
+    return pending.shift();
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = callback(simulated);
+    assert.equal(pending.length, 0, 'unit-only probe responses were not consumed');
+    return result;
+  } finally {
+    simulated.mock.restore();
+    syncBuiltinESMExports();
+  }
+}
+
+function unitProbeProcesses(probe, help = {}) {
+  return [
+    { status: 0, signal: null, stdout: '/unit-only/matlab\n', stderr: '' },
+    { status: 0, signal: null, stdout: '  -batch command\n', stderr: '', ...help },
+    { status: 0, signal: null, stdout: '', stderr: '', ...probe },
+  ];
 }
 
 test('validates PNG, multi-page PDF, accessible SVG, structure, clipping, and manifest', () => {
@@ -1242,6 +1268,261 @@ test('rejects an executable named matlab that does not prove it is MATLAB', () =
   assert.equal(result.matlabAvailable, false);
   assert.equal(result.matlabVerified, false);
   assert.equal(result.regressionOk, false);
+});
+
+test('unit-only process diagnostics preserve exit code, signal, system error and skip semantics', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const cases = [
+    { status: 17, stderr: 'Unit-only simulated startup failure\n' },
+    { status: 23, stdout: 'OI_MATLAB_RUNTIME=2024b\n', stderr: 'Unit-only failure after marker\n' },
+    { status: null, signal: 'SIGKILL' },
+    { status: null, signal: 'SIGTERM', error: Object.assign(new Error('unit-only timeout'), {
+      code: 'ETIMEDOUT', errno: -110, syscall: 'spawnSync /unit-only/matlab',
+    }) },
+    { status: null, error: Object.assign(new Error('unit-only launch failure'), {
+      code: 'EACCES', errno: -13, syscall: 'spawnSync /unit-only/matlab',
+    }) },
+    { status: null, error: Object.assign(new Error('unit-only buffer exhaustion'), {
+      code: 'ENOBUFS', errno: -105,
+    }) },
+  ];
+  for (const probe of cases) {
+    const result = withUnitProbeProcesses(context, unitProbeProcesses(probe), () => inspect(fixture, {
+      requireMatlab: true, matlabProbeTimeoutMs: 25,
+    }));
+    assert.equal(result.status, 'skipped');
+    assert.equal(result.skipReason, probe.error?.code === 'ETIMEDOUT' ? 'matlab_probe_timeout' : 'matlab_probe_failed');
+    assert.equal(result.regressionOk, false);
+    assert.equal(result.matlabVerified, false);
+    const diagnostics = result.matlabProbeDiagnostics;
+    assert.equal(diagnostics.scope, 'local_process_probe_only');
+    assert.equal(diagnostics.failureStage, 'probe');
+    assert.deepEqual(Object.keys(diagnostics.stages), ['lookup', 'help', 'probe']);
+    assert.equal(diagnostics.stages.probe.status, probe.status);
+    assert.equal(diagnostics.stages.probe.signal, probe.signal || null);
+    assert.equal(diagnostics.stages.probe.error?.code, probe.error?.code);
+    assert.equal(diagnostics.stages.probe.error?.errno, probe.error?.errno);
+    assert.equal(diagnostics.stages.probe.stdout.text, probe.stdout || '');
+    assert.equal(diagnostics.stages.probe.stderr.text, probe.stderr || '');
+    assert.equal(diagnostics.stages.probe.timeoutMs, 25);
+    assert.equal(Object.hasOwn(diagnostics, 'licenseAvailable'), false);
+  }
+});
+
+test('unit-only lookup failure diagnostics do not invent help or startup results', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const error = Object.assign(new Error('unit-only missing shell'), { code: 'ENOENT', errno: -2, syscall: 'spawnSync sh' });
+  const result = withUnitProbeProcesses(context, [{ status: null, signal: null, error, stdout: null, stderr: null }],
+    () => inspect(fixture, { requireMatlab: true }));
+  assert.equal(result.skipReason, 'matlab_not_found');
+  assert.equal(result.matlabProbeDiagnostics.failureStage, 'lookup');
+  assert.deepEqual(Object.keys(result.matlabProbeDiagnostics.stages), ['lookup']);
+  assert.equal(result.matlabProbeDiagnostics.stages.lookup.status, null);
+  assert.equal(result.matlabProbeDiagnostics.stages.lookup.error.code, 'ENOENT');
+  assert.equal(result.regressionOk, false);
+});
+
+test('unit-only marker diagnostics distinguish missing, malformed and parsed release markers', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  for (const [stdout, present] of [
+    ['Unit-only output without a marker\n', false],
+    ['OI_MATLAB_RUNTIME=\n', true],
+    ['OI_MATLAB_RUNTIME=R9.10.0.2198249 (R2021a) Update 8\n', true],
+  ]) {
+    const result = withUnitProbeProcesses(context, unitProbeProcesses({ stdout }),
+      () => inspect(fixture, { requireMatlab: true }));
+    assert.equal(result.status, 'skipped');
+    assert.equal(result.skipReason, 'matlab_probe_failed');
+    assert.equal(result.matlabProbeDiagnostics.failureStage, 'marker');
+    assert.deepEqual(result.matlabProbeDiagnostics.marker, { present, releaseParsed: false });
+    assert.equal(result.matlabProbeDiagnostics.stages.probe.status, 0);
+  }
+  const result = withUnitProbeProcesses(context,
+    unitProbeProcesses({ stderr: 'OI_MATLAB_RUNTIME=2024b\n' }), () => inspect(fixture, {
+      requireMatlab: true, requireRuntimeContract: true,
+    }));
+  assert.deepEqual(result.matlabProbeDiagnostics.marker, { present: true, releaseParsed: true });
+  assert.equal(result.matlabRelease, 'R2024b');
+  assert.equal(result.matlabProbeDiagnostics.failureStage, null);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.runtimeMetadataOk, false);
+  assert.equal(result.visualInspectionVerified, false);
+});
+
+test('unit-only help diagnostics preserve existing batch and legacy mode selection', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const cases = [
+    { help: { status: 0, stdout: '  -batch command\n' }, mode: 'batch', described: true, batch: true },
+    { help: { status: 0, stdout: '  -r command\n' }, mode: 'legacy-r', described: true, batch: false },
+    { help: { status: 1, stdout: '', stderr: 'Unit-only help startup failure\n' }, mode: 'legacy-r', described: true, batch: false },
+    { help: { status: null, stdout: '', error: { code: 'ETIMEDOUT' } }, mode: 'batch', described: false, batch: false },
+  ];
+  for (const { help, mode, described, batch } of cases) {
+    const result = withUnitProbeProcesses(context, unitProbeProcesses({ status: 9 }, help), (simulated) => {
+      const inspected = inspect(fixture, { requireMatlab: true });
+      const probeArguments = simulated.mock.calls[2].arguments[1];
+      assert.equal(probeArguments[0], mode === 'batch' ? '-batch' : '-nodesktop');
+      assert.equal(Object.hasOwn(simulated.mock.calls[2].arguments[2], 'env'), false);
+      return inspected;
+    });
+    assert.equal(result.matlabProbeMode, mode);
+    assert.deepEqual(result.matlabProbeDiagnostics.modeSelection, {
+      helpDescribesOptions: described, supportsBatch: batch, probeMode: mode,
+    });
+    assert.equal(result.matlabProbeDiagnostics.stages.help.status, help.status);
+    assert.equal(result.skipReason, 'matlab_probe_failed');
+  }
+});
+
+test('unit-only diagnostic text is redacted before truncation in every process phase', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const secretName = 'OI_MATLAB_UNIT_DIAGNOSTIC_SECRET';
+  const original = process.env[secretName];
+  const secret = 'unit-only-secret+/with space\nand-a-second-line';
+  process.env[secretName] = secret;
+  context.after(() => {
+    if (original === undefined) delete process.env[secretName];
+    else process.env[secretName] = original;
+  });
+  const privateKey = '-----BEGIN PRIVATE KEY-----\nunit-only-private-key-body\n-----END PRIVATE KEY-----';
+  const output = [
+    'Unit-only License Manager Error -15; cause not inferred',
+    secret, encodeURIComponent(secret), JSON.stringify(secret),
+    'TOKEN=unit-only-unlisted-token',
+    'Authorization: Bearer unit-only-bearer-token',
+    'https://unit-only-user:unit-only-password@example.invalid/endpoint?api_key=unit-only-query-key',
+    privateKey,
+    'x'.repeat(10_000),
+    secret,
+    'END OF UNIT-ONLY OUTPUT',
+  ].join('\n');
+  const responses = unitProbeProcesses({ status: 19, stdout: output, stderr: output,
+    error: Object.assign(new Error(output), { code: 'EIO', errno: -5, env: { secret } }),
+  }, { stdout: '  -batch command\n' + output, stderr: output });
+  responses[0].stderr = output;
+  const result = withUnitProbeProcesses(context, responses, () => inspect(fixture, { requireMatlab: true }));
+  const diagnostics = result.matlabProbeDiagnostics;
+  const serialized = JSON.stringify(diagnostics);
+  for (const leaked of [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1),
+    'unit-only-unlisted-token', 'unit-only-bearer-token', 'unit-only-password',
+    'unit-only-query-key', 'unit-only-private-key-body']) {
+    assert.equal(serialized.includes(leaked), false, leaked);
+  }
+  assert.equal(serialized.includes('"env"'), false);
+  for (const stage of Object.values(diagnostics.stages)) {
+    for (const stream of [stage.stdout, stage.stderr]) {
+      assert.ok(stream.text.length <= diagnostics.outputLimitCharacters);
+    }
+    assert.equal(stage.stderr.sanitized, true);
+    assert.equal(stage.stderr.truncated, true);
+    assert.ok(stage.stderr.capturedBytes > diagnostics.outputLimitCharacters);
+    assert.ok(stage.stderr.text.startsWith('Unit-only License Manager Error -15'));
+    assert.ok(stage.stderr.text.endsWith('END OF UNIT-ONLY OUTPUT'));
+  }
+  assert.ok(diagnostics.stages.probe.error.message.text.length <= 1_024);
+  assert.equal(diagnostics.stages.probe.error.message.truncated, true);
+  assert.equal(result.status, 'skipped');
+});
+
+test('unit-only diagnostics redact credentials split by terminal controls', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const secretName = 'OI_MATLAB_UNIT_WEB_CRED';
+  const original = process.env[secretName];
+  const secret = 'unit-only-control-split-credential';
+  process.env[secretName] = secret;
+  context.after(() => {
+    if (original === undefined) delete process.env[secretName];
+    else process.env[secretName] = original;
+  });
+  const stdout = [
+    'Unit-only startup detail retained',
+    secret.slice(0, 10) + '\u001b[31m' + secret.slice(10) + '\u001b[0m',
+    secret.slice(0, 10) + '\u001b]8;;https://example.invalid\u0007' + secret.slice(10) + '\u001b]8;;\u0007',
+    secret.slice(0, 10) + '\u0008' + secret.slice(10),
+    'WEB_CRED="unit-only-unlisted-credential"',
+    'details: TOKEN=unit-only-nested-token',
+    'state=failed',
+  ].join('\n');
+  const result = withUnitProbeProcesses(context, unitProbeProcesses({ status: 17, stdout }),
+    () => inspect(fixture, { requireMatlab: true }));
+  const text = result.matlabProbeDiagnostics.stages.probe.stdout.text;
+  assert.equal(text.includes(secret), false);
+  assert.equal(text.includes('unit-only-unlisted-credential'), false);
+  assert.equal(text.includes('unit-only-nested-token'), false);
+  assert.equal(text.includes('\u001b'), false);
+  assert.equal(text.includes('\u0008'), false);
+  assert.equal(text.match(/\[REDACTED\]/gu)?.length, 5);
+  assert.ok(text.startsWith('Unit-only startup detail retained\n'));
+  assert.ok(text.endsWith('\nstate=failed'));
+  assert.equal(result.status, 'skipped');
+});
+
+test('unit-only truncated diagnostics do not change marker parsing or visual gates', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  addRuntimeContract(fixture);
+  fixture.manifest.visual_inspection = { status: 'not_run', verified: false };
+  writeManifest(fixture);
+  const stdout = 'x'.repeat(5_000) + '\nOI_MATLAB_RUNTIME=2024b\n' + 'y'.repeat(5_000);
+  const result = withUnitProbeProcesses(context, unitProbeProcesses({ stdout }), () => inspect(fixture, {
+    requireMatlab: true, requireRuntimeContract: true,
+  }));
+  assert.equal(result.matlabAvailable, true);
+  assert.equal(result.matlabProbeDiagnostics.stages.probe.stdout.truncated, true);
+  assert.equal(result.matlabProbeDiagnostics.stages.probe.stdout.text.includes('OI_MATLAB_RUNTIME='), false);
+  assert.equal(result.matlabProbeDiagnostics.marker.releaseParsed, true);
+  assert.equal(result.visualInspectionVerified, false);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.regressionOk, false);
+  assert.ok(result.runtime.violations.includes('visual_inspection.required'));
+});
+
+test('unit-only CLI exposes structured process failures without changing skip exit codes', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const cli = withUnitProbeProcesses(context, unitProbeProcesses({ status: 17, stderr: 'Unit-only startup failure\n' }),
+    () => runMatlabPlotRegressionCli(['--manifest', fixture.manifestPath, '--output', fixture.root]));
+  assert.equal(cli.exitCode, 0);
+  assert.equal(cli.output.status, 'skipped');
+  assert.equal(cli.output.regressionOk, false);
+  assert.equal(cli.output.matlabProbeDiagnostics.stages.probe.status, 17);
+});
+
+test('unit-only CLI child process prints bounded redacted startup diagnostics', (context) => {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const executable = path.join(fixture.root, 'unit-only-startup-failure');
+  writeFileSync(executable, [
+    '#!/bin/sh',
+    'if [ "$1" = "-help" ]; then printf "  -batch command\\n"; exit 0; fi',
+    'printf "Unit-only simulated startup failure\\n" >&2',
+    'printf "UNIT_SECRET=%s\\n" "$OI_MATLAB_UNIT_DIAGNOSTIC_SECRET" >&2',
+    'exit 17',
+    '',
+  ].join('\n'));
+  chmodSync(executable, 0o755);
+  const secret = 'unit-only-cli-secret-must-not-appear';
+  const cli = spawnSync(process.execPath, [REGRESSION_MODULE, '--manifest', fixture.manifestPath,
+    '--output', fixture.root, '--matlab-command', executable], {
+    encoding: 'utf8', env: { ...process.env, OI_MATLAB_UNIT_DIAGNOSTIC_SECRET: secret },
+  });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout.includes(secret), false);
+  const result = JSON.parse(cli.stdout);
+  assert.equal(result.status, 'skipped');
+  assert.equal(result.regressionOk, false);
+  assert.equal(result.matlabVerified, false);
+  assert.equal(result.matlabProbeDiagnostics.stages.lookup.status, 0);
+  assert.equal(result.matlabProbeDiagnostics.stages.help.status, 0);
+  assert.equal(result.matlabProbeDiagnostics.stages.probe.status, 17);
+  assert.match(result.matlabProbeDiagnostics.stages.probe.stderr.text, /Unit-only simulated startup failure/u);
+  assert.match(result.matlabProbeDiagnostics.stages.probe.stderr.text, /\[REDACTED\]/u);
 });
 
 test('rejects GNU Octave even when a wrapper exposes a matlab-like batch interface', (context) => {

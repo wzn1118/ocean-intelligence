@@ -14,6 +14,7 @@ import { MATLAB_MANIFEST_SCHEMA_VERSION } from './matlab-task-routing-contract.m
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const REQUIRED_FORMATS = ['png', 'pdf'];
 const SUPPORTED_FORMATS = ['png', 'pdf', 'svg'];
+const MATLAB_PROBE_OUTPUT_LIMIT = 4_096;
 
 export function inspectMatlabPlotRegression(options = {}) {
   const manifestPath = resolveOptionalPath(options.manifestPath);
@@ -94,6 +95,7 @@ export function inspectMatlabPlotRegression(options = {}) {
     matlabVerified: matlab.verified,
     matlabRelease: matlab.release,
     matlabProbeMode: matlab.probeMode,
+    matlabProbeDiagnostics: matlab.diagnostics,
     matlabCommand: matlab.command,
     runtimeMetadataOk,
     exportCompatibilityOk: runtime.exportCompatibilityOk,
@@ -1894,20 +1896,92 @@ function canonicalMatlabRelease(value) {
   return match ? `R${match[1]}${match[2].toLowerCase()}` : undefined;
 }
 
+function probeDiagnosticRedactor() {
+  const stripControls = (value) => value
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/gu, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '');
+  const secrets = new Set();
+  const sensitiveName = /token|secret|password|passwd|cred|auth|license|cookie|(?:^|[_-])(?:api[_-]?)?key(?:$|[_-])/iu;
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!value || !sensitiveName.test(name)) continue;
+    for (const variant of [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1)]) {
+      const normalized = stripControls(variant);
+      if (normalized) secrets.add(normalized);
+    }
+  }
+  const values = [...secrets].sort((first, second) => second.length - first.length);
+  return (value) => {
+    let text = stripControls(String(value ?? ''));
+    for (const secret of values) text = text.replaceAll(secret, '[REDACTED]');
+    return text
+      .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/gu, '[REDACTED PRIVATE KEY]')
+      .replace(/\b((?:Bearer|Basic)\s+)[^\s,;"']+/giu, '$1[REDACTED]')
+      .replace(/(\b[a-z][a-z\d+.-]*:\/\/)[^\s/@]+@/giu, '$1[REDACTED]@')
+      .replace(/((?:^|[\s{,;?&])["']?(?=[\w.-]*(?:token|secret|password|passwd|cred|auth|license|cookie|key))[\w.-]+["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&}]+)/giu, '$1[REDACTED]');
+  };
+}
+
+function probeDiagnosticOutput(value, redact, limit = MATLAB_PROBE_OUTPUT_LIMIT) {
+  const captured = String(value ?? '');
+  const sanitized = redact(captured);
+  const truncated = sanitized.length > limit;
+  const separator = '\n...[truncated]...\n';
+  const headLength = Math.floor((limit - separator.length) / 2);
+  return {
+    text: truncated
+      ? sanitized.slice(0, headLength) + separator + sanitized.slice(-(limit - separator.length - headLength))
+      : sanitized,
+    capturedBytes: Buffer.byteLength(captured, 'utf8'),
+    truncated,
+    sanitized: sanitized !== captured,
+  };
+}
+
+function probeProcessDiagnostics(result, redact, timeoutMs = null) {
+  const error = result.error;
+  return {
+    status: Number.isInteger(result.status) ? result.status : null,
+    signal: result.signal ? probeDiagnosticOutput(result.signal, redact, 128).text : null,
+    timeoutMs,
+    error: error ? {
+      code: error.code ? probeDiagnosticOutput(error.code, redact, 128).text : null,
+      errno: Number.isInteger(error.errno) ? error.errno : null,
+      syscall: error.syscall ? probeDiagnosticOutput(error.syscall, redact, 256).text : null,
+      message: probeDiagnosticOutput(error.message, redact, 1_024),
+    } : null,
+    stdout: probeDiagnosticOutput(result.stdout, redact),
+    stderr: probeDiagnosticOutput(result.stderr, redact),
+  };
+}
+
 function detectMatlab(command, options) {
+  const redact = probeDiagnosticRedactor();
+  const diagnostics = {
+    schemaVersion: 1,
+    scope: 'local_process_probe_only',
+    outputLimitCharacters: MATLAB_PROBE_OUTPUT_LIMIT,
+    redaction: 'sensitive_environment_values_and_credential_patterns',
+    failureStage: null,
+    stages: {},
+  };
   const lookup = spawnSync('sh', ['-c', `command -v -- ${shellQuote(command)}`], { encoding: 'utf8' });
+  diagnostics.stages.lookup = probeProcessDiagnostics(lookup, redact);
   if (lookup.status !== 0) {
-    return { available: false, verified: false, command, reason: 'matlab_not_found' };
+    diagnostics.failureStage = 'lookup';
+    return { available: false, verified: false, command, reason: 'matlab_not_found', diagnostics };
   }
   const resolvedCommand = lookup.stdout.trim();
   const marker = 'OI_MATLAB_RUNTIME=';
   const timeout = positiveInteger(options.matlabProbeTimeoutMs, 120_000);
   const help = spawnSync(resolvedCommand, ['-help'], { encoding: 'utf8', timeout });
+  diagnostics.stages.help = probeProcessDiagnostics(help, redact, timeout);
   const helpOutput = `${help.stdout || ''}\n${help.stderr || ''}`;
   const helpDescribesOptions = helpOutput.trim().length > 0;
   const supportsBatch = /(?:^|\s)-batch(?:\s|$)/imu.test(helpOutput);
   const useLegacyRun = helpDescribesOptions && !supportsBatch;
   const probeMode = useLegacyRun ? 'legacy-r' : 'batch';
+  diagnostics.modeSelection = { helpDescribesOptions, supportsBatch, probeMode };
   const probeCommand = "assert(exist('OCTAVE_VERSION','builtin') == 0, 'oi:MatlabRequired', 'GNU Octave is not MATLAB'); fprintf('OI_MATLAB_RUNTIME=%s\\n', version('-release'));";
   const legacyCommand = `try, ${probeCommand} catch exception, disp(getReport(exception,'extended')); exit(1); end; exit(0);`;
   const probeArguments = useLegacyRun
@@ -1917,15 +1991,19 @@ function detectMatlab(command, options) {
     encoding: 'utf8',
     timeout,
   });
+  diagnostics.stages.probe = probeProcessDiagnostics(probe, redact, timeout);
   const output = `${probe.stdout || ''}\n${probe.stderr || ''}`;
   const release = canonicalMatlabRelease(output.match(/OI_MATLAB_RUNTIME=([^\s]+)/u)?.[1]);
   const available = probe.status === 0 && nonEmptyString(release) && output.includes(marker);
+  diagnostics.marker = { present: output.includes(marker), releaseParsed: nonEmptyString(release) };
+  diagnostics.failureStage = available ? null : (probe.status === 0 ? 'marker' : 'probe');
   return {
     available,
     verified: available,
     command: resolvedCommand,
     release,
     probeMode,
+    diagnostics,
     reason: available ? undefined : (probe.error?.code === 'ETIMEDOUT' ? 'matlab_probe_timeout' : 'matlab_probe_failed'),
   };
 }

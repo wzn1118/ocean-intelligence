@@ -109,7 +109,7 @@ assert(horizontalBounds(3) > horizontalBounds(4), ...
     "Horizontal text must be wider than it is tall; geometry=%s", horizontalDetails);
 
 textHandle.Rotation = 90;
-[verticalBounds, verticalDetails] = measure_bounds(textHandle, figureHandle, "90-degree axes text");
+[verticalBounds, verticalDetails] = render_text_state(textHandle, figureHandle, axesHandle, "nested-rotation-90");
 assert_inside(verticalBounds, "90-degree axes text", verticalDetails);
 assert(verticalBounds(4) > verticalBounds(3), ...
     "test_text_bounds:RotatedExtent", ...
@@ -306,16 +306,23 @@ textHandle = text(axesHandle, 0.5, 0.5, "MMMMMMMM geometry", ...
     "HorizontalAlignment", "center", "VerticalAlignment", "middle", ...
     "Interpreter", "none");
 
-[smallBounds, smallDetails] = measure_bounds(textHandle, figureHandle, "small font");
+[smallBounds, smallDetails] = render_text_state(textHandle, figureHandle, axesHandle, "font-refresh-9pt");
 textHandle.FontSize = 22;
-[largeBounds, largeDetails] = measure_bounds(textHandle, figureHandle, "large font");
+[largeBounds, largeDetails] = render_text_state(textHandle, figureHandle, axesHandle, "font-refresh-22pt");
 assert(largeBounds(3) > smallBounds(3) && largeBounds(4) > smallBounds(4), ...
     "test_text_bounds:FontRefresh", ...
     "Text bounds must be re-rendered after final typography changes; before=%s; after=%s", ...
     smallDetails, largeDetails);
 
+textHandle.String = "MMMMMMMMMMMMMMMM geometry";
+[longerBounds, longerDetails] = render_text_state(textHandle, figureHandle, axesHandle, "font-refresh-longer-string");
+assert(longerBounds(3) > largeBounds(3), ...
+    "test_text_bounds:StringRefresh", ...
+    "Longer text must be re-rendered after String changes; before=%s; after=%s", ...
+    largeDetails, longerDetails);
+
 textHandle.FontName = "Courier";
-[switchedBounds, switchedDetails] = measure_bounds(textHandle, figureHandle, "switched font");
+[switchedBounds, switchedDetails] = render_text_state(textHandle, figureHandle, axesHandle, "font-refresh-courier");
 assert(all(isfinite(switchedBounds)) && all(switchedBounds(3:4) > 0) ...
     && string(textHandle.FontName) == "Courier", ...
     "test_text_bounds:FontNameRefresh", ...
@@ -335,7 +342,7 @@ axesHandle = axes("Parent", figureHandle, "Units", "normalized", ...
 titleHandle = title(axesHandle, repmat('W', 1, 80), ...
     "FontName", fontName, "FontSize", 14, "Interpreter", "none");
 
-[bounds, details] = measure_bounds(titleHandle, figureHandle, "true clipping title");
+[bounds, details] = render_text_state(titleHandle, figureHandle, axesHandle, "true-clipping-title");
 assert(bounds(1) < 0 && bounds(1) + bounds(3) > 1 && bounds(3) > 1, ...
     "test_text_bounds:TrueClipping", ...
     "A genuinely oversized title must remain outside the figure bounds; geometry=%s", details);
@@ -457,6 +464,30 @@ assert(fileId >= 0, "test_text_bounds:EvidenceFile", ...
 fileCleanup = onCleanup(@() fclose(fileId));
 fprintf(fileId, "%s\n", jsonencode(evidence));
 clear fileCleanup;
+end
+
+function [bounds, details] = render_text_state(textHandle, figureHandle, axesHandle, artifactName)
+outputRoot = string(getenv("MATLAB_FULL100_OUTPUT"));
+if strlength(outputRoot) == 0
+    outputRoot = string(tempname);
+end
+outputDirectory = fullfile(outputRoot, "text-bounds");
+if ~isfolder(outputDirectory)
+    mkdir(outputDirectory);
+end
+jsonPath = fullfile(outputDirectory, artifactName + ".json");
+[~, beforeDetails] = measure_bounds(textHandle, figureHandle, artifactName + " before export");
+evidence = struct("before_export", jsondecode(beforeDetails));
+write_evidence_json(jsonPath, evidence);
+evidence.export = export_diagnostic_crop(axesHandle, "axes", ...
+    fullfile(outputDirectory, artifactName + "-axes.png"));
+drawnow;
+[bounds, details] = measure_bounds(textHandle, figureHandle, artifactName + " after export");
+evidence.after_export = jsondecode(details);
+write_evidence_json(jsonPath, evidence);
+assert(evidence.export.succeeded, "test_text_bounds:DiagnosticExport", ...
+    "Text state requires a successful native render; evidence=%s; export=%s", ...
+    jsonPath, jsonencode(evidence.export));
 end
 
 function [bounds, details] = measure_bounds(textHandle, figureHandle, role)

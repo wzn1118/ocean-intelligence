@@ -520,6 +520,9 @@ test('end-to-end interactive routing calls the native template with aligned meta
   assert.match(resolved.script, /'Interactive', interactionRequested/u);
   assert.match(resolved.script, /'Export', false/u);
   assert.match(resolved.script, /'FontName', selectedFontName/u);
+  assert.doesNotMatch(resolved.script, /title\(axesHandle,/u);
+  assert.match(resolved.script, /interactionPlot\.Layout\.Title\.FontSize = theme\.TitleSize/u);
+  assert.match(resolved.script, /runtime_bounds = "pending";\s+if exportEntry\.rendering_evidence\.bounds_audit_complete\s+publicationContract\.verification\.runtime_bounds = "passed";/u);
   assert.match(resolved.script, /interactionPlot\.Layout\.Padding = 'loose'/u);
   assert.match(resolved.script, /'ValueLabel', 'Sea water temperature', 'ValueUnit', 'degC'/u);
   assert.match(resolved.script, /'ObservationID', 'Station', 'QCFlag'/u);
@@ -818,7 +821,8 @@ test('publication contract controls physical canvas, layout, typography and hone
   assert.match(resolved.script, /fontCandidates = \["Helvetica"\]/u);
   assert.match(resolved.script, /theme\.FontSize = 9/u);
   assert.match(resolved.script, /LineWidth', 1\.3/u);
-  assert.match(resolved.script, /qualityTightInset = axesHandle\.TightInset/u);
+  assert.match(resolved.script, /qualityFigureSizeInches = double\(figureHandle\.Position\(3:4\)\)/u);
+  assert.match(resolved.script, /exportEntry\.rendering_evidence\.bounds_audited && exportEntry\.rendering_evidence\.physical_dimensions_verified/u);
   assert.match(resolved.script, /exportEntry\.publication\.contract = publicationContract/u);
   assert.match(resolved.script, /exportEntry\.publication\.typography\.selected_font = selectedFontName/u);
   assert.doesNotMatch(resolved.script, /exportEntry\.publication = publicationContract/u);
@@ -826,6 +830,137 @@ test('publication contract controls physical canvas, layout, typography and hone
   assert.doesNotMatch(resolved.script, /publicationContract\.typography\.glyphs_verified/u);
   assert.match(resolved.script, /exportEntry\.accessibility\.grayscale_status = "not-verified"/u);
   assert.doesNotMatch(resolved.script, /'ContrastRatio', 4\.5/u);
+});
+
+test('static generators establish physical canvas and page margins before axes on every audited release', () => {
+  for (const targetRelease of ['R2021a', 'R2024b', 'R2026a']) {
+    for (const architecture of ['single-axes', 'tiledlayout']) {
+      for (const target of [{ width: 6, height: 4, units: 'in', dpi: 150 }, { width: 18, height: 12, units: 'cm', dpi: 600 }]) {
+        const publicationContract = completePublicationContract();
+        Object.assign(publicationContract.target, target);
+        publicationContract.layout.architecture = architecture;
+        publicationContract.headless.exportApi = targetRelease === 'R2026a' ? 'exportgraphics' : 'print';
+        const resolved = resolveMatlabPlotRequest(deliverable({
+          runtime: 'matlab', matlabAvailable: true, targetRelease, publicationContract,
+          question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
+          dataType: 'datetime', timeZone: 'UTC', missing: false,
+          units: { value: 'degC' }, quantities: { value: 'Temperature' },
+        }));
+        assert.equal(resolved.status, 'ready', JSON.stringify({ targetRelease, architecture, target }));
+        const { script } = resolved;
+        const inchesPerUnit = target.units === 'cm' ? 1 / 2.54 : 1;
+        assert.ok(script.includes(`publicationWidthPixels = ${Math.round(target.width * inchesPerUnit * target.dpi)};`));
+        assert.ok(script.includes(`publicationHeightPixels = ${Math.round(target.height * inchesPerUnit * target.dpi)};`));
+        assert.ok(script.includes(`publicationDpi = ${target.dpi};`));
+        assert.match(script, /publicationSizeInches = \[publicationWidthPixels publicationHeightPixels\] \/ publicationDpi;/u);
+        assert.match(script, /publicationPageMargin = min\(0\.25 \.\/ publicationSizeInches, 0\.1\);/u);
+        const figureIndex = script.indexOf('figureHandle = oi_figure(');
+        const sizingIndex = script.indexOf('figureHandle.Position(3:4) = publicationSizeInches;');
+        const axesIndex = script.indexOf(architecture === 'tiledlayout' ? 'layoutHandle = tiledlayout(' : 'axesHandle = axes(');
+        const plotIndex = script.indexOf('graphicsHandle = plot(');
+        assert.ok(figureIndex < sizingIndex && sizingIndex < axesIndex && axesIndex < plotIndex);
+        const physicalSetup = script.slice(sizingIndex, axesIndex);
+        assert.match(physicalSetup, /figureHandle\.PaperPosition = \[0 0 publicationSizeInches\];/u);
+        assert.match(physicalSetup, /figureHandle\.PaperSize = publicationSizeInches;/u);
+        assert.match(physicalSetup, /figureHandle\.PaperPositionMode = 'manual';/u);
+        const layoutSetup = script.slice(axesIndex, plotIndex);
+        assert.match(layoutSetup, /\.OuterPosition = \[publicationPageMargin 1 - 2 \* publicationPageMargin\];/u);
+        assert.match(layoutSetup, /PositionConstraint = 'outerposition'/u);
+        assert.match(script, /abs\(qualityFigureSizeInches - publicationSizeInches\) <= 1e-6/u);
+        assert.match(script, /abs\(figureHandle\.PaperSize - publicationSizeInches\) <= 1e-6/u);
+        assert.match(script, /abs\(figureHandle\.PaperPosition - \[0 0 publicationSizeInches\]\) <= 1e-6/u);
+        assert.match(script, /'plot:PaperSize'/u);
+        assert.doesNotMatch(script.slice(plotIndex), /figureHandle\.(?:Position|PaperPosition|PaperSize)(?:\(3:4\))? =/u);
+        assert.doesNotMatch(script, /figureHandle\.Units = 'pixels'|ScreenPixelsPerInch|round\(figureHandle\.Position/u);
+        assert.match(script, /runtime_margins_inches = exportEntry\.rendering_evidence\.normalized_margins \.\* \[qualityFigureSizeInches qualityFigureSizeInches\]/u);
+        assert.doesNotMatch(script, /qualityTightInset|qualityMargins = max|qualityAxesPosition/u);
+        assert.equal(resolved.plotRoute.apiPlan.exportFormats.png.api, publicationContract.headless.exportApi);
+      }
+    }
+  }
+});
+
+test('interactive generators pass nondefault physical dimensions into the template before rendering', () => {
+  const asset = readFileSync(new URL('../matlab/assets/interactive_timeseries_native_template.m', import.meta.url), 'utf8');
+  assert.ok(asset.indexOf("'Units', 'inches'") < asset.indexOf('layout = tiledlayout('));
+  assert.match(asset, /publication_size = \[options\.PublicationWidthPixels options\.PublicationHeightPixels\] \.\.\.\s*\/ options\.PublicationDPI/u);
+  assert.match(asset, /layout\.OuterPosition = \[page_margin 1 - 2 \* page_margin\]/u);
+  for (const targetRelease of ['R2021a', 'R2024b', 'R2026a']) {
+    for (const interactionEnvironment of ['auto', 'headless', 'desktop']) {
+      const publicationContract = completePublicationContract({ interactionMode: 'dual' });
+      Object.assign(publicationContract.target, { width: 6, height: 4, units: 'in', dpi: 450 });
+      publicationContract.headless.exportApi = targetRelease === 'R2026a' ? 'exportgraphics' : 'print';
+      const script = generateMatlabPlotScript(deliverable({
+        taskType: 'interactive', targetRelease, interactionEnvironment, publicationContract,
+        question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
+        observationDimension: 'time', dataType: 'datetime', timeZone: 'UTC', missing: false,
+        qc: { status: 'present', variable: 'qcFlag', alignment: 'time', accepted: ['good'], suspect: [], rejected: ['bad'], action: 'preserve' },
+        units: { value: 'degC' }, quantities: { value: 'Temperature' },
+      }));
+      assert.match(script, /publicationWidthPixels = 2700;\s*publicationHeightPixels = 1800;\s*publicationDpi = 450;/u);
+      const templateCall = script.split('\n').find((line) => line.startsWith('interactionPlot = '));
+      assert.match(templateCall, /'PublicationWidthPixels', publicationWidthPixels, 'PublicationHeightPixels', publicationHeightPixels, 'PublicationDPI', publicationDpi/u);
+      assert.match(templateCall, /'Export', false/u);
+      assert.doesNotMatch(script, /figureHandle = oi_figure|figureHandle\.Position\(3:4\) =|figureHandle\.Units = 'pixels'/u);
+      assert.match(script, /qualityFigureSizeInches - publicationSizeInches/u);
+      assert.ok(script.indexOf('qualityFigureSizeInches = ') > script.indexOf('figureHandle = interactionPlot.Figure;'));
+      assert.match(script, /'plot:PaperSize'/u);
+      assert.match(script, /exportEntry\.interaction\.interaction_verified = false/u);
+    }
+  }
+});
+
+test('exact font probes preserve explicit candidate order and bind the selected theme to export evidence', () => {
+  for (const targetRelease of ['R2021a', 'R2024b', 'R2026a']) {
+    for (const interactive of [false, true]) {
+      for (const candidates of [['Noto Sans CJK SC', 'WenQuanYi Zen Hei'], ['WenQuanYi Zen Hei', 'Noto Sans CJK SC']]) {
+        const publicationContract = completePublicationContract({ chineseRequired: true, interactionMode: interactive ? 'dual' : 'static' });
+        publicationContract.typography.fontFamily = candidates[0];
+        publicationContract.typography.fallbackFamilies = candidates.slice(1);
+        publicationContract.headless.exportApi = targetRelease === 'R2026a' ? 'exportgraphics' : 'print';
+        const input = deliverable({
+          targetRelease, publicationContract, title: '海温观测',
+          question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
+          dataType: 'datetime', timeZone: 'UTC', missing: false,
+          units: { value: 'degC' }, quantities: { value: '海水温度' },
+          ...(interactive ? {
+            taskType: 'interactive', observationDimension: 'time',
+            qc: { status: 'present', variable: 'qcFlag', alignment: 'time', accepted: ['good'], suspect: [], rejected: ['bad'], action: 'preserve' },
+          } : {}),
+        });
+        const before = structuredClone(input);
+        const script = generateMatlabPlotScript(input);
+        assert.deepEqual(input, before);
+        assert.deepEqual(routeMatlabPlot(input).publicationPolicy.typography.fontCandidates, candidates);
+        assert.ok(script.includes(`fontCandidates = [${candidates.map((name) => JSON.stringify(name)).join(' ')}];`));
+        assert.match(script, /if oi_font_available\(fontCandidates\(fontCandidateIndex\), availableFontNames\)\s*selectedFontName = fontCandidates\(fontCandidateIndex\);\s*break;/u);
+        assert.match(script, /assert\(strlength\(selectedFontName\) > 0, 'plot:FontUnavailable'/u);
+        assert.doesNotMatch(script, /if any\(strcmpi\(fontCandidates|selectedFontName = "(?:Noto|WenQuanYi)/u);
+        const fontIndex = script.indexOf('theme.FontName = selectedFontName;');
+        const figureIndex = script.indexOf(interactive ? 'figureHandle = interactionPlot.Figure;' : 'figureHandle = oi_figure(');
+        const cacheIndex = script.indexOf("setappdata(figureHandle, 'OI_OceanTheme', theme);");
+        const exportIndex = script.indexOf('exportEntry = oi_export_figure(');
+        const evidenceIndex = script.indexOf("'plot:ExportFontMismatch'");
+        assert.ok(fontIndex < figureIndex && figureIndex < cacheIndex && cacheIndex < exportIndex && exportIndex < evidenceIndex);
+        assert.match(script, /exportedFontNames = string\(exportEntry\.publication\.typography\.selected_fonts\)/u);
+        assert.match(script, /font_selection_verified && ~isempty\(exportedFontNames\) && all\(strcmpi\(exportedFontNames, selectedFontName\), 'all'\)/u);
+        assert.ok(evidenceIndex < script.indexOf('exportEntry.publication.typography.selected_font = selectedFontName;'));
+        assert.doesNotMatch(script, /(?:glyphs_verified|pdf_fonts_embedded|visual_inspection_verified) = true/u);
+      }
+    }
+  }
+});
+
+test('implicit theme fonts use the same exact probe without adding a generator fallback preference', () => {
+  const script = generateMatlabPlotScript(deliverable({
+    question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
+    dataType: 'datetime', timeZone: 'UTC', missing: false,
+    units: { value: 'degC' }, quantities: { value: 'Temperature' },
+  }));
+  assert.match(script, /selectedFontName = string\(theme\.FontName\);/u);
+  assert.match(script, /assert\(oi_font_available\(selectedFontName, availableFontNames\), 'plot:FontUnavailable'/u);
+  assert.doesNotMatch(script, /any\(strcmpi\(selectedFontName, availableFontNames\)\)|fontCandidates =|WenQuanYi|Noto/u);
+  assert.match(script, /set\(figureHandle, 'DefaultAxesFontName', selectedFontName, 'DefaultTextFontName', selectedFontName/u);
 });
 
 test('Chinese output requires a runtime CJK font and never fabricates glyph verification', () => {

@@ -253,11 +253,13 @@ function buildMatlabPlotScript(taskRoute, spec, route) {
     ...qcValidationLines(spec, route.plotType, names),
     ...plotLines(spec, route.plotType, names),
     ...(interactiveSeries ? [`cleanupFigure = onCleanup(@() close(figureHandle));`] : []),
+    `setappdata(figureHandle, 'OI_OceanTheme', theme);`,
     `axesHandle = plotResult.Axes;`,
     ...accessibilityEnhancementLines(spec, route.plotType, names),
-    ...labelLines(labels, route.plotType, spec.title),
+    ...labelLines(labels, route.plotType, interactiveSeries ? '' : spec.title),
     `oi_apply_axes(axesHandle, theme);`,
     ...typographyLines(spec),
+    ...(interactiveSeries ? [`interactionPlot.Layout.Title.FontSize = theme.TitleSize;`] : []),
     `drawnow;`,
     ...runtimeLayoutAuditLines(spec),
     `exportEntry = oi_export_figure(figureHandle, outputDirectory, ${matlabString(spec.figureId)}, publicationWidthPixels, publicationHeightPixels, publicationDpi, ...`,
@@ -1039,6 +1041,8 @@ function themeAndFontLines(spec) {
     `publicationWidthPixels = ${spec.publication.target.widthPixels};`,
     `publicationHeightPixels = ${spec.publication.target.heightPixels};`,
     `publicationDpi = ${spec.publication.target.dpi};`,
+    `publicationSizeInches = [publicationWidthPixels publicationHeightPixels] / publicationDpi;`,
+    `publicationPageMargin = min(0.25 ./ publicationSizeInches, 0.1);`,
     `desktopAvailable = usejava('desktop');`,
     ...(spec.interactive && spec.interactionEnvironment === 'desktop'
       ? [`assert(desktopAvailable, 'plot:DesktopRequired', 'interactionEnvironment="desktop" requires the MATLAB desktop; no silent headless downgrade is allowed.');`]
@@ -1050,15 +1054,15 @@ function themeAndFontLines(spec) {
       `fontCandidates = ${matlabStringVector(fontCandidates)};`,
       `selectedFontName = "";`,
       `for fontCandidateIndex = 1:numel(fontCandidates)`,
-      `  if any(strcmpi(fontCandidates(fontCandidateIndex), availableFontNames))`,
+      `  if oi_font_available(fontCandidates(fontCandidateIndex), availableFontNames)`,
       `    selectedFontName = fontCandidates(fontCandidateIndex);`,
       `    break;`,
       `  end`,
       `end`,
-      `assert(strlength(selectedFontName) > 0, 'plot:FontUnavailable', 'None of the publication font candidates is installed in MATLAB.');`,
+      `assert(strlength(selectedFontName) > 0, 'plot:FontUnavailable', 'None of the publication font candidates is available by exact installed family name.');`,
     ] : [
       `selectedFontName = string(theme.FontName);`,
-      `assert(any(strcmpi(selectedFontName, availableFontNames)), 'plot:FontUnavailable', 'The theme font is not present in MATLAB listfonts.');`,
+      `assert(oi_font_available(selectedFontName, availableFontNames), 'plot:FontUnavailable', 'The theme font is not available by exact installed family name.');`,
     ]),
     ...(spec.publication.localization.chineseRequired ? [
       `cjkFontCandidates = ["Noto Sans CJK SC" "Source Han Sans SC" "Microsoft YaHei" "PingFang SC" "Arial Unicode MS" "WenQuanYi Zen Hei"];`,
@@ -1075,15 +1079,30 @@ function staticFigureLines(spec) {
   const figureLines = [
     `figureHandle = oi_figure(publicationWidthPixels, publicationHeightPixels, 'off');`,
     `cleanupFigure = onCleanup(@() close(figureHandle));`,
+    `figureHandle.Units = 'inches';`,
+    `figureHandle.Position(3:4) = publicationSizeInches;`,
+    `figureHandle.PaperUnits = 'inches';`,
+    `figureHandle.PaperPosition = [0 0 publicationSizeInches];`,
+    `figureHandle.PaperSize = publicationSizeInches;`,
+    `figureHandle.PaperPositionMode = 'manual';`,
+    `set(figureHandle, 'DefaultAxesFontName', selectedFontName, 'DefaultTextFontName', selectedFontName, 'DefaultAxesFontSize', theme.FontSize, 'DefaultTextFontSize', theme.FontSize);`,
   ];
   if (spec.publication.layout.architecture === 'tiledlayout') {
     return [
       ...figureLines,
       `layoutHandle = tiledlayout(figureHandle, ${spec.publication.layout.rows}, ${spec.publication.layout.columns}, 'TileSpacing', ${matlabString(spec.publication.layout.tileSpacing)}, 'Padding', ${matlabString(spec.publication.layout.padding)});`,
+      `layoutHandle.Units = 'normalized';`,
+      `if isprop(layoutHandle, 'PositionConstraint'), layoutHandle.PositionConstraint = 'outerposition'; end`,
+      `layoutHandle.OuterPosition = [publicationPageMargin 1 - 2 * publicationPageMargin];`,
       `axesHandle = nexttile(layoutHandle, 1);`,
     ];
   }
-  return [...figureLines, `axesHandle = axes('Parent', figureHandle);`];
+  return [
+    ...figureLines,
+    `axesHandle = axes('Parent', figureHandle, 'Units', 'normalized');`,
+    `if isprop(axesHandle, 'PositionConstraint'), axesHandle.PositionConstraint = 'outerposition'; else, axesHandle.ActivePositionProperty = 'outerposition'; end`,
+    `axesHandle.OuterPosition = [publicationPageMargin 1 - 2 * publicationPageMargin];`,
+  ];
 }
 
 function accessibilityEnhancementLines(spec, plotType, names) {
@@ -1126,16 +1145,11 @@ function typographyLines(spec) {
 
 function runtimeLayoutAuditLines(spec) {
   return [
-    `figureHandle.Units = 'pixels';`,
-    `assert(all(round(figureHandle.Position(3:4)) == [publicationWidthPixels publicationHeightPixels]), 'plot:FigureSize', 'Figure size changed before export.');`,
-    `originalAxesUnits = axesHandle.Units;`,
-    `axesHandle.Units = 'normalized';`,
-    `qualityAxesPosition = axesHandle.Position;`,
-    `qualityTightInset = axesHandle.TightInset;`,
-    `qualityBounds = [qualityAxesPosition(1) - qualityTightInset(1), qualityAxesPosition(2) - qualityTightInset(2), qualityAxesPosition(1) + qualityAxesPosition(3) + qualityTightInset(3), qualityAxesPosition(2) + qualityAxesPosition(4) + qualityTightInset(4)];`,
-    `assert(all(isfinite(qualityBounds)) && qualityBounds(1) >= -0.01 && qualityBounds(2) >= -0.01 && qualityBounds(3) <= 1.01 && qualityBounds(4) <= 1.01, 'plot:ClippingRisk', 'Axes labels or title exceed the final figure bounds after drawnow.');`,
-    `qualityMargins = max([qualityBounds(1) qualityBounds(2) 1 - qualityBounds(3) 1 - qualityBounds(4)], 0);`,
-    `axesHandle.Units = originalAxesUnits;`,
+    `figureHandle.Units = 'inches';`,
+    `qualityFigureSizeInches = double(figureHandle.Position(3:4));`,
+    `assert(all(isfinite(qualityFigureSizeInches)) && all(abs(qualityFigureSizeInches - publicationSizeInches) <= 1e-6), 'plot:FigureSize', 'Physical figure size changed before export.');`,
+    `figureHandle.PaperUnits = 'inches';`,
+    `assert(all(abs(figureHandle.PaperSize - publicationSizeInches) <= 1e-6) && all(abs(figureHandle.PaperPosition - [0 0 publicationSizeInches]) <= 1e-6) && strcmp(figureHandle.PaperPositionMode, 'manual'), 'plot:PaperSize', 'Physical page geometry changed before export.');`,
     `visibleFontHandles = findall(figureHandle, '-property', 'FontSize');`,
     `qualityMinimumFontSize = Inf;`,
     `for fontAuditIndex = 1:numel(visibleFontHandles)`,
@@ -1144,8 +1158,6 @@ function runtimeLayoutAuditLines(spec) {
     `  end`,
     `end`,
     `assert(isfinite(qualityMinimumFontSize) && qualityMinimumFontSize >= 8, 'plot:FontSize', 'Visible publication text must be at least 8 pt.');`,
-    `qualityRuntimeBoundsPassed = true;`,
-    `% Runtime bounds are checked here; PNG/PDF clipping, glyphs, grayscale and color-vision safety remain artifact checks.`,
   ];
 }
 
@@ -1160,11 +1172,19 @@ function publicationManifestLines(spec, plotType) {
     `interactionStatus = "not-requested";`,
   ];
   return [
+    `assert(exportEntry.rendering_evidence.bounds_audited && exportEntry.rendering_evidence.physical_dimensions_verified, 'plot:LayoutEvidence', 'Export must supply audited final bounds and physical dimensions.');`,
+    `exportedFontNames = string(exportEntry.publication.typography.selected_fonts);`,
+    `assert(exportEntry.rendering_evidence.font_selection_verified && ~isempty(exportedFontNames) && all(strcmpi(exportedFontNames, selectedFontName), 'all'), 'plot:ExportFontMismatch', 'Exported font evidence must match the selected publication font.');`,
     `publicationContract = jsondecode(${matlabString(publicationJson)});`,
-    `publicationContract.verification.runtime_bounds = "passed";`,
+    `publicationContract.verification.runtime_bounds = "pending";`,
+    `if exportEntry.rendering_evidence.bounds_audit_complete`,
+    `  publicationContract.verification.runtime_bounds = "passed";`,
+    `end`,
     `exportEntry.publication.contract = publicationContract;`,
     `exportEntry.publication.typography.selected_font = selectedFontName;`,
     `exportEntry.publication.typography.runtime_font_resolved = true;`,
+    `exportEntry.publication.layout.runtime_figure_size_inches = qualityFigureSizeInches;`,
+    `exportEntry.publication.layout.runtime_margins_inches = exportEntry.rendering_evidence.normalized_margins .* [qualityFigureSizeInches qualityFigureSizeInches];`,
     `exportEntry.publication.verification = publicationContract.verification;`,
     `exportEntry.publication_contract = publicationContract;`,
     `exportEntry.accessibility.alt_text = ${matlabString(accessibility.altText)};`,
@@ -1413,7 +1433,7 @@ function plotLines(spec, plotType, names) {
     }
     return [
       tableLine,
-      `interactionPlot = interactive_timeseries_native_template(interactionData, fullfile(outputDirectory, ${matlabString(spec.figureId)}), 'Interactive', interactionRequested, 'Export', false, 'Title', ${matlabString(spec.title)}, 'FontName', selectedFontName, 'TimeZone', ${matlabString(spec.timeZone)}, 'ValueLabel', ${matlabString(spec.quantities.value)}, 'ValueUnit', ${matlabString(spec.units.value)}${uncertaintyOptions});`,
+      `interactionPlot = interactive_timeseries_native_template(interactionData, fullfile(outputDirectory, ${matlabString(spec.figureId)}), 'Interactive', interactionRequested, 'Export', false, 'PublicationWidthPixels', publicationWidthPixels, 'PublicationHeightPixels', publicationHeightPixels, 'PublicationDPI', publicationDpi, 'Title', ${matlabString(spec.title)}, 'FontName', selectedFontName, 'TimeZone', ${matlabString(spec.timeZone)}, 'ValueLabel', ${matlabString(spec.quantities.value)}, 'ValueUnit', ${matlabString(spec.units.value)}${uncertaintyOptions});`,
       `interactionPlot.Layout.TileSpacing = ${matlabString(spec.publication.layout.tileSpacing)};`,
       `interactionPlot.Layout.Padding = ${matlabString(spec.publication.layout.padding)};`,
       `figureHandle = interactionPlot.Figure;`,

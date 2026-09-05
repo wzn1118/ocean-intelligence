@@ -1,10 +1,15 @@
 function [bounds, diagnostics] = oi_text_bounds(textHandle, figureHandle)
 %OI_TEXT_BOUNDS Measure a text object's rendered extent in figure coordinates.
 % The returned [left bottom width height] bounds are normalized to the
-% figure's drawable pixel canvas. Call this only after final fonts, strings,
-% interpreters, and rotations are set. MATLAB's Extent includes alignment and
-% rotation but excludes the Text Margin. The result is graphics geometry; it
-% does not verify exported glyphs or artifact-level clipping.
+% figure's drawable pixel canvas. After setting final fonts, strings,
+% interpreters, and rotations, render the owning axes or figure with a native
+% graphics operation such as exportgraphics before calling this helper.
+% Repeat that rendering after typography or text changes. In headless/batch
+% MATLAB (observed in R2026a), drawnow alone can leave placeholder Extent
+% values. This helper flushes pending updates but does not export or initialize
+% an unrendered scene. MATLAB's Extent includes alignment and rotation but
+% excludes the Text Margin. The result is graphics geometry; it does not
+% verify exported glyphs or artifact-level clipping.
 arguments
     textHandle (1,1)
     figureHandle (1,1)

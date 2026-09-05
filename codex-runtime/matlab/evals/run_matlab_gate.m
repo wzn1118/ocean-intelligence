@@ -238,15 +238,25 @@ figure_handle.PaperUnits = "inches";
 figure_handle.PaperPosition = [0 0 page_size_inches];
 figure_handle.PaperSize = page_size_inches;
 figure_handle.PaperPositionMode = "manual";
-page_margin = 0.3 ./ page_size_inches;
-axes_handle = axes("Parent", figure_handle, "Units", "normalized", ...
-    "PositionConstraint", "outerposition", ...
-    "OuterPosition", [page_margin 1 - 2 * page_margin]);
+page_margin = 0.4 ./ page_size_inches;
+layout_handle = tiledlayout(figure_handle, 1, 1, ...
+    "Padding", "loose", "TileSpacing", "compact");
+layout_handle.Units = "normalized";
+layout_handle.OuterPosition = [page_margin 1 - 2 * page_margin];
+axes_handle = nexttile(layout_handle);
 result = plotter(axes_handle);
 assert(result.ValidCount + result.MissingCount == prod(contract.shape), ...
     "run_matlab_gate:Counts", "Plot counts must match fixture shape");
 oi_apply_axes(axes_handle, theme);
-axes_handle.PositionConstraint = "outerposition";
+if isfield(result, "Legend") && isscalar(result.Legend) && isgraphics(result.Legend)
+    legend_location = string(result.Legend.Location);
+    if any(legend_location == ["northoutside" "southoutside" "eastoutside" "westoutside"])
+        result.Legend.Layout.Tile = erase(legend_location, "outside");
+    end
+end
+if isfield(result, "Colorbar") && isscalar(result.Colorbar) && isgraphics(result.Colorbar)
+    result.Colorbar.Layout.Tile = "east";
+end
 drawnow;
 entry = oi_export_figure(figure_handle, output_directory, identifier, ...
     2400, 1500, 300, "Title", title_text, ...

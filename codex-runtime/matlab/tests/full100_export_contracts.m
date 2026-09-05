@@ -23,8 +23,11 @@ figureHandle = oi_figure(1200, 675, "off");
 cleanupFigure = onCleanup(@() close_if_valid(figureHandle));
 figureHandle.Units = "inches";
 figureHandle.Position(3:4) = [4 2.25];
-axesHandle = axes("Parent", figureHandle, "Units", "normalized", ...
-    "PositionConstraint", "outerposition", "OuterPosition", [0.04 0.04 0.92 0.92]);
+layoutHandle = tiledlayout(figureHandle, 1, 1, ...
+    "Padding", "loose", "TileSpacing", "compact");
+layoutHandle.Units = "normalized";
+layoutHandle.OuterPosition = [0.04 0.04 0.92 0.92];
+axesHandle = nexttile(layoutHandle);
 timeValues = 1:20;
 lineOne = plot(axesHandle, timeValues, sin(timeValues / 3), "-o", ...
     "DisplayName", "observed");
@@ -39,9 +42,9 @@ yLabelText = string(native2unicode(uint8([230 184 169 229 186 166 32 40 100 101 
 title(axesHandle, titleText);
 xlabel(axesHandle, xLabelText);
 ylabel(axesHandle, yLabelText);
-legend(axesHandle, [lineOne lineTwo], "Location", "southoutside");
-axesHandle.PositionConstraint = "outerposition";
-axesHandle.OuterPosition = [0.04 0.04 0.92 0.92];
+legendHandle = legend(axesHandle, [lineOne lineTwo], ...
+    "Orientation", "horizontal", "NumColumns", 2);
+legendHandle.Layout.Tile = "south";
 drawnow;
 entry = oi_export_figure(figureHandle, outputDirectory, "publication", ...
     1200, 675, 300, "Title", titleText, ...

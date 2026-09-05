@@ -45,6 +45,8 @@ jobs:
         run: mh_lint --brief --input-encoding utf-8 --matlab 2021a codex-runtime/matlab/assets codex-runtime/matlab/tests codex-runtime/matlab/evals/run_matlab_gate.m
       - name: Node contracts
         run: node --test codex-runtime/server/*.test.mjs
+      - name: Generated router smoke preparation contracts
+        run: node --test codex-runtime/matlab/tests/generate_router_smoke.test.mjs
       - name: MATLAB asset contracts
         run: python3 codex-runtime/matlab/tests/validate_assets.py
       - name: Full-score evaluator tests
@@ -106,6 +108,10 @@ jobs:
           PY
           echo "MATLAB_FULL100_OUTPUT=$output" >> "$GITHUB_ENV"
           echo "MATLAB_EVAL_NONCE=$nonce" >> "$GITHUB_ENV"
+      - name: Prepare deterministic router smoke scripts
+        continue-on-error: true
+        shell: bash
+        run: node codex-runtime/matlab/tests/generate_router_smoke.mjs "${{ matrix.release }}" "$MATLAB_FULL100_OUTPUT"
       - name: Run licensed MATLAB plotting, reporting and interaction gates
         id: matlab-runtime
         continue-on-error: true

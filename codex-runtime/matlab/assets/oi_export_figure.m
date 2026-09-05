@@ -6,6 +6,8 @@ function entry = oi_export_figure(figureHandle, outputDirectory, figureId, width
 % files. Output contract: requested files exist, are nonempty, and include
 % byte counts, SHA-256 hashes, dimensions, normalized bounds, typography,
 % contrast, release/toolbox provenance, and honest verification evidence.
+% Layout text without public geometry is listed separately as unverified;
+% bounds audits cover measured objects only, not a complete layout claim.
 arguments
     figureHandle (1,1)
     outputDirectory (1,1) string
@@ -143,6 +145,7 @@ assert(pdfPages == 1 && abs(pdfWidthPoints - widthPoints) <= 1 ...
     "PDF MediaBox %.3fx%.3f pt (%d pages) must match requested %.3fx%.3f pt", ...
     pdfWidthPoints, pdfHeightPoints, pdfPages, widthPoints, heightPoints);
 textEvidence = collect_text(figureHandle);
+unmeasuredTextEvidence = collect_unmeasured_layout_text(figureHandle);
 axesEvidence = collect_axes(figureHandle);
 containerEvidence = collect_layout_containers(figureHandle);
 assert(~isempty(textEvidence) && ~isempty(axesEvidence), ...
@@ -168,7 +171,7 @@ assert(textOverlapCount == 0, "oi_export_figure:OverlappingText", ...
     "Visible text objects overlap in the final export layout");
 normalizedMargins = layout_margins(allEvidence);
 [fontSelectionVerified, cjkTextPresent, cjkFontVerified, selectedFonts] = font_audit( ...
-    figureHandle, textEvidence, axesEvidence);
+    figureHandle, textEvidence, axesEvidence, unmeasuredTextEvidence);
 assert(fontSelectionVerified, "oi_export_figure:FontUnavailable", ...
     "Every visible text and axes font must match an installed MATLAB font");
 assert(~cjkTextPresent || cjkFontVerified, "oi_export_figure:CJKFontUnavailable", ...
@@ -186,6 +189,7 @@ entry.title = options.Title;
 entry.source = options.Source;
 entry.theme = options.Theme;
 entry.text_objects = textEvidence;
+entry.unmeasured_text_objects = unmeasuredTextEvidence;
 entry.axes_objects = axesEvidence;
 [measuredContrast, foregroundColor, backgroundColor] = figure_contrast(figureHandle);
 [colorblindSafe, redundantEncoding, colorAudit] = oi_color_accessibility_audit(figureHandle);
@@ -213,6 +217,9 @@ entry.accessibility = struct("alt_text", altText, ...
     "color_vision_simulation", colorAudit);
 entry.rendering_evidence = struct("drawnow_completed", true, ...
     "bounds_audited", true, "bounds_units", "normalized", ...
+    "bounds_audit_scope", "measured_objects_only", ...
+    "bounds_audit_complete", isempty(unmeasuredTextEvidence), ...
+    "unmeasured_count", numel(unmeasuredTextEvidence), ...
     "clipped_count", clippedCount, "text_overlap_count", textOverlapCount, ...
     "normalized_margins", normalizedMargins, ...
     "font_selection_verified", fontSelectionVerified, ...
@@ -234,7 +241,8 @@ entry.artifact_freshness = struct( ...
     "content_verified_before_promotion", true, ...
     "promotion_strategy", "same-filesystem rename");
 entry.publication = struct( ...
-    "layout", struct("stable", true, "overlap_count", textOverlapCount, ...
+    "layout", struct("stable", isempty(unmeasuredTextEvidence), ...
+        "overlap_count", textOverlapCount, ...
         "clipped_count", clippedCount, "margins", normalizedMargins), ...
     "typography", struct("selected_fonts", selectedFonts, ...
         "glyphs_verified", false, "cjk_verified", false, ...
@@ -488,6 +496,7 @@ end
 function apply_export_font(figureHandle)
 installedFonts = string(listfonts);
 fontObjects = findall(figureHandle, "-property", "FontName");
+[layoutTextEvidence, layoutTextHandles] = collect_unmeasured_layout_text(figureHandle);
 assert(~isempty(fontObjects), "oi_export_figure:FontUnavailable", ...
     "The figure contains no font-bearing graphics objects");
 allText = strings(0, 1);
@@ -498,6 +507,7 @@ for index = 1:numel(stringObjects)
     catch
     end
 end
+allText = [allText; string({layoutTextEvidence.string})'];
 cjkPresent = contains_cjk(strjoin(allText, " "));
 candidates = ["WenQuanYi Zen Hei" "Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Noto Sans CJK JP" "Noto Sans CJK KR" "Source Han Sans SC" ...
@@ -535,6 +545,12 @@ if strlength(selectedFont) == 0
 end
 for index = 1:numel(fontObjects)
     fontObjects(index).FontName = selectedFont;
+end
+for index = 1:numel(layoutTextHandles)
+    layoutTextHandles{index}.FontName = selectedFont;
+    if contains_cjk(layoutTextEvidence(index).string)
+        layoutTextHandles{index}.Interpreter = "none";
+    end
 end
 if cjkPresent
     for index = 1:numel(stringObjects)
@@ -600,6 +616,38 @@ for index = 1:numel(objects)
         evidence(visibleIndex).bounds);
 end
 evidence = evidence(1:visibleIndex);
+end
+
+function [evidence, textHandles] = collect_unmeasured_layout_text(figureHandle)
+evidence = repmat(struct("role", "", "string", "", "font_name", "", ...
+    "font_size", 0, "class", "", "geometry_status", "unverified"), 0, 1);
+textHandles = cell(0, 1);
+objects = findall(figureHandle);
+for index = 1:numel(objects)
+    layoutHandle = objects(index);
+    if ~isa(layoutHandle, "matlab.graphics.layout.TiledChartLayout")
+        continue;
+    end
+    for propertyName = ["Title" "Subtitle" "XLabel" "YLabel"]
+        if ~isprop(layoutHandle, propertyName)
+            continue;
+        end
+        textHandle = layoutHandle.(char(propertyName));
+        if ~isa(textHandle, "matlab.graphics.layout.Text") ...
+                || string(textHandle.Visible) ~= "on"
+            continue;
+        end
+        renderedString = strjoin(string(textHandle.String), " ");
+        if strlength(strtrim(renderedString)) == 0
+            continue;
+        end
+        evidence(end + 1, 1) = struct("role", "layout." + lower(propertyName), ...
+            "string", renderedString, "font_name", string(textHandle.FontName), ...
+            "font_size", double(textHandle.FontSize), "class", string(class(textHandle)), ...
+            "geometry_status", "unverified"); %#ok<AGROW>
+        textHandles{end + 1, 1} = textHandle; %#ok<AGROW>
+    end
+end
 end
 
 function evidence = collect_axes(figureHandle)
@@ -726,12 +774,13 @@ for index = 1:numel(axesEvidence)
 end
 end
 
-function [verified, cjkPresent, cjkVerified, selectedFonts] = font_audit(figureHandle, textEvidence, axesEvidence)
+function [verified, cjkPresent, cjkVerified, selectedFonts] = font_audit(figureHandle, textEvidence, axesEvidence, unmeasuredTextEvidence)
 fontObjects = findall(figureHandle, "-property", "FontName");
 fontNames = strings(numel(fontObjects), 1);
 for index = 1:numel(fontObjects)
     fontNames(index) = string(fontObjects(index).FontName);
 end
+fontNames = [fontNames; string({unmeasuredTextEvidence.font_name})'];
 installedFonts = string(listfonts);
 fontAvailable = false(size(fontNames));
 for index = 1:numel(fontNames)
@@ -740,6 +789,7 @@ end
 verified = ~isempty(fontNames) && all(strlength(fontNames) > 0) ...
     && all(fontAvailable);
 renderedText = strjoin([string({textEvidence.string}) ...
+    string({unmeasuredTextEvidence.string}) ...
     string({axesEvidence.xlabel}) string({axesEvidence.ylabel})], " ");
 cjkPresent = contains_cjk(renderedText);
 cjkVerified = ~cjkPresent || all(is_cjk_font(fontNames));
