@@ -125,6 +125,26 @@ def require_vector(value: Any, count: int, field: str) -> list[Any]:
     return value
 
 
+def require_exact_fields(value: Any, fields: set[str], field: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ReportBuildError(f"{field} fields are missing or unsupported")
+    return value
+
+
+def derived_numeric_equal(actual: Any, expected: Any) -> bool:
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return False
+    if actual is None or expected is None:
+        return actual is expected
+    if not isinstance(actual, (int, float)) or not isinstance(expected, (int, float)):
+        return False
+    try:
+        return (math.isfinite(actual) and math.isfinite(expected)
+                and math.isclose(actual, expected, rel_tol=1e-12, abs_tol=1e-12))
+    except OverflowError:
+        return False
+
+
 def parse_utc(value: Any, field: str) -> datetime:
     text = require_text(value, field)
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", text):
@@ -500,9 +520,12 @@ def validate_layout_measurement(figure: dict[str, Any]) -> dict[str, Any]:
             raise ReportBuildError(f"figure {figure_id} unmeasured text must contain only public text/font identity and geometry_status")
         for field in ("role", "string", "font_name", "class", "geometry_status"):
             require_text(record[field], f"{figure_id}.unmeasured_text.{field}")
-        if (record["role"] not in {"layout.title", "layout.subtitle", "layout.xlabel", "layout.ylabel"}
-                or record["class"] != "matlab.graphics.layout.Text" or record["geometry_status"] != "unverified"):
-            raise ReportBuildError(f"figure {figure_id} unmeasured layout text must retain unverified geometry")
+        layout_text = (record["role"] in {"layout.title", "layout.subtitle", "layout.xlabel", "layout.ylabel"}
+                       and record["class"] == "matlab.graphics.layout.Text")
+        legend_title = (record["role"] == "legend.title"
+                        and record["class"] == "matlab.graphics.illustration.legend.Text")
+        if not (layout_text or legend_title) or record["geometry_status"] != "unverified":
+            raise ReportBuildError(f"figure {figure_id} unmeasured native text must retain unverified geometry")
         require_positive_number(record["font_size"], f"{figure_id}.unmeasured_text.font_size")
     result.update({
         "status": "available", "bounds_audit_scope": rendering["bounds_audit_scope"],
@@ -620,6 +643,198 @@ def validate_interactive_plot_data_evidence(
     }
 
 
+def validate_comparison_plot_data_evidence(
+    declaration: Any, context: dict[str, Any], input_bound: bool, runtime_release: str
+) -> dict[str, Any]:
+    label = "paired-observation-model plot_data_evidence"
+    require_exact_fields(declaration, {
+        "schema_version", "figure_id", "fixture_id", "fixture_sha256", "matlab_release",
+        "dimension_order", "shape", "quantity_unit", "missing_policy", "records", "input_values",
+        "pairing", "qc", "native_data_source", "native_scatter", "uncertainty", "paired_stats",
+    }, label)
+    if require_nonnegative_integer(declaration["schema_version"], f"{label}.schema_version") != 3:
+        raise ReportBuildError(f"{label}.schema_version must be 3")
+    require_bool(input_bound, f"{label}.input_bound")
+    if context["fixture_id"] != "paired-observation-model":
+        raise ReportBuildError(f"{label} requires the paired fixture context")
+    for field, expected_value in {
+        "figure_id": "paired-observation-model", "fixture_id": context["fixture_id"],
+        "fixture_sha256": context["fixture_sha256"], "quantity_unit": context["unit"],
+        "missing_policy": "preserve", "native_data_source": "Scatter.XData/YData",
+    }.items():
+        if not isinstance(declaration[field], str) or declaration[field] != expected_value:
+            raise ReportBuildError(f"{label}.{field} differs from the fixture contract")
+    if SHA256_PATTERN.fullmatch(declaration["fixture_sha256"]) is None:
+        raise ReportBuildError(f"{label}.fixture_sha256 must be a lowercase SHA256 digest")
+    release = normalize_matlab_release(declaration["matlab_release"], f"{label}.matlab_release")
+    if declaration["matlab_release"] != release or release != runtime_release:
+        raise ReportBuildError(f"{label} requires the matching canonical MATLAB release")
+
+    records = require_exact_fields(declaration["records"], {
+        "ids", "time_utc", "time_zone", "depth_m", "depth_unit", "depth_direction",
+        "source_rows", "source_row_origin",
+    }, f"{label}.records")
+    input_values = require_exact_fields(declaration["input_values"], {"observation", "model"}, f"{label}.input_values")
+    pairing = require_exact_fields(declaration["pairing"], {
+        "rule", "observation_indices", "model_indices", "finite_pair_mask", "paired_mask",
+        "unmatched_observation_count", "unmatched_model_count", "duplicate_key_policy",
+    }, f"{label}.pairing")
+    qc = require_exact_fields(declaration["qc"], {"policy", "observation", "model", "accepted_mask"}, f"{label}.qc")
+    observation_qc = require_exact_fields(qc["observation"], {"status", "flags", "accepted_values"}, f"{label}.qc.observation")
+    model_qc = require_exact_fields(qc["model"], {"status"}, f"{label}.qc.model")
+    scatter = require_exact_fields(declaration["native_scatter"], {
+        "source_rows", "record_ids", "x_values", "y_values",
+    }, f"{label}.native_scatter")
+    uncertainty = require_exact_fields(declaration["uncertainty"], {
+        "type", "unit", "representation", "confidence_level", "display", "observation", "model",
+        "graphics_mask", "native_data_source", "segments",
+    }, f"{label}.uncertainty")
+    observation_uncertainty = require_exact_fields(uncertainty["observation"], {
+        "status", "values", "missing_mask",
+    }, f"{label}.uncertainty.observation")
+    model_uncertainty = require_exact_fields(uncertainty["model"], {"status"}, f"{label}.uncertainty.model")
+    paired_stats = require_exact_fields(declaration["paired_stats"], {
+        "paired_count", "bias_model_minus_observation", "mean_absolute_error",
+        "root_mean_square_error", "pearson_correlation",
+    }, f"{label}.paired_stats")
+    uncertainty_type = {"standard_uncertainty": "standard-uncertainty"}.get(context["uncertainty"]["type"])
+    if uncertainty_type is None or uncertainty["confidence_level"] is not None:
+        raise ReportBuildError(f"{label} requires standard uncertainty, not a confidence interval")
+    for field, actual, expected_value in (
+        ("records.time_zone", records["time_zone"], "UTC"),
+        ("records.depth_unit", records["depth_unit"], "m"),
+        ("records.depth_direction", records["depth_direction"], "positive_down"),
+        ("records.source_row_origin", records["source_row_origin"], "call_entry_order"),
+        ("pairing.rule", pairing["rule"], "row-aligned"),
+        ("pairing.duplicate_key_policy", pairing["duplicate_key_policy"], "reject"),
+        ("qc.policy", qc["policy"], "preserve"),
+        ("qc.observation.status", observation_qc["status"], "provided"),
+        ("qc.model.status", model_qc["status"], "not_provided"),
+        ("uncertainty.type", uncertainty["type"], uncertainty_type),
+        ("uncertainty.unit", uncertainty["unit"], context["uncertainty"]["unit"]),
+        ("uncertainty.representation", uncertainty["representation"], "magnitude"),
+        ("uncertainty.display", uncertainty["display"], "horizontal-line-segments"),
+        ("uncertainty.observation.status", observation_uncertainty["status"], "provided"),
+        ("uncertainty.model.status", model_uncertainty["status"], "not_provided"),
+        ("uncertainty.native_data_source", uncertainty["native_data_source"], "UncertaintyGraphics.XData/YData"),
+    ):
+        if not isinstance(actual, str) or actual != expected_value:
+            raise ReportBuildError(f"{label}.{field} differs from the fixture contract")
+
+    expected = context["plot_input"]
+    observations = expected["observation_values"]
+    models = expected["model_values"]
+    magnitudes = expected["uncertainty_values"]
+    count = len(observations)
+    source_rows = list(range(1, count + 1))
+    finite_mask = [observation is not None and model is not None for observation, model in zip(observations, models)]
+    accepted_values = ["good", "suspect"]
+    accepted_mask = [flag in accepted_values for flag in expected["qc_flags"]]
+    paired_mask = [finite and accepted for finite, accepted in zip(finite_mask, accepted_mask)]
+    graphics_mask = [paired and magnitude is not None for paired, magnitude in zip(paired_mask, magnitudes)]
+    paired_indices = [index for index, paired in enumerate(paired_mask) if paired]
+    graphics_indices = [index for index, drawn in enumerate(graphics_mask) if drawn]
+    if not paired_indices or any(finite and not accepted for finite, accepted in zip(finite_mask, accepted_mask)):
+        raise ReportBuildError(f"{label} requires preserved complete pairs including suspect")
+    paired_observations = [observations[index] for index in paired_indices]
+    paired_models = [models[index] for index in paired_indices]
+    for field, values, source in (
+        ("shape", declaration["shape"], [count]),
+        ("records.source_rows", records["source_rows"], source_rows),
+        ("pairing.observation_indices", pairing["observation_indices"], source_rows),
+        ("pairing.model_indices", pairing["model_indices"], source_rows),
+        ("native_scatter.source_rows", scatter["source_rows"], [index + 1 for index in paired_indices]),
+    ):
+        vector = require_vector(values, len(source), f"{label}.{field}")
+        for value in vector:
+            require_nonnegative_integer(value, f"{label}.{field}")
+        if vector != source:
+            raise ReportBuildError(f"{label}.{field} differs from the complete fixture shape/source order")
+    for field in ("unmatched_observation_count", "unmatched_model_count"):
+        if require_nonnegative_integer(pairing[field], f"{label}.pairing.{field}") != 0:
+            raise ReportBuildError(f"{label}.pairing.{field} must be zero for row-aligned fixture records")
+    if require_nonnegative_integer(paired_stats["paired_count"], f"{label}.paired_stats.paired_count") != len(paired_indices):
+        raise ReportBuildError(f"{label}.paired_stats.paired_count differs from complete fixture pairs")
+    for field, values, source in (
+        ("dimension_order", declaration["dimension_order"], ["observation"]),
+        ("records.ids", records["ids"], expected["record_ids"]),
+        ("records.time_utc", records["time_utc"], expected["time_utc"]),
+        ("qc.observation.flags", observation_qc["flags"], expected["qc_flags"]),
+        ("qc.observation.accepted_values", observation_qc["accepted_values"], accepted_values),
+        ("native_scatter.record_ids", scatter["record_ids"], [expected["record_ids"][index] for index in paired_indices]),
+    ):
+        vector = require_vector(values, len(source), f"{label}.{field}")
+        if any(not isinstance(value, str) for value in vector) or vector != source:
+            raise ReportBuildError(f"{label}.{field} differs from the full fixture identity/order")
+    if len(set(records["ids"])) != count:
+        raise ReportBuildError(f"{label}.records.ids must be unique")
+    for timestamp in records["time_utc"]:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", timestamp) is None:
+            raise ReportBuildError(f"{label}.records.time_utc must use canonical UTC seconds")
+        parse_utc(timestamp, f"{label}.records.time_utc")
+    for field, values, source in (
+        ("records.depth_m", records["depth_m"], expected["depth_m"]),
+        ("input_values.observation", input_values["observation"], observations),
+        ("input_values.model", input_values["model"], models),
+        ("uncertainty.observation.values", observation_uncertainty["values"], magnitudes),
+        ("native_scatter.x_values", scatter["x_values"], paired_observations),
+        ("native_scatter.y_values", scatter["y_values"], paired_models),
+    ):
+        vector = require_vector(values, len(source), f"{label}.{field}")
+        if not all(numeric_equal(value, expected_value) for value, expected_value in zip(vector, source)):
+            raise ReportBuildError(f"{label}.{field} differs from the full fixture array/subset")
+    for field, values, source in (
+        ("pairing.finite_pair_mask", pairing["finite_pair_mask"], finite_mask),
+        ("pairing.paired_mask", pairing["paired_mask"], paired_mask),
+        ("qc.accepted_mask", qc["accepted_mask"], accepted_mask),
+        ("uncertainty.observation.missing_mask", observation_uncertainty["missing_mask"],
+         [value is None for value in magnitudes]),
+        ("uncertainty.graphics_mask", uncertainty["graphics_mask"], graphics_mask),
+    ):
+        vector = require_vector(values, count, f"{label}.{field}")
+        for value in vector:
+            require_bool(value, f"{label}.{field}")
+        if vector != source:
+            raise ReportBuildError(f"{label}.{field} differs from the fixture missing/QC/pairing mask")
+
+    segments = require_vector(uncertainty["segments"], len(graphics_indices), f"{label}.uncertainty.segments")
+    for segment, index in zip(segments, graphics_indices):
+        segment_label = f"{label}.uncertainty.segments[{index}]"
+        require_exact_fields(segment, {"source_row", "record_id", "x_values", "y_values"}, segment_label)
+        if (require_nonnegative_integer(segment["source_row"], f"{segment_label}.source_row") != index + 1
+                or not isinstance(segment["record_id"], str) or segment["record_id"] != expected["record_ids"][index]):
+            raise ReportBuildError(f"{segment_label} differs from fixture segment source order/identity")
+        for field, endpoints in (
+            ("x_values", [observations[index] - magnitudes[index], observations[index] + magnitudes[index]]),
+            ("y_values", [models[index], models[index]]),
+        ):
+            vector = require_vector(segment[field], 2, f"{segment_label}.{field}")
+            if not all(derived_numeric_equal(value, endpoint) for value, endpoint in zip(vector, endpoints)):
+                raise ReportBuildError(f"{segment_label}.{field} differs from observation-only horizontal endpoints")
+
+    for source, actual_observations, actual_models in (
+        ("fixture", paired_observations, paired_models),
+        ("native Scatter", scatter["x_values"], scatter["y_values"]),
+    ):
+        residuals = [model - observation for observation, model in zip(actual_observations, actual_models)]
+        metrics = {
+            "bias_model_minus_observation": statistics.fmean(residuals),
+            "mean_absolute_error": statistics.fmean(abs(value) for value in residuals),
+            "root_mean_square_error": math.sqrt(statistics.fmean(value * value for value in residuals)),
+            "pearson_correlation": pearson_correlation(actual_observations, actual_models),
+        }
+        for field, value in metrics.items():
+            if not derived_numeric_equal(paired_stats[field], value):
+                raise ReportBuildError(f"{label}.paired_stats.{field} differs from independently derived {source} metrics")
+    return {
+        "status": "runtime_declaration_verified" if input_bound else "not_verified",
+        "provided": True, "local_arrays_match": True, "input_fixture_binding_verified": input_bound,
+        "reason": "Native Scatter/Line and helper record declarations match complete fixture arrays, identity and paired metrics; not independently re-executed"
+        if input_bound else "Arrays match local fixtures but runtime input bytes are not bound",
+        "declaration": declaration,
+    }
+
+
 def validate_plot_data_evidence(
     figure: dict[str, Any], context: dict[str, Any], input_bound: bool, runtime_release: str
 ) -> dict[str, Any]:
@@ -633,6 +848,8 @@ def validate_plot_data_evidence(
     declaration = contract["plot_data_evidence"]
     if figure_id == "paired-interactive" and isinstance(declaration, dict) and declaration.get("schema_version") == 2:
         return validate_interactive_plot_data_evidence(declaration, context, input_bound, runtime_release)
+    if figure_id == "paired-observation-model" and isinstance(declaration, dict) and declaration.get("schema_version") == 3:
+        return validate_comparison_plot_data_evidence(declaration, context, input_bound, runtime_release)
     fields = {
         "schema_version", "figure_id", "fixture_id", "fixture_sha256", "matlab_release",
         "dimension_order", "shape", "time_utc", "depth_m", "depth_unit", "quantity_unit",
@@ -800,6 +1017,8 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
         if plot_data["status"] == "runtime_declaration_verified":
             scientific["qc"]["plot_filtering"] = "preserve"
             scientific["uncertainty"]["plot_display"] = plot_data["declaration"]["uncertainty"]["display"]
+            if figure_id == "paired-observation-model":
+                scientific["uncertainty"].update({"scope": "observation", "model": {"status": "not_provided"}})
         layout_measurement = validate_layout_measurement(figure)
         exports = figure.get("exports")
         if not isinstance(exports, dict) or set(exports) != set(REQUIRED_FORMATS):
@@ -1225,6 +1444,16 @@ def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any
             "values": variables[variable]["values"], "qc_flags": variables["qc"]["values"],
             "uncertainty_values": variables[f"{variable}_standard_uncertainty"]["values"],
         }
+    paired_records = payloads["paired-observation-model"]["records"]
+    figure_contexts["paired-observation-model"]["plot_input"] = {
+        "record_ids": [record["id"] for record in paired_records],
+        "time_utc": [record["time"] for record in paired_records],
+        "depth_m": [record["depth_m"] for record in paired_records],
+        "observation_values": [record["observation_degC"] for record in paired_records],
+        "model_values": [record["model_degC"] for record in paired_records],
+        "qc_flags": [record["qc"] for record in paired_records],
+        "uncertainty_values": [record["uncertainty_degC"] for record in paired_records],
+    }
     return summaries, figure_contexts
 
 
@@ -1369,8 +1598,12 @@ def render_report(evidence: dict[str, Any]) -> str:
             f"绝对误差不超过逐记录标准不确定度的配对数为 {paired_stats['within_standard_uncertainty_count']}/{paired['counts']['valid_count']}。"
             "这是合成观测-模式基准的配对表现，不是生产模式验证结果。[E2]",
             f"观测侧缺测 {len(paired['pairing']['observation_missing_ids'])} 条，模式侧缺测 {len(paired['pairing']['model_missing_ids'])} 条；"
-            "观测均值和模式均值均限定在相同完整配对上。记录 ID、时间和深度用于唯一匹配，suspect 保留。",
+            "观测均值和模式均值均限定在相同完整配对上。按输入行配对；记录 ID、时间和深度保留用于身份追踪，suspect 保留。",
             "误差覆盖分母为完整配对数，阈值仅取观测侧标准不确定度。fixture 未提供模式不确定度，不能据此声明联合置信区间、概率校准或独立实测验证。",
+            ("比较图原生 Scatter 与水平 Line 端点声明已核对：X 为观测值、Y 为模式值，水平线段表示观测值加减一个观测标准不确定度；"
+             "模型不确定度为 `not_provided`，不绘制模型侧区间。这不是模式误差模型或置信区间，也不等于人工视觉通过。"
+             if paired_figure["plot_data_evidence"]["status"] == "runtime_declaration_verified" else
+             "比较图原生散点与水平观测标准不确定度线段仍为 `not_verified`；不能从 fixture 的不确定度存在推定图上已呈现。模型不确定度未提供。"),
             "",
             f"![{paired_figure['title']}]({paired_png['file']})",
             "",
@@ -1431,7 +1664,7 @@ def render_report(evidence: dict[str, Any]) -> str:
             lines.append("| " + " | ".join([*values, "; ".join(details) or "无"]) + " |")
     lines.extend([
         "", "### 布局测量覆盖", "",
-        "以下为清单记录，未独立重测。完整标志仅指边界审计覆盖；文件哈希/尺寸通过、`bounds_audited` 或 `layout.stable` 均不等于视觉、字形或布局外观通过。`layout.Text` 无公开 Extent 的标题/标签保持未验证。",
+        "以下为清单记录，未独立重测。完整标志仅指边界审计覆盖；文件哈希/尺寸通过、`bounds_audited` 或 `layout.stable` 均不等于视觉、字形或布局外观通过。`layout.Text` 标题/标签与 `legend.Text` 图例标题无公开 Extent，保持未验证。",
         "",
         "| 图 ID | 文件哈希/尺寸 | 已测文本/坐标轴记录数 | 边界审计覆盖 | 未测标题/标签 |",
         "|---|---|---:|---|---|",
@@ -1467,6 +1700,8 @@ def render_report(evidence: dict[str, Any]) -> str:
             qc_text = "preserve，保留 suspect"
             uncertainty = declaration["uncertainty"]
             uncertainty_text = f"{uncertainty['type']} / {uncertainty['unit']} / {uncertainty['display']}"
+            if figure["id"] == "paired-observation-model":
+                uncertainty_text += "（仅观测侧水平线段；模型不确定度 not_provided）"
         else:
             status += "（输入字节未绑定）" if declaration else "（未提供）"
             qc_text = "应用未验证"

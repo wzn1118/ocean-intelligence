@@ -6,7 +6,7 @@ function entry = oi_export_figure(figureHandle, outputDirectory, figureId, width
 % files. Output contract: requested files exist, are nonempty, and include
 % byte counts, SHA-256 hashes, dimensions, normalized bounds, typography,
 % contrast, release/toolbox provenance, and honest verification evidence.
-% Layout text without public geometry is listed separately as unverified;
+% Layout and legend text without public geometry is listed as unverified;
 % bounds audits cover measured objects only, not a complete layout claim.
 arguments
     figureHandle (1,1)
@@ -556,7 +556,8 @@ for index = 1:numel(fontObjects)
 end
 for index = 1:numel(layoutTextHandles)
     layoutTextHandles{index}.FontName = selectedFont;
-    if contains_cjk(layoutTextEvidence(index).string)
+    if contains_cjk(layoutTextEvidence(index).string) ...
+            && isprop(layoutTextHandles{index}, "Interpreter")
         layoutTextHandles{index}.Interpreter = "none";
     end
 end
@@ -632,16 +633,27 @@ evidence = repmat(struct("role", "", "string", "", "font_name", "", ...
 textHandles = cell(0, 1);
 objects = findall(figureHandle);
 for index = 1:numel(objects)
-    layoutHandle = objects(index);
-    if ~isa(layoutHandle, "matlab.graphics.layout.TiledChartLayout")
-        continue;
-    end
-    for propertyName = ["Title" "Subtitle" "XLabel" "YLabel"]
-        if ~isprop(layoutHandle, propertyName)
+    ownerHandle = objects(index);
+    if isa(ownerHandle, "matlab.graphics.layout.TiledChartLayout")
+        propertyNames = ["Title" "Subtitle" "XLabel" "YLabel"];
+        textClass = "matlab.graphics.layout.Text";
+        rolePrefix = "layout.";
+    elseif isa(ownerHandle, "matlab.graphics.illustration.Legend")
+        if string(ownerHandle.Visible) ~= "on"
             continue;
         end
-        textHandle = layoutHandle.(char(propertyName));
-        if ~isa(textHandle, "matlab.graphics.layout.Text") ...
+        propertyNames = "Title";
+        textClass = "matlab.graphics.illustration.legend.Text";
+        rolePrefix = "legend.";
+    else
+        continue;
+    end
+    for propertyName = propertyNames
+        if ~isprop(ownerHandle, propertyName)
+            continue;
+        end
+        textHandle = ownerHandle.(char(propertyName));
+        if ~isa(textHandle, textClass) ...
                 || string(textHandle.Visible) ~= "on"
             continue;
         end
@@ -649,7 +661,7 @@ for index = 1:numel(objects)
         if strlength(strtrim(renderedString)) == 0
             continue;
         end
-        evidence(end + 1, 1) = struct("role", "layout." + lower(propertyName), ...
+        evidence(end + 1, 1) = struct("role", rolePrefix + lower(propertyName), ...
             "string", renderedString, "font_name", string(textHandle.FontName), ...
             "font_size", double(textHandle.FontSize), "class", string(class(textHandle)), ...
             "geometry_status", "unverified"); %#ok<AGROW>

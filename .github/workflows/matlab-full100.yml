@@ -42,7 +42,7 @@ jobs:
       - name: Install evaluation dependencies
         run: python3 -m pip install -r codex-runtime/matlab/evals/requirements.txt
       - name: MATLAB syntax at oldest runtime boundary
-        run: mh_lint --brief --input-encoding utf-8 --matlab 2021a codex-runtime/matlab/assets codex-runtime/matlab/tests codex-runtime/matlab/evals/run_matlab_gate.m
+        run: mh_lint --brief --input-encoding utf-8 --matlab 2021a codex-runtime/matlab/assets codex-runtime/matlab/tests codex-runtime/matlab/evals
       - name: Node contracts
         run: node --test codex-runtime/server/*.test.mjs
       - name: Generated router smoke preparation contracts

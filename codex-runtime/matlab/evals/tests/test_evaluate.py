@@ -838,6 +838,210 @@ class RuntimePlotDataEvidenceTests(RuntimeFixtureTestCase):
                 load_validator.assert_not_called()
 
 
+class RuntimeComparisonV3EvidenceTests(RuntimeFixtureTestCase):
+    """Exercise the runtime entry with synthetic declarations, not MATLAB execution."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = Path(__file__).with_name("test_ocean_report.py")
+        spec = importlib.util.spec_from_file_location("matlab_ocean_report_test_fixtures", path)
+        assert spec and spec.loader
+        cls.report_fixtures = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.report_fixtures)
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bundle = self.report_fixtures.RuntimeBundle(self.output_root)
+        self.runtime.update(
+            nonce=self.bundle.runtime["nonce"], matlab_release=self.bundle.release,
+            matlab_version="Synthetic unit fixture; not an executed MATLAB version",
+        )
+        self.bundle.runtime = self.runtime
+        self.manifest = self.bundle.manifest
+        self.manifest["runtime"] = {"matlab_release": self.bundle.writer_release}
+        for identifier in self.report_fixtures.ocean_report.GRID_NATIVE_SOURCES:
+            self.bundle.record_plot_data_evidence(identifier)
+        self.bundle.record_interactive_plot_data_evidence()
+        self.declaration = self.bundle.record_synthetic_comparison_plot_data_evidence(self.fixture_root)
+        self.figure = next(figure for figure in self.manifest["figures"] if figure["id"] == "paired-observation-model")
+
+    def validate_output(self) -> dict:
+        self.bundle.write_metadata()
+        return matlab_eval.validate_runtime_output(self.output_root, self.runtime["nonce"], self.started_ns)
+
+    def test_synthetic_v3_uses_shared_consumer_with_bound_full_fixture(self) -> None:
+        report = matlab_eval.load_report_validator()
+        original = copy.deepcopy((self.runtime, self.manifest))
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "load_fixture_statistics", wraps=report.load_fixture_statistics) as load_contexts, \
+                mock.patch.object(report, "validate_plot_data_evidence", wraps=report.validate_plot_data_evidence) as dispatch, \
+                mock.patch.object(report, "validate_comparison_plot_data_evidence",
+                                  wraps=report.validate_comparison_plot_data_evidence) as comparison:
+            result = self.validate_output()
+        load_contexts.assert_called_once_with(self.fixture_root)
+        self.assertEqual(dispatch.call_count, 4)
+        comparison.assert_called_once()
+        declaration, context, input_bound, release = comparison.call_args.args
+        self.assertEqual(declaration, self.declaration)
+        self.assertEqual(context["fixture_id"], "paired-observation-model")
+        checked_input = next(item for item in result["input_fixtures"] if item["id"] == context["fixture_id"])
+        self.assertEqual(context["fixture_sha256"], checked_input["sha256"])
+        self.assertIs(input_bound, True)
+        self.assertEqual(release, self.runtime["matlab_release"])
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(len(result["artifacts"]), 12)
+        self.assertEqual((self.runtime, self.manifest), original)
+        proofs = {item["figure_id"]: item for item in result["plot_data_evidence"]["figures"]}
+        self.assertEqual(len(proofs), 4)
+        self.assertTrue(all(proof["status"] == "runtime_declaration_verified" for proof in proofs.values()))
+        proof = proofs["paired-observation-model"]
+        self.assertEqual(proof["declaration"], self.declaration)
+        self.assertIs(proof["local_arrays_match"], True)
+        self.assertIs(proof["input_fixture_binding_verified"], True)
+        self.assertEqual(self.declaration["shape"], [12])
+        self.assertIsNone(self.declaration["input_values"]["observation"][-1])
+        self.assertEqual(self.declaration["input_values"]["model"][-1], 13.96)
+        self.assertEqual(len(self.declaration["native_scatter"]["x_values"]), 11)
+        self.assertEqual(len(self.declaration["uncertainty"]["segments"]), 11)
+        self.assertEqual(self.declaration["uncertainty"]["model"], {"status": "not_provided"})
+        self.assertIn("not independent", result["plot_data_evidence"]["scope"])
+        self.assertEqual(matlab_eval.validate_visual_audit(None, result)["status"], "pending")
+        self.assertNotIn("score", result)
+
+    def test_legacy_package_without_comparison_v3_keeps_three_proofs_and_runtime_pass(self) -> None:
+        del self.figure["scientific_data_contract"]["plot_data_evidence"]
+        result = self.validate_output()
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(len(result["artifacts"]), 12)
+        proofs = {item["figure_id"]: item for item in result["plot_data_evidence"]["figures"]}
+        comparison = proofs.pop("paired-observation-model")
+        self.assertEqual(comparison["status"], "not_verified")
+        self.assertIs(comparison["provided"], False)
+        self.assertIsNone(comparison["declaration"])
+        self.assertEqual(len(proofs), 3)
+        self.assertTrue(all(proof["status"] == "runtime_declaration_verified" for proof in proofs.values()))
+
+    def test_full_model_value_on_missing_observation_row_cannot_be_erased_or_changed(self) -> None:
+        scatter = copy.deepcopy(self.declaration["native_scatter"])
+        stats = copy.deepcopy(self.declaration["paired_stats"])
+        for value in (None, 0, 14.96):
+            self.declaration["input_values"]["model"][-1] = value
+            with self.subTest(value=value), self.assertRaisesRegex(matlab_eval.EvaluationError, r"input_values\.model"):
+                self.validate_output()
+            self.assertEqual(self.declaration["native_scatter"], scatter)
+            self.assertEqual(self.declaration["paired_stats"], stats)
+
+    def test_fabricated_model_uncertainty_is_rejected(self) -> None:
+        observation_values = self.declaration["uncertainty"]["observation"]["values"]
+        for model in (
+            {"status": "not_provided", "values": [0] * 12},
+            {"status": "not_provided", "values": [None] * 12},
+            {"status": "provided", "values": observation_values},
+            {"status": "provided"},
+        ):
+            self.declaration["uncertainty"]["model"] = model
+            with self.subTest(model=model), self.assertRaisesRegex(matlab_eval.EvaluationError, r"uncertainty\.model"):
+                self.validate_output()
+
+    def test_comparison_v3_top_level_bypasses_are_rejected(self) -> None:
+        sources = [("runtime", self.runtime), ("manifest", self.manifest),
+                   ("manifest.runtime", self.manifest["runtime"]), ("figure", self.figure),
+                   ("figure.runtime", self.figure["runtime"])]
+        for field, source in sources:
+            for declaration in (self.declaration, {}):
+                source["plot_data_evidence"] = declaration
+                try:
+                    with self.subTest(field=field, empty=not declaration), \
+                            self.assertRaisesRegex(matlab_eval.EvaluationError, "plot_data_evidence must be nested"):
+                        self.validate_output()
+                finally:
+                    del source["plot_data_evidence"]
+
+    def test_comparison_fixture_hash_must_match_the_measured_paired_snapshot(self) -> None:
+        temperature_input = next(item for item in self.runtime["input_fixtures"]
+                                 if item["id"] == "crossed-time-depth-temperature")
+        for value in ("0" * 64, temperature_input["sha256"]):
+            self.declaration["fixture_sha256"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(matlab_eval.EvaluationError, "fixture_sha256"):
+                self.validate_output()
+
+    def test_native_scatter_segments_and_statistics_are_checked_by_the_runtime_entry(self) -> None:
+        original = copy.deepcopy(self.declaration)
+        for field, mutate in (
+            ("native_scatter.y_values", lambda proof: proof["native_scatter"]["y_values"].__setitem__(0, 99)),
+            ("uncertainty.segments", lambda proof: proof["uncertainty"]["segments"][0]["x_values"].__setitem__(1, 99)),
+            ("paired_stats", lambda proof: proof["paired_stats"].__setitem__("bias_model_minus_observation", 99)),
+        ):
+            declaration = copy.deepcopy(original)
+            mutate(declaration)
+            self.figure["scientific_data_contract"]["plot_data_evidence"] = declaration
+            with self.subTest(field=field), self.assertRaises(matlab_eval.EvaluationError) as caught:
+                self.validate_output()
+            self.assertIn(field, str(caught.exception))
+
+    def test_valid_comparison_v3_does_not_skip_artifact_hash_checks(self) -> None:
+        artifact = self.output_root / self.figure["exports"]["png"]["file"]
+        artifact.write_bytes(artifact.read_bytes() + b"synthetic test corruption")
+        report = matlab_eval.load_report_validator()
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "validate_comparison_plot_data_evidence",
+                                  wraps=report.validate_comparison_plot_data_evidence) as comparison:
+            with self.assertRaisesRegex(matlab_eval.EvaluationError, "manifest byte/hash mismatch"):
+                self.validate_output()
+        comparison.assert_called_once()
+
+    def test_paired_snapshot_change_after_v3_validation_is_rejected(self) -> None:
+        report = matlab_eval.load_report_validator()
+        validate_comparison = report.validate_comparison_plot_data_evidence
+        record = next(item for item in self.runtime["input_fixtures"] if item["id"] == "paired-observation-model")
+        snapshot = self.output_root / record["file"]
+
+        def mutate_snapshot(*args):
+            proof = validate_comparison(*args)
+            snapshot.write_bytes(snapshot.read_bytes() + b"\n")
+            return proof
+
+        with mock.patch.object(matlab_eval, "load_report_validator", return_value=report), \
+                mock.patch.object(report, "validate_comparison_plot_data_evidence", side_effect=mutate_snapshot), \
+                mock.patch.object(matlab_eval, "artifact_signature", wraps=matlab_eval.artifact_signature) as artifacts:
+            with self.assertRaisesRegex(matlab_eval.EvaluationError, "input fixture snapshot byte/hash mismatch"):
+                self.validate_output()
+        self.assertEqual(artifacts.call_count, 12)
+
+    def test_comparison_v3_does_not_change_score_or_visual_gate_weights(self) -> None:
+        marker = self.directory / "synthetic-runtime-start.marker"
+        marker.write_text("Synthetic unit-test marker, not a MATLAB run", encoding="utf-8")
+        os.utime(marker, ns=(self.started_ns, self.started_ns))
+        rubric = matlab_eval.load_json(matlab_eval.RUBRIC_PATH)
+        expected_weights = {gate["id"]: gate["weight"] for gate in rubric["gates"]}
+        results = []
+        with mock.patch.object(matlab_eval, "REPOSITORY_ROOT", self.directory), \
+                mock.patch.object(matlab_eval, "FREEZE_PATH", self.directory / "absent-test-freeze.txt"), \
+                mock.patch.object(matlab_eval, "run_matlab") as run_matlab:
+            for provided in (False, True):
+                contract = self.figure["scientific_data_contract"]
+                if provided:
+                    contract["plot_data_evidence"] = self.declaration
+                else:
+                    del contract["plot_data_evidence"]
+                self.bundle.write_metadata()
+                results.append(matlab_eval.evaluate(
+                    "require", self.directory / "unused-runtime", None, 10, False,
+                    runtime_evidence_dir=self.output_root, runtime_nonce=self.runtime["nonce"], runtime_start_marker=marker,
+                ))
+            run_matlab.assert_not_called()
+        legacy, comparison = results
+        self.assertEqual(legacy["gates"], comparison["gates"])
+        self.assertEqual(legacy["score"], comparison["score"])
+        self.assertEqual(comparison["status"], "runtime_pending")
+        self.assertEqual({gate["id"]: gate["weight"] for gate in comparison["gates"]}, expected_weights)
+        visual_gate = next(gate for gate in comparison["gates"] if gate["id"] == "artifact_visual_audit")
+        self.assertEqual(visual_gate["weight"], 10)
+        self.assertEqual(visual_gate["status"], "pending")
+        self.assertEqual(visual_gate["trusted_evidence"], [])
+        self.assertEqual(comparison["visual_audit"]["status"], "pending")
+
+
 class FreezeTests(unittest.TestCase):
     def test_inventory_excludes_itself_and_caches(self) -> None:
         paths = matlab_eval.inventory_files()

@@ -429,6 +429,97 @@ class RuntimeBundle:
         figure["scientific_data_contract"]["plot_data_evidence"] = declaration
         return declaration
 
+    @staticmethod
+    def synthetic_comparison_stats(observations: list, models: list) -> dict:
+        count = len(observations)
+        residuals = [model - observation for observation, model in zip(observations, models)]
+        observation_mean = sum(observations) / count
+        model_mean = sum(models) / count
+        centered_observations = [value - observation_mean for value in observations]
+        centered_models = [value - model_mean for value in models]
+        scale = math.sqrt(sum(value * value for value in centered_observations)) * math.sqrt(
+            sum(value * value for value in centered_models)
+        )
+        correlation = (sum(left * right for left, right in zip(centered_observations, centered_models)) / scale
+                       if count >= 2 and scale else None)
+        return {
+            "paired_count": count,
+            "bias_model_minus_observation": sum(residuals) / count,
+            "mean_absolute_error": sum(abs(value) for value in residuals) / count,
+            "root_mean_square_error": math.sqrt(sum(value * value for value in residuals) / count),
+            "pearson_correlation": correlation,
+        }
+
+    def record_synthetic_comparison_plot_data_evidence(
+        self, fixture_directory: Path = ocean_report.DEFAULT_FIXTURE_DIRECTORY,
+    ) -> dict:
+        """Build a fixture-derived unit declaration, NOT actual MATLAB/native execution evidence."""
+        identifier = "paired-observation-model"
+        filename = ocean_report.EXPECTED_FIXTURES[identifier]
+        path = self.root / "fixture-inputs" / filename
+        if not path.is_file():
+            path = fixture_directory / filename
+        fixture = json.loads(path.read_bytes())
+        records = fixture["records"]
+        contract = fixture["contract"]
+        observations = [record["observation_degC"] for record in records]
+        models = [record["model_degC"] for record in records]
+        magnitudes = [record["uncertainty_degC"] for record in records]
+        flags = [record["qc"] for record in records]
+        accepted_values = ["good", "suspect"]
+        accepted_mask = [flag in accepted_values for flag in flags]
+        finite_mask = [observation is not None and model is not None
+                       for observation, model in zip(observations, models)]
+        paired_mask = [finite and accepted for finite, accepted in zip(finite_mask, accepted_mask)]
+        graphics_mask = [paired and magnitude is not None for paired, magnitude in zip(paired_mask, magnitudes)]
+        selected = [index for index, paired in enumerate(paired_mask) if paired]
+        scatter = {
+            "source_rows": [index + 1 for index in selected],
+            "record_ids": [records[index]["id"] for index in selected],
+            "x_values": [observations[index] for index in selected],
+            "y_values": [models[index] for index in selected],
+        }
+        declaration = {
+            "schema_version": 3, "figure_id": identifier, "fixture_id": identifier,
+            "fixture_sha256": sha256(path), "matlab_release": self.release,
+            "dimension_order": ["observation"], "shape": [len(records)],
+            "quantity_unit": contract["observation_unit"], "missing_policy": contract["missing_policy"],
+            "records": {
+                "ids": [record["id"] for record in records], "time_utc": [record["time"] for record in records],
+                "time_zone": contract["time_zone"], "depth_m": [record["depth_m"] for record in records],
+                "depth_unit": "m", "depth_direction": contract["depth_direction"],
+                "source_rows": list(range(1, len(records) + 1)), "source_row_origin": "call_entry_order",
+            },
+            "input_values": {"observation": observations, "model": models},
+            "pairing": {
+                "rule": "row-aligned", "observation_indices": list(range(1, len(records) + 1)),
+                "model_indices": list(range(1, len(records) + 1)), "finite_pair_mask": finite_mask,
+                "paired_mask": paired_mask, "unmatched_observation_count": 0, "unmatched_model_count": 0,
+                "duplicate_key_policy": "reject",
+            },
+            "qc": {"policy": contract["qc_policy"],
+                   "observation": {"status": "provided", "flags": flags, "accepted_values": accepted_values},
+                   "model": {"status": "not_provided"}, "accepted_mask": accepted_mask},
+            "native_data_source": "Scatter.XData/YData", "native_scatter": scatter,
+            "uncertainty": {
+                "type": {"standard_uncertainty": "standard-uncertainty"}[contract["uncertainty_type"]],
+                "unit": contract["uncertainty_unit"], "representation": "magnitude", "confidence_level": None,
+                "display": "horizontal-line-segments",
+                "observation": {"status": "provided", "values": magnitudes,
+                                "missing_mask": [value is None for value in magnitudes]},
+                "model": {"status": "not_provided"}, "graphics_mask": graphics_mask,
+                "native_data_source": "UncertaintyGraphics.XData/YData",
+                "segments": [{"source_row": index + 1, "record_id": records[index]["id"],
+                              "x_values": [observations[index] - magnitudes[index], observations[index] + magnitudes[index]],
+                              "y_values": [models[index], models[index]]}
+                             for index, drawn in enumerate(graphics_mask) if drawn],
+            },
+            "paired_stats": self.synthetic_comparison_stats(scatter["x_values"], scatter["y_values"]),
+        }
+        figure = next(item for item in self.manifest["figures"] if item["id"] == identifier)
+        figure["scientific_data_contract"]["plot_data_evidence"] = declaration
+        return declaration
+
 
 class OceanReportTests(unittest.TestCase):
     def fixture_payload(self, identifier: str) -> dict[str, object]:
@@ -527,6 +618,44 @@ class OceanReportTests(unittest.TestCase):
             self.assertIn("无公开 Extent", table)
             self.assertIn("均不等于视觉、字形或布局外观通过", table)
             self.assertIn("数据来源=合成基准非实测海况", report)
+
+    def test_native_legend_title_remains_unmeasured_in_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            record = self.unmeasured_layout_text("legend.title", "观测标准不确定度 | synthetic")
+            record["class"] = "matlab.graphics.illustration.legend.Text"
+            bundle.record_layout_measurement("paired-observation-model", record)
+            bundle.write_metadata()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            figure = next(item for item in evidence["runtime_evidence"]["figures"]
+                          if item["id"] == "paired-observation-model")
+            coverage = figure["layout_measurement"]
+            self.assertEqual(coverage["unmeasured_text_objects"], [record])
+            self.assertEqual(coverage["unmeasured_count"], 1)
+            self.assertFalse(coverage["bounds_audit_complete"])
+            self.assertFalse(coverage["layout_stable_declared"])
+            self.assertEqual(figure["verification"]["layout_visual"], "not_verified")
+            report = (root / "report.md").read_text(encoding="utf-8")
+            self.assertIn("legend.title: 观测标准不确定度 \\| synthetic", report)
+
+    def test_unmeasured_legend_identity_is_not_a_general_text_exemption(self) -> None:
+        for role, class_name in (
+            ("legend.title", "matlab.graphics.layout.Text"),
+            ("layout.title", "matlab.graphics.illustration.legend.Text"),
+            ("legend.subtitle", "matlab.graphics.illustration.legend.Text"),
+            ("legend.title", "matlab.graphics.primitive.Text"),
+        ):
+            with self.subTest(role=role, class_name=class_name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                record = self.unmeasured_layout_text(role)
+                record["class"] = class_name
+                bundle.record_layout_measurement("paired-observation-model", record)
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
 
     def test_legacy_layout_flags_do_not_supply_missing_measurement_coverage(self) -> None:
         for flags in ({}, {"bounds_audited": True}):
@@ -1836,6 +1965,474 @@ class OceanReportTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ocean_report.ReportBuildError, "visual inspection as not_run"):
                 ocean_report.build_ocean_report(root, ocean_report.DEFAULT_FIXTURE_DIRECTORY)
+
+
+class ComparisonProofTests(unittest.TestCase):
+    @staticmethod
+    def at_path(value, path: tuple):
+        for key in path:
+            value = value[key]
+        return value
+
+    def replace_field(self, path: tuple, value):
+        def mutate(declaration):
+            self.at_path(declaration, path[:-1])[path[-1]] = copy.deepcopy(value)
+        return mutate
+
+    def assert_comparison_mutations_rejected(self, case_factory, *, bound: bool = True) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            if bound:
+                bundle.capture_input_fixtures()
+            original = bundle.record_synthetic_comparison_plot_data_evidence()
+            self.assert_comparison_report(bundle, original, bound=bound)
+            for name in ("report.md", "report-evidence.json"):
+                (bundle.root / name).unlink()
+            inputs = {path: path.read_bytes() for path in (bundle.root / "fixture-inputs").glob("*")}
+            contract = next(item for item in bundle.manifest["figures"]
+                            if item["id"] == "paired-observation-model")["scientific_data_contract"]
+            for label, mutate in case_factory(original):
+                with self.subTest(mutation=label, bound=bound):
+                    declaration = copy.deepcopy(original)
+                    contract["plot_data_evidence"] = declaration
+                    mutate(declaration)
+                    bundle.write_metadata()
+                    with mock.patch.object(ocean_report, "write_outputs",
+                                           side_effect=AssertionError("invalid comparison reached output writer")) as writer:
+                        with self.assertRaises(ocean_report.ReportBuildError):
+                            ocean_report.build_ocean_report(bundle.root)
+                        writer.assert_not_called()
+                    self.assertFalse((bundle.root / "report.md").exists())
+                    self.assertFalse((bundle.root / "report-evidence.json").exists())
+                    self.assertEqual(inputs, {path: path.read_bytes() for path in inputs})
+
+    def assert_comparison_fields_rejected(self, fields, *, bound: bool = True) -> None:
+        def cases(original):
+            for path, value in fields(original) if callable(fields) else fields:
+                yield (path, value), self.replace_field(path, value)
+        self.assert_comparison_mutations_rejected(cases, bound=bound)
+
+    def assert_comparison_report(
+        self, bundle: RuntimeBundle, declaration: dict, *, bound: bool = True,
+        fixture_directory: Path = ocean_report.DEFAULT_FIXTURE_DIRECTORY,
+    ) -> dict:
+        bundle.write_metadata()
+        before = {path: path.read_bytes() for path in bundle.root.rglob("*") if path.is_file()}
+        result = ocean_report.build_ocean_report(bundle.root, fixture_directory)
+        self.assertEqual(result["status"], "passed")
+        evidence = json.loads((bundle.root / "report-evidence.json").read_bytes())
+        figure = next(item for item in evidence["runtime_evidence"]["figures"] if item["id"] == "paired-observation-model")
+        proof = figure["plot_data_evidence"]
+        self.assertEqual(proof["status"], "runtime_declaration_verified" if bound else "not_verified")
+        self.assertIs(proof["provided"], True)
+        self.assertIs(proof["local_arrays_match"], True)
+        self.assertIs(proof["input_fixture_binding_verified"], bound)
+        self.assertEqual(proof["declaration"], declaration)
+        self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "preserve" if bound else "not_verified")
+        self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"],
+                         "horizontal-line-segments" if bound else "not_verified")
+        self.assertFalse(evidence["data_source"]["observed_ocean_conditions"])
+        self.assertFalse(evidence["runtime_evidence"]["visual_inspection"]["verified"])
+        self.assertEqual(evidence["runtime_evidence"]["desktop_validation"]["status"], "not_performed")
+        for item in evidence["runtime_evidence"]["figures"]:
+            self.assertEqual(item["verification"]["visual_inspection"], "not_verified")
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+        return evidence
+
+    def test_synthetic_comparison_v3_verifies_four_figures_without_execution_or_visual_promotion(self) -> None:
+        for release in ("R2021a", "R2024b", "R2026a"):
+            with self.subTest(release=release), tempfile.TemporaryDirectory() as directory:
+                bundle = RuntimeBundle(Path(directory))
+                bundle.release = release
+                bundle.runtime["matlab_release"] = release
+                bundle.runtime["matlab_version"] = {"R2021a": "9.10.0", "R2024b": "24.2.0", "R2026a": "26.1.0"}[release]
+                bundle.manifest["matlab_release"] = release[1:]
+                for figure in bundle.manifest["figures"]:
+                    figure["runtime"]["matlab_release"] = release[1:]
+                bundle.capture_input_fixtures()
+                declarations = {identifier: bundle.record_plot_data_evidence(identifier)
+                                for identifier in ocean_report.GRID_NATIVE_SOURCES}
+                declarations["paired-interactive"] = bundle.record_interactive_plot_data_evidence()
+                declaration = bundle.record_synthetic_comparison_plot_data_evidence()
+                declarations["paired-observation-model"] = declaration
+                evidence = self.assert_comparison_report(bundle, declaration)
+                figures = {item["id"]: item for item in evidence["runtime_evidence"]["figures"]}
+                self.assertEqual({identifier for identifier, figure in figures.items()
+                                  if figure["plot_data_evidence"]["status"] == "runtime_declaration_verified"},
+                                 ocean_report.EXPECTED_FIGURES)
+                for identifier, expected in declarations.items():
+                    self.assertEqual(figures[identifier]["plot_data_evidence"]["declaration"], expected)
+                self.assertEqual(declaration["shape"], [12])
+                self.assertEqual(declaration["records"]["source_rows"], list(range(1, 13)))
+                self.assertEqual(declaration["records"]["depth_m"], [10, 40, 70] * 4)
+                self.assertEqual(declaration["input_values"]["model"][-1], 13.96)
+                self.assertIsNone(declaration["input_values"]["observation"][-1])
+                self.assertEqual(declaration["qc"]["observation"]["flags"][5], "suspect")
+                self.assertEqual(declaration["native_scatter"]["source_rows"], list(range(1, 12)))
+                self.assertEqual(len(declaration["uncertainty"]["segments"]), 11)
+                self.assertEqual(declaration["qc"]["model"], {"status": "not_provided"})
+                self.assertEqual(declaration["uncertainty"]["model"], {"status": "not_provided"})
+                for field, expected in {"paired_count": 11, "bias_model_minus_observation": 0.08727272727272767,
+                                        "mean_absolute_error": 0.09272727272727334,
+                                        "root_mean_square_error": 0.11159993483217405,
+                                        "pearson_correlation": 0.9996003539344701}.items():
+                    self.assertAlmostEqual(declaration["paired_stats"][field], expected, places=14)
+                report = (bundle.root / "report.md").read_text(encoding="utf-8")
+                self.assertIn("horizontal-line-segments", report)
+                self.assertIn("未提供模式不确定度", report)
+
+    def test_comparison_v3_unbound_arrays_match_but_do_not_verify_display(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            declaration = bundle.record_synthetic_comparison_plot_data_evidence()
+            evidence = self.assert_comparison_report(bundle, declaration, bound=False)
+            self.assertEqual(evidence["runtime_fixture_binding"]["status"], "unverified")
+
+    def test_comparison_v3_all_object_fields_are_required_and_exact(self) -> None:
+        paths = ((), ("records",), ("input_values",), ("pairing",), ("qc",), ("qc", "observation"),
+                 ("qc", "model"), ("native_scatter",), ("uncertainty",), ("uncertainty", "observation"),
+                 ("uncertainty", "model"), ("uncertainty", "segments", 0), ("paired_stats",))
+
+        def cases(original):
+            for path in paths:
+                for field in self.at_path(original, path):
+                    yield ("missing", path, field), lambda declaration, path=path, field=field: self.at_path(
+                        declaration, path
+                    ).pop(field)
+                yield ("extra", path), lambda declaration, path=path: self.at_path(declaration, path).update(verified=True)
+                if path:
+                    for value in (None, [], True, "provided"):
+                        yield ("not_object", path, value), self.replace_field(path, value)
+        self.assert_comparison_mutations_rejected(cases)
+
+    def test_comparison_v3_flat_vectors_and_segments_cannot_use_scalar_or_partial_forms(self) -> None:
+        def fields(original):
+            def vectors(value, path=()):
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        yield from vectors(item, (*path, key))
+                elif isinstance(value, list):
+                    yield path, value
+                    if value and isinstance(value[0], dict):
+                        yield from vectors(value[0], (*path, 0))
+            for path, vector in vectors(original):
+                for value in (vector[:-1], vector + [copy.deepcopy(vector[0])], [vector], vector[0]):
+                    yield path, value
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_integer_identity_fields_reject_boolean_float_and_string(self) -> None:
+        paths = (("schema_version",), ("shape", 0), ("records", "source_rows", 0),
+                 ("pairing", "observation_indices", 0), ("pairing", "model_indices", 0),
+                 ("pairing", "unmatched_observation_count"), ("pairing", "unmatched_model_count"),
+                 ("native_scatter", "source_rows", 0), ("uncertainty", "segments", 0, "source_row"),
+                 ("paired_stats", "paired_count"))
+
+        def fields(original):
+            for path in paths:
+                original_value = self.at_path(original, path)
+                for value in (bool(original_value), float(original_value), str(original_value)):
+                    yield path, value
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_boolean_masks_reject_numeric_and_string_substitutes(self) -> None:
+        paths = (("pairing", "finite_pair_mask"), ("pairing", "paired_mask"), ("qc", "accepted_mask"),
+                 ("uncertainty", "observation", "missing_mask"), ("uncertainty", "graphics_mask"))
+
+        def fields(original):
+            for path in paths:
+                for index in (0, 11):
+                    value = self.at_path(original, path)[index]
+                    for replacement in (int(value), float(value), str(value).lower(), None):
+                        yield (*path, index), replacement
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_schema_identity_hash_release_and_fixed_semantics_are_strict(self) -> None:
+        fields = [
+            (("schema_version",), value) for value in (1, 2, 4, None)
+        ] + [
+            (("figure_id",), "paired-interactive"), (("fixture_id",), "crossed-time-depth-temperature"),
+            (("fixture_sha256",), "0" * 64), (("fixture_sha256",), None),
+            (("matlab_release",), "R2024b"), (("matlab_release",), "26.1.0 (R2026a)"),
+            (("dimension_order",), ["time"]), (("shape",), [11]), (("quantity_unit",), "K"),
+            (("missing_policy",), "drop"), (("native_data_source",), "Lines.XData/YData"),
+            (("records", "time_zone"), "Europe/London"), (("records", "depth_unit"), "km"),
+            (("records", "depth_direction"), "positive_up"), (("records", "source_row_origin"), "sorted_order"),
+            (("pairing", "rule"), "row-time-inner"), (("pairing", "duplicate_key_policy"), "first"),
+            (("pairing", "unmatched_observation_count"), 1), (("pairing", "unmatched_model_count"), 1),
+        ]
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_cannot_be_attached_to_another_figure_or_manifest_root(self) -> None:
+        for destination in ("paired-interactive", "crossed-time-depth-temperature", "manifest", "runtime"):
+            with self.subTest(destination=destination), tempfile.TemporaryDirectory() as directory:
+                bundle = RuntimeBundle(Path(directory))
+                bundle.capture_input_fixtures()
+                declaration = bundle.record_synthetic_comparison_plot_data_evidence()
+                self.assert_comparison_report(bundle, declaration)
+                for name in ("report.md", "report-evidence.json"):
+                    (bundle.root / name).unlink()
+                if destination in {"manifest", "runtime"}:
+                    getattr(bundle, destination)["plot_data_evidence"] = declaration
+                else:
+                    figure = next(item for item in bundle.manifest["figures"] if item["id"] == destination)
+                    figure["scientific_data_contract"]["plot_data_evidence"] = declaration
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(bundle.root)
+                self.assertFalse((bundle.root / "report.md").exists())
+                self.assertFalse((bundle.root / "report-evidence.json").exists())
+
+    def test_comparison_v3_checks_every_record_identity_time_depth_and_pair_index(self) -> None:
+        def fields(original):
+            for index in range(12):
+                yield ("records", "ids", index), f"changed-pair-{index + 1:03d}"
+                yield ("records", "time_utc", index), "2026-08-20T01:00:00Z"
+                depth = original["records"]["depth_m"][index]
+                yield ("records", "depth_m", index), math.nextafter(float(depth), math.inf)
+                for path in (("records", "source_rows"), ("pairing", "observation_indices"), ("pairing", "model_indices")):
+                    yield (*path, index), index
+            for field in ("ids", "time_utc", "depth_m", "source_rows"):
+                yield ("records", field), list(reversed(original["records"][field]))
+            yield ("records", "ids", 1), original["records"]["ids"][0]
+            for timestamp in ("2026-08-20T00:00:00+00:00", "2026-08-20T00:00:00.000Z",
+                              "2026-08-20T00:00:00", "2026-08-32T00:00:00Z"):
+                yield ("records", "time_utc", 0), timestamp
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_every_raw_value_is_exact_including_unplotted_model(self) -> None:
+        def fields(original):
+            for name in ("observation", "model"):
+                for index, value in enumerate(original["input_values"][name]):
+                    yield ("input_values", name, index), 0 if value is None else math.nextafter(value, math.inf)
+            yield ("input_values", "model", 11), None
+            yield ("input_values", "observation", 0), True
+            yield ("input_values", "model", 0), "17.10"
+            yield ("records", "depth_m", 0), True
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_qc_all_flags_acceptance_and_model_absence_are_preserved(self) -> None:
+        def fields(original):
+            for index, flag in enumerate(original["qc"]["observation"]["flags"]):
+                yield ("qc", "observation", "flags", index), "suspect" if flag == "good" else "good"
+                yield ("qc", "accepted_mask", index), not original["qc"]["accepted_mask"][index]
+                for mask in ("finite_pair_mask", "paired_mask"):
+                    yield ("pairing", mask, index), not original["pairing"][mask][index]
+            for values in (["good"], ["suspect", "good"], ["good", "suspect", "missing"]):
+                yield ("qc", "observation", "accepted_values"), values
+            yield ("qc", "policy"), "filter"
+            yield ("qc", "observation", "status"), "not_provided"
+            yield ("qc", "model"), copy.deepcopy(original["qc"]["observation"])
+            yield ("qc", "model"), {"status": "not_provided", "flags": []}
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_coherent_suspect_exclusion_cannot_forge_preservation(self) -> None:
+        def mutate(declaration):
+            declaration["qc"]["observation"]["accepted_values"] = ["good"]
+            declaration["qc"]["accepted_mask"][5] = False
+            declaration["pairing"]["paired_mask"][5] = False
+            declaration["uncertainty"]["graphics_mask"][5] = False
+            for vector in declaration["native_scatter"].values():
+                vector.pop(5)
+            declaration["uncertainty"]["segments"].pop(5)
+            scatter = declaration["native_scatter"]
+            declaration["paired_stats"] = RuntimeBundle.synthetic_comparison_stats(scatter["x_values"], scatter["y_values"])
+        self.assert_comparison_mutations_rejected(lambda original: [("coherent_drop_pair_006", mutate)])
+
+    def test_comparison_v3_observation_uncertainty_checks_every_value_and_mask(self) -> None:
+        def fields(original):
+            for index, value in enumerate(original["uncertainty"]["observation"]["values"]):
+                yield ("uncertainty", "observation", "values", index), 0 if value is None else math.nextafter(value, math.inf)
+                yield ("uncertainty", "observation", "missing_mask", index), value is not None
+                yield ("uncertainty", "graphics_mask", index), not original["uncertainty"]["graphics_mask"][index]
+            for value in (None, True, "0.10", -0.1):
+                yield ("uncertainty", "observation", "values", 0), value
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_uncertainty_semantics_reject_model_zero_fill_and_fake_errorbars(self) -> None:
+        self.assert_comparison_fields_rejected([
+            (("uncertainty", "type"), "standard-error"), (("uncertainty", "type"), "standard_uncertainty"),
+            (("uncertainty", "unit"), "K"), (("uncertainty", "representation"), "bounds"),
+            (("uncertainty", "confidence_level"), 0.95), (("uncertainty", "confidence_level"), False),
+            (("uncertainty", "display"), "metadata"), (("uncertainty", "display"), "errorbar"),
+            (("uncertainty", "native_data_source"), "ErrorBar.XData/YData/YNegativeDelta/YPositiveDelta"),
+            (("uncertainty", "observation", "status"), "not_provided"),
+            (("uncertainty", "model"), {"status": "provided", "values": [0] * 12}),
+            (("uncertainty", "model"), {"status": "not_provided", "values": [None] * 12}),
+            (("uncertainty", "model"), {"status": "not_provided", "values": []}),
+        ])
+
+    def test_comparison_v3_native_scatter_checks_every_coordinate_and_identity(self) -> None:
+        def fields(original):
+            scatter = original["native_scatter"]
+            for index in range(11):
+                for name in ("x_values", "y_values"):
+                    yield ("native_scatter", name, index), math.nextafter(scatter[name][index], math.inf)
+                yield ("native_scatter", "source_rows", index), index + 2
+                yield ("native_scatter", "record_ids", index), f"wrong-{index}"
+            for name, vector in scatter.items():
+                yield ("native_scatter", name), list(reversed(vector))
+            yield ("native_scatter", "x_values"), list(scatter["y_values"])
+            yield ("native_scatter", "y_values"), sorted(scatter["y_values"])
+            yield ("native_scatter", "x_values", 0), None
+            yield ("native_scatter", "y_values", 0), True
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_checks_both_endpoints_and_identity_of_every_horizontal_segment(self) -> None:
+        def fields(original):
+            for index, segment in enumerate(original["uncertainty"]["segments"]):
+                for name in ("x_values", "y_values"):
+                    for endpoint, value in enumerate(segment[name]):
+                        yield ("uncertainty", "segments", index, name, endpoint), value + 1e-6
+                yield ("uncertainty", "segments", index, "source_row"), index + 2
+                yield ("uncertainty", "segments", index, "record_id"), f"wrong-{index}"
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_segment_order_count_and_orientation_are_not_interchangeable(self) -> None:
+        def fields(original):
+            segments = original["uncertainty"]["segments"]
+            yield ("uncertainty", "segments"), list(reversed(segments))
+            yield ("uncertainty", "segments"), [copy.deepcopy(segments[0])] * len(segments)
+            yield ("uncertainty", "segments", 0, "x_values"), list(reversed(segments[0]["x_values"]))
+            observation = original["native_scatter"]["x_values"][0]
+            model = original["native_scatter"]["y_values"][0]
+            for span in (0, 0.1):
+                vertical = {**segments[0], "x_values": [observation, observation], "y_values": [model - span, model + span]}
+                yield ("uncertainty", "segments", 0), vertical
+                yield ("uncertainty", "segments"), segments + [vertical]
+            for name in ("x_values", "y_values"):
+                for value in (None, True, "17.1"):
+                    yield ("uncertainty", "segments", 0, name, 0), value
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_nonfinite_values_are_rejected_even_without_binding(self) -> None:
+        paths = (("input_values", "model", 11), ("records", "depth_m", 0),
+                 ("native_scatter", "x_values", 0), ("uncertainty", "observation", "values", 0),
+                 ("uncertainty", "segments", 0, "y_values", 1), ("paired_stats", "pearson_correlation"))
+        self.assert_comparison_fields_rejected([(path, value) for path in paths
+                                               for value in (math.nan, math.inf, -math.inf)], bound=False)
+
+    def test_comparison_v3_json_overflow_and_identical_duplicate_keys_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            declaration = bundle.record_synthetic_comparison_plot_data_evidence()
+            self.assert_comparison_report(bundle, declaration, bound=False)
+            for name in ("report.md", "report-evidence.json"):
+                (bundle.root / name).unlink()
+            manifest = bundle.root / "figures.json"
+            original = manifest.read_text(encoding="utf-8")
+            correlation = '"pearson_correlation": ' + json.dumps(declaration["paired_stats"]["pearson_correlation"])
+            mutations = [(correlation, '"pearson_correlation": ' + token)
+                         for token in ("NaN", "Infinity", "-Infinity", "1e999")]
+            for field, value in (("schema_version", 3), ("paired_count", 11)):
+                member = json.dumps(field) + ": " + str(value)
+                mutations.append((member, member + ", " + member))
+            for member, replacement in mutations:
+                with self.subTest(replacement=replacement):
+                    self.assertEqual(original.count(member), 1)
+                    manifest.write_text(original.replace(member, replacement, 1), encoding="utf-8")
+                    with mock.patch.object(ocean_report, "write_outputs") as writer:
+                        with self.assertRaises(ocean_report.ReportBuildError):
+                            ocean_report.build_ocean_report(bundle.root)
+                        writer.assert_not_called()
+                    self.assertFalse((bundle.root / "report.md").exists())
+                    self.assertFalse((bundle.root / "report-evidence.json").exists())
+
+    def test_comparison_v3_stats_require_all_pairs_and_defined_correlation(self) -> None:
+        def fields(original):
+            for name, value in original["paired_stats"].items():
+                for replacement in (None, True, str(value), value + 0.01):
+                    yield ("paired_stats", name), replacement
+            yield ("paired_stats", "paired_count"), 12
+            yield ("paired_stats", "bias_model_minus_observation"), -original["paired_stats"]["bias_model_minus_observation"]
+            scatter = original["native_scatter"]
+            yield ("paired_stats",), RuntimeBundle.synthetic_comparison_stats(
+                scatter["x_values"][:5] + scatter["x_values"][6:], scatter["y_values"][:5] + scatter["y_values"][6:]
+            )
+            weights = [1 / value ** 2 for value in original["uncertainty"]["observation"]["values"] if value is not None]
+            weighted_bias = sum(weight * (model - observation) for weight, observation, model in zip(
+                weights, scatter["x_values"], scatter["y_values"]
+            )) / sum(weights)
+            yield ("paired_stats", "bias_model_minus_observation"), weighted_bias
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_only_derived_values_allow_one_e_minus_twelve_roundoff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            bundle.capture_input_fixtures()
+            declaration = bundle.record_synthetic_comparison_plot_data_evidence()
+            self.assert_comparison_report(bundle, declaration)
+            for name in ("report.md", "report-evidence.json"):
+                (bundle.root / name).unlink()
+            declaration["records"]["depth_m"] = [float(value) for value in declaration["records"]["depth_m"]]
+            for segment in declaration["uncertainty"]["segments"]:
+                for field in ("x_values", "y_values"):
+                    segment[field] = [value + 0.5e-12 * max(1, abs(value)) for value in segment[field]]
+            for field, value in declaration["paired_stats"].items():
+                if field != "paired_count":
+                    declaration["paired_stats"][field] = value + 0.5e-12 * max(1, abs(value))
+            self.assert_comparison_report(bundle, declaration)
+
+        def fields(original):
+            for field, value in original["paired_stats"].items():
+                if field != "paired_count":
+                    yield ("paired_stats", field), value + 2e-12 * max(1, abs(value))
+            for name in ("x_values", "y_values"):
+                for endpoint, value in enumerate(original["uncertainty"]["segments"][0][name]):
+                    yield ("uncertainty", "segments", 0, name, endpoint), value + 2e-12 * abs(value)
+        self.assert_comparison_fields_rejected(fields)
+
+    def test_comparison_v3_null_correlation_is_valid_only_for_a_constant_side(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_directory = root / "fixtures"
+            shutil.copytree(ocean_report.DEFAULT_FIXTURE_DIRECTORY, fixture_directory)
+            path = fixture_directory / "paired_observation_model.json"
+            fixture = json.loads(path.read_bytes())
+            for record in fixture["records"]:
+                record["model_degC"] = 15.0
+            path.write_text(json.dumps(fixture), encoding="utf-8")
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures(fixture_directory)
+            declaration = bundle.record_synthetic_comparison_plot_data_evidence(fixture_directory)
+            self.assertIsNone(declaration["paired_stats"]["pearson_correlation"])
+            self.assert_comparison_report(bundle, declaration, fixture_directory=fixture_directory)
+            for name in ("report.md", "report-evidence.json"):
+                (root / name).unlink()
+            declaration["paired_stats"]["pearson_correlation"] = 0
+            bundle.write_metadata()
+            with self.assertRaises(ocean_report.ReportBuildError):
+                ocean_report.build_ocean_report(root, fixture_directory)
+            self.assertFalse((root / "report.md").exists())
+            self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_comparison_v3_unbound_cannot_bypass_malformed_or_mismatched_evidence(self) -> None:
+        self.assert_comparison_fields_rejected([
+            (("fixture_sha256",), "0" * 64), (("schema_version",), 3.0),
+            (("uncertainty", "segments", 5, "source_row"), True),
+            (("input_values", "model", 11), None), (("paired_stats", "pearson_correlation"), None),
+        ], bound=False)
+
+    def test_comparison_v3_paired_snapshot_is_rechecked_after_report_render(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = RuntimeBundle(Path(directory))
+            bundle.capture_input_fixtures()
+            declaration = bundle.record_synthetic_comparison_plot_data_evidence()
+            self.assert_comparison_report(bundle, declaration)
+            for name in ("report.md", "report-evidence.json"):
+                (bundle.root / name).unlink()
+            snapshot = bundle.root / "fixture-inputs" / "paired_observation_model.json"
+            original_render = ocean_report.render_report
+
+            def change_snapshot(evidence):
+                report = original_render(evidence)
+                snapshot.write_bytes(snapshot.read_bytes() + b"\n")
+                return report
+
+            with mock.patch.object(ocean_report, "render_report", side_effect=change_snapshot), \
+                    mock.patch.object(ocean_report, "write_outputs") as writer:
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(bundle.root)
+                writer.assert_not_called()
 
 
 class RenderedAuditTests(unittest.TestCase):

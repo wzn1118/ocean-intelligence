@@ -103,6 +103,8 @@ clear cleanup;
 
 run_negative_contracts(theme);
 uncertaintyEntry = test_comparison_uncertainty(outputDirectory);
+test_comparison_record_metadata();
+test_comparison_native_evidence(outputDirectory);
 save(fullfile(outputDirectory,"family-b-runtime-evidence.mat"),"entries", ...
     "timeResult","comparisonResult","tsResult","uncertaintyEntry");
 fprintf("FAMILY_B_MATLAB_RUNTIME=passed\n");

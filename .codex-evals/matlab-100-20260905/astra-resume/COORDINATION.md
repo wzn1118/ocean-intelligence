@@ -16,13 +16,13 @@
 | --- | --- | --- |
 | 回归与图族布局 | 三版主运行60/60 | 单侧观测不确定度实现及真实三格式测试待CI |
 | Manifest 完整性 | 拒绝篡改、混合API及快照复核 | 补齐真实文件校验verified字段，不提升视觉状态 |
-| 中文海区报告 | 原生声明3/4、显式外部审计三版通过 | 比较图v3协议尚未实施，不冒充实测海区 |
+| 中文海区报告 | 原生声明3/4、显式外部审计三版通过 | 比较图v3采集及消费者已实现待CI，不冒充实测海区 |
 | 颜色与冗余编码 | 隐藏数据系列、连续色标与不确定度审计 | 自动门禁通过；最终视觉仍未通过 |
 | 文字几何 | points/pixels参考及完整正负例三版通过 | 保留原data Extent异常诊断及逐格式视觉缺口 |
 | MATLAB 交互 | 原生 UIAxes 调用、稳定 ID 与刷选兼容 | 三版本无桌面回退通过，桌面操作未验证 |
 | 字体与导出能力 | PNG原生尺寸、受限SVG规范化三版通过 | 旧版PDF Courier与R24额外DISPLAY内嵌SVG字体未解决 |
 | 外部产物检查 | R26十二产物通过、旧版各8/12 | 失败叶子进入中文报告，不把声明当工具认证 |
-| CI 证据汇总 | 第15轮主运行60/60、原始评分90 | 整体CI仍失败，保留后处理/视觉门槛 |
+| CI 证据汇总 | 第16轮57/60，图例非法属性导致新测试失败 | 原始90分非全量通过；兼容修复待新CI |
 | 逐格式视觉核验 | 两SVG布局引擎对照、真实产物哈希绑定 | 四件第15轮SVG零像素差，不代表全图族或字体验收 |
 
 ## 实跑历史
@@ -45,6 +45,7 @@
 | [33993011601](https://github.com/wzn1118/ocean-intelligence/actions/runs/33993011601) | `e1cc8db` | 57/60；原始90/100 | 交互v2原生声明三版通过，报告覆盖3/4；SVG比例和旧版PDF字体仍失败 |
 | [33994158131](https://github.com/wzn1118/ocean-intelligence/actions/runs/33994158131) | `25d1417` | 57/60；原始90/100 | 外部检查入报告三版通过；新增SVG DOM测试暴露namespace未填充，规范化尚未通过 |
 | [33994671384](https://github.com/wzn1118/ocean-intelligence/actions/runs/33994671384) | `a8f2759` | 60/60主运行阶段；原始90/100 | 三版DOM正负例及严格出版导出通过；文件校验字段、视觉验收和旧版PDF字体后处理仍失败，R24额外DISPLAY拒绝内嵌SVG字体 |
+| [33995525791](https://github.com/wzn1118/ocean-intelligence/actions/runs/33995525791) | `b0d7fb2` | 57/60；原始90/100 | 三版首次单侧不确定度调用均因legend.Text.FontUnits不可访问而失败，未生成新U产物；文件校验verified字段修复生效，视觉/旧PDF字体仍失败 |
 
 阶段数不是能力分数。各轮的 90 分只是当时评分器原始输出，不能当成全量验收。33984097740 暴露的版本字段校验已加强；33984666441 尚无输入快照绑定，下一轮必须提供真实输入副本与哈希，缺失旧包不能冒充新协议通过。
 
@@ -196,3 +197,16 @@
 - 后处理另有artifact_validation.verified字段缺失。writer已在实际字节/hash/尺寸复核路径上输出true，新增返回/序列化检查；visual_inspection仍为not_run/false，消费者的visual_inspection.required门槛未改。此字段不是视觉、字体或执行认证的替代。
 - 比较v3记录身份/完整QC协议仍仅为草案，评测图仍只3/4获得绑定声明；没有把新增helper能力直接换成评分或报告证明。
 - 推送前本地验证：243项Python、全部已跟踪服务器Node测试、8项生成器smoke、资产/技能和Family B/导出静态检查通过；58个MATLAB文件通过R2021a语法检查，28文件冻结清单未变。完整静态评分70/100、runtime_pending，新增原生能力仍待三版本CI。
+
+## 第十七批接续
+
+- 第十六批本地提交 `4a445f5`，远端 `b0d7fb2d1204424bd0b347cf8aa33c7368814e16`，运行33995525791已结束。三版各19/20、原始90分，整体失败；主线程已回收全部原件至 `/tmp/matlab-run-33995525791`，汇总在 `/tmp/matlab-ci-summary-33995525791/summary.md`。
+- 新能力第一次调用因Legend.Title并非普通Text、不支持FontUnits而失败，三版均尚未导出新不确定度图。依据[官方legend.Text属性文档](https://ww2.mathworks.cn/help/matlab/ref/matlab.graphics.illustration.legend.text-properties.html)，FontSize固定为points，删除非法FontUnits设置，保留真实字号/字体断言，待重跑。独立记录见 `comparison-uncertainty-review-round16.md`。
+- artifact_validation.verified修复三版实跑生效；后处理runtime.violations仅剩visual_inspection.required，未豁免。R26评测外部12/12，R21/R24各8/12，旧PDF Courier与R24额外DISPLAY SVG内嵌字体问题保留。
+- 十个原代理均已分批续派：helper记录身份、原生metadata测试、报告v3消费者、声明篡改测试、评测入口测试、原生采集端独立审查、图例文字覆盖、文档同步、真实不确定度产物审查、内嵌SVG字体独立研究；峰值并发不超过六。主线程负责原生gate、跨模块接线、CI和整合，不冒充侧边栏十会话同时活跃。
+- 比较v3生产及消费路径已实现：helper按numeric row-aligned输入生成源行，保留完整12记录和实际QC、不确定度，原生Scatter与水平Line附带同掩码身份；gate在同一图导出后读取实际对象并核对全部值和统计，消费者从冻结fixture逐条独立重建并严格验字段/类型/绑定。新增代码和合成测试不代表4/4已在MATLAB通过。
+- 可见图例标题无公开几何时明确归入legend.title未测量列表，已同步严格writer/report角色与类匹配；不生成零边界、不把缺口算完整或视觉通过。新增可见、空标题、隐藏标题、隐藏图例四个原生回归，旧可测axes文字和全部裁切负例保持，仍待MATLAB执行。
+- `svg-embedded-font-review-round17.md`发现两SVG引擎都不消费探针的嵌入字形，字形突变仍零像素差。维持内嵌字体拒绝，不用这种零差分扩大白名单；真实CairoSVG文字破碎另作已有兼容缺陷记录。
+- 新报告对第16轮三版evaluator副本的兼容检查完成，输出在 `/tmp/matlab-round17-report-kme52f`；每版17个输入/图件文件与原件哈希一致，旧包仍3/4，比较图未验证。构建均成功但外检failed/failed/passed，未改源包或生成伪v3声明。
+- 独立读端审查发现字符矩阵标题先展平会丢行，以及透明度未与实际marker颜色联合判断；已修正候选，拆出原生reader用于真实句柄篡改测试，不能用Python声明负例代替MATLAB读端测试。审查原始快照及范围保留于 `comparison-native-reader-review-round17.md`。
+- 推送前全部十项已收齐：279项Python、全部已跟踪服务器Node、8项生成器smoke、资产/技能/Family B/导出静态检查及workflow YAML解析通过；61个MATLAB文件通过R2021a语法检查，CI语法范围同步覆盖整个evals目录。冻结29文件后静态评分70/100、runtime_pending。新增原生记录/篡改回归、图例覆盖和v3仍待本批首次licensed CI，不称已恢复60/60或达到100分。

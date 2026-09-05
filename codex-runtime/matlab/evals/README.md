@@ -42,6 +42,11 @@ as observed conditions in a real ocean region.
 Reports also distinguish file hashes/dimensions from the declared coverage of
 graphics bounds. Native layout text without public geometry remains unmeasured;
 old manifests without coverage fields are reported as unavailable, not complete.
+Visible, nonempty legend titles without public `Extent`/`Position` also belong
+in `unmeasured_text_objects`, with `role="legend.title"` and
+`class="matlab.graphics.illustration.legend.Text"`; their presence requires
+`bounds_audit_complete=false`. This declares missing measurement coverage,
+not a repaired visual defect or a verified title boundary.
 
 For the temperature field and salinity profiles, the MATLAB gate passes the
 fixture's complete QC and uncertainty arrays to the plotting helpers without
@@ -60,8 +65,33 @@ units, uncertainty and separate missing masks against the complete 50 m fixture
 row. The report independently reconstructs that row; single-element shape and
 dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
-The paired scatter still has no native array declaration and is not upgraded.
-This new v2 path requires another licensed MATLAB run before claiming 3/4.
+Round 13 passed this v2 path on R2021a/R2024b/R2026a. The latest licensed
+native-proof coverage is 3/4 figures; the paired scatter in existing packages
+remains `not_verified`, rather than inheriting the interactive proof.
+
+Round 17 adds a comparison v3 candidate for `paired-observation-model`.
+`oi_plot_comparison` accepts optional strict `RecordMetadata` only for numeric
+row-aligned inputs: exactly `ID`, `Time`, `Depth`, `DepthUnit`, and
+`DepthDirection`, with unique nonblank string IDs, non-NaT UTC datetimes and
+finite nonnegative depths in `m`/`positive_down`, all aligned to input rows.
+It retains complete `RecordData` and supplied/not-provided QC, with native
+Scatter and horizontal Line `UserData` carrying IDs and call-entry row numbers.
+Omitting metadata preserves existing numeric/tabular calls without invented
+identity or `RecordData`; this option does not extend tabular pairing.
+
+`run_matlab_gate.m` now calls the comparison helper with this metadata,
+observation QC and observation-only standard uncertainty, then reads native
+Scatter values and horizontal Line endpoints, ownership and identities into
+v3 evidence. The report/evaluator consumer and mutation tests validate all 12
+synthetic records, all 11 scatter pairs, unplotted input values, complete masks,
+statistics, release and input hashes. Model QC and uncertainty stay
+`not_provided`: never fill them with zeros or copy observation values. Missing
+observation uncertainty does not remove otherwise accepted scatter pairs.
+This new metadata/v3 path still awaits its first licensed CI run; synthetic
+consumer tests are not executed 4/4 proof, independent MATLAB execution or
+visual approval. Legacy packages without v3 remain compatible at 3/4, while
+malformed or inconsistent declarations fail. The fixtures remain synthetic,
+not measurements of real ocean conditions.
 
 The evaluator reuses the same report validator for all provided native array
 declarations. It rejects misplaced, malformed or inconsistent evidence before
@@ -104,8 +134,10 @@ two other suites. The next candidate requested integer pixel dimensions for PNG
 and inches for PDF/SVG, recording `runtime.export_size_units` per format. The
 publication suite exercises 400x300 at 150 DPI, 1200x675 at 180 DPI, and 997x613
 at 300 DPI, with actual dimensions and embedded DPI checked before promotion.
-These sizing changes still require a new licensed MATLAB run; no resampling or
-relaxed geometry tolerance is used.
+That pixel-based candidate was not yet validated at that point; no resampling
+or relaxed geometry tolerance was used. Rounds 12/13 subsequently passed the
+full three-release native dimension regression with inches/off for R2026a PNG,
+without implying whole-figure visual approval.
 
 Run 33990723561 confirmed that integer pixel requests alone did not fix the
 R2026a off-by-one output. A separate native raster probe now compares pixels
@@ -134,6 +166,18 @@ DISPLAY diagnostics. XML attributes and hashes are read without rewriting SVG.
 The existing strict SVG gate remains unchanged. The points-based text test also
 exposed a row/column broadcasting bug; normalizing both extents to four-element
 rows fixes the comparison without changing its 1e-6-pixel threshold.
+
+Round-16 run 33995525791 completed 19/20 primary stages on each of R2021a,
+R2024b and R2026a. `family-b-runtime` failed on the unsupported `Legend.Title.FontUnits`
+setter: the object is `matlab.graphics.illustration.legend.Text`, whose
+`FontSize` is points-based. Current code removes `FontUnits`; the corrected
+comparison path still needs successful licensed validation. All three releases
+already include the `artifact_validation.verified` fix, leaving only
+`visual_inspection.required` among runtime-contract violations. External PDF
+checks still fail on the older releases, including unembedded Courier; neither
+flag correctness nor report construction is visual or PDF approval. R2026a
+passed all twelve external evaluator artifact checks, not the visual gate or
+overall CI.
 
 ## Commands
 
