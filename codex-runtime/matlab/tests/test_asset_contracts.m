@@ -265,13 +265,24 @@ cjk_label = string(char([hex2dec("4E2D") hex2dec("6587")]));
 cjk_font = "";
 cjk_font_candidates = ["Noto Sans CJK SC" "Noto Sans CJK TC" "Noto Sans CJK HK" ...
     "Noto Sans CJK JP" "Noto Sans CJK KR" "Source Han Sans SC" ...
-    "Microsoft YaHei" "PingFang SC" "SimHei" "SimSun" "Arial Unicode MS"];
+    "WenQuanYi Zen Hei" "Droid Sans Fallback" "Microsoft YaHei" ...
+    "PingFang SC" "SimHei" "SimSun" "Arial Unicode MS"];
 installed_fonts = string(listfonts);
 for font_index = 1:numel(cjk_font_candidates)
     installed_index = find(strcmpi(installed_fonts, cjk_font_candidates(font_index)), 1);
     if ~isempty(installed_index)
         cjk_font = installed_fonts(installed_index);
         break;
+    end
+    if isunix
+        command = sprintf("fc-match -f '%%{family}' '%s' 2>/dev/null", ...
+            char(cjk_font_candidates(font_index)));
+        [status, output] = system(command);
+        if status == 0 && contains(lower(string(output)), ...
+                lower(cjk_font_candidates(font_index)))
+            cjk_font = cjk_font_candidates(font_index);
+            break;
+        end
     end
 end
 if strlength(cjk_font) == 0
