@@ -352,6 +352,7 @@ while true
     elseif strcmp(chunkType, 'IEND')
         break;
     end
+end
 clear cleanup;
 end
 
