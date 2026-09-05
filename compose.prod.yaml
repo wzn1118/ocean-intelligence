@@ -148,7 +148,14 @@ services:
     logging: *default-logging
 
   codex-runtime:
-    image: ${NODE_IMAGE:-node:22-alpine}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.codex-runtime
+      network: host
+      args:
+        NODE_IMAGE: ${CODEX_RUNTIME_NODE_IMAGE:-node:22-bookworm-slim}
+    image: ${CODEX_RUNTIME_IMAGE:-ocean-intelligence-codex-runtime:production}
+    pull_policy: ${CODEX_RUNTIME_PULL_POLICY:-missing}
     restart: unless-stopped
     command: ["node", "/app/codex-runtime/server/index.mjs"]
     environment:
@@ -159,6 +166,12 @@ services:
       OCEAN_CODEX_WORKSPACE: /workspace
       OCEAN_CODEX_BIN: /opt/codex-cli/bin/codex
       OCEAN_CODEX_MCP_URL: http://app:8000/api/codex/mcp
+      OCEAN_OCTAVE_TOOLKIT: qt
+      OCEAN_MATLAB_RUNTIME: external-mathworks-only
+      OCEAN_MATLAB_EXECUTABLE: ${OCEAN_MATLAB_EXECUTABLE:-}
+      OCEAN_MATLAB_RELEASE: ${OCEAN_MATLAB_RELEASE:-R2026a}
+      OCEAN_MATLAB_EVIDENCE_DIR: /workspace/.runtime/matlab-ci
+      MATLAB_LICENSE_FILE: ${MATLAB_LICENSE_FILE:-}
       OCEAN_CODEX_MCP_TOKEN: ${OCEAN_CODEX_MCP_TOKEN:?set OCEAN_CODEX_MCP_TOKEN in the production env file}
       OCEAN_CODEX_TENANT_SECRET: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the production env file}
     volumes:
