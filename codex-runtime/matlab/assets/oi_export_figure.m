@@ -352,6 +352,7 @@ while true
     elseif strcmp(chunkType, 'IEND')
         break;
     end
+clear cleanup;
 end
 
 function pathValue = canonical_path(pathValue)
@@ -363,8 +364,6 @@ end
 assert(status, "oi_export_figure:JVMRequired", ...
     "Canonical path resolution failed without the MATLAB JVM: %s", pathValue);
 pathValue = string(attributes.Name);
-end
-clear cleanup;
 end
 
 function [widthPoints, heightPoints, pageCount] = pdf_geometry(filePath)

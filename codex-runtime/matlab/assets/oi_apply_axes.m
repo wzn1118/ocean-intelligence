@@ -37,6 +37,7 @@ else
     set_if_property(axesHandle, "TickDir", "out");
     set_if_property(axesHandle, "TickLength", [0.008 0.008]);
     set_if_property(axesHandle, "Box", "on");
+end
 grid(axesHandle, "on");
 if isprop(axesHandle, "Layer")
     axesHandle.Layer = "top";
