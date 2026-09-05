@@ -477,7 +477,16 @@ def verify_freeze_inventory() -> dict[str, Any]:
     return {"status": "passed", "file_count": len(expected), "inventory": str(FREEZE_PATH.relative_to(REPOSITORY_ROOT))}
 
 
-def evaluate(runtime_mode: str, output_root: Path, visual_audit: Path | None, timeout: int, run_tests: bool) -> dict[str, Any]:
+def evaluate(
+    runtime_mode: str,
+    output_root: Path,
+    visual_audit: Path | None,
+    timeout: int,
+    run_tests: bool,
+    runtime_evidence_dir: Path | None = None,
+    runtime_nonce: str | None = None,
+    runtime_start_marker: Path | None = None,
+) -> dict[str, Any]:
     rubric = load_json(RUBRIC_PATH)
     weights = {gate["id"]: gate["weight"] for gate in rubric["gates"]}
     fixture_paths = sorted(FIXTURE_ROOT.glob("*.json"))
@@ -499,9 +508,25 @@ def evaluate(runtime_mode: str, output_root: Path, visual_audit: Path | None, ti
     runtime: dict[str, Any] = {"status": "pending", "matlab_executable": shutil.which("matlab")}
     visual = {"status": "pending", "reason": "MATLAB runtime has not run"}
     matlab_available = shutil.which("matlab") is not None
-    if runtime_mode == "require" and not matlab_available:
+    external_runtime = runtime_evidence_dir is not None
+    if external_runtime:
+        if runtime_mode == "skip":
+            raise EvaluationError("external runtime evidence cannot be used with runtime mode skip")
+        if not runtime_nonce or len(runtime_nonce.strip()) < 32:
+            raise EvaluationError("external runtime evidence requires a valid nonce")
+        if runtime_start_marker is None or not runtime_start_marker.is_file():
+            raise EvaluationError("external runtime evidence requires a start marker")
+        runtime = validate_runtime_output(
+            runtime_evidence_dir.resolve(),
+            runtime_nonce.strip(),
+            runtime_start_marker.stat().st_mtime_ns,
+        )
+        gate_status["matlab_runtime"] = "passed"
+        visual = validate_visual_audit(visual_audit, runtime)
+        gate_status["artifact_visual_audit"] = visual["status"]
+    elif runtime_mode == "require" and not matlab_available:
         raise EvaluationError("runtime mode require selected but matlab is unavailable")
-    if runtime_mode != "skip" and matlab_available:
+    elif runtime_mode != "skip" and matlab_available:
         nonce = secrets.token_hex(24)
         runtime, _, _ = run_matlab(output_root, nonce, timeout)
         gate_status["matlab_runtime"] = "passed"
@@ -514,7 +539,7 @@ def evaluate(runtime_mode: str, output_root: Path, visual_audit: Path | None, ti
         "anti_cheat": ["anti-cheat-rules.json", "evaluate.py:strip_matlab_comments_and_strings"],
         "hash_freeze": [str(FREEZE_PATH.relative_to(REPOSITORY_ROOT))] if FREEZE_PATH.exists() else [],
         "framework_tests": ["codex-runtime/matlab/evals/tests/test_evaluate.py"],
-        "matlab_runtime": ["evaluator-owned process exit", "matlab-runtime.json", "figures.json"] if gate_status["matlab_runtime"] == "passed" else [],
+        "matlab_runtime": ["nonce-bound MATLAB process exit", "matlab-runtime.json", "figures.json"] if gate_status["matlab_runtime"] == "passed" else [],
         "artifact_visual_audit": [str(visual_audit)] if gate_status["artifact_visual_audit"] == "passed" else [],
     }
     gates = [{"id": identifier, "weight": weights[identifier], "status": gate_status[identifier], "trusted_evidence": trusted_evidence[identifier]} for identifier in weights]
@@ -569,6 +594,9 @@ def main() -> int:
     parser.add_argument("--visual-audit", type=Path)
     parser.add_argument("--result", type=Path)
     parser.add_argument("--timeout", type=int, default=1200)
+    parser.add_argument("--runtime-evidence-dir", type=Path)
+    parser.add_argument("--runtime-nonce")
+    parser.add_argument("--runtime-start-marker", type=Path)
     parser.add_argument("--skip-tests", action="store_true")
     parser.add_argument("--write-freeze", action="store_true")
     parser.add_argument("--verify-freeze", action="store_true")
@@ -579,7 +607,16 @@ def main() -> int:
         elif arguments.verify_freeze:
             payload = verify_freeze_inventory()
         else:
-            payload = evaluate(arguments.runtime, arguments.output_dir.resolve(), arguments.visual_audit, arguments.timeout, not arguments.skip_tests)
+            payload = evaluate(
+                arguments.runtime,
+                arguments.output_dir.resolve(),
+                arguments.visual_audit,
+                arguments.timeout,
+                not arguments.skip_tests,
+                arguments.runtime_evidence_dir,
+                arguments.runtime_nonce,
+                arguments.runtime_start_marker,
+            )
         encoded = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         if arguments.result:
             arguments.result.parent.mkdir(parents=True, exist_ok=True)

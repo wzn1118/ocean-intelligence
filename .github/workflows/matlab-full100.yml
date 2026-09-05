@@ -68,14 +68,22 @@ jobs:
         uses: matlab-actions/setup-matlab@v3
         with:
           release: ${{ matrix.release }}
-      - name: Confirm MathWorks runtime
+      - name: Prepare isolated evidence directory
         shell: bash
         run: |
-          command -v matlab
-          matlab -batch "fprintf('MATLAB_RELEASE=%s\\n',version('-release')); fprintf('MATLAB_VERSION=%s\\n',version); assert(license('test','MATLAB')==1);"
-      - name: Run plotting, reporting, export and headless interaction gates
+          output="${RUNNER_TEMP}/ocean-matlab-full100-${{ matrix.release }}"
+          rm -rf "$output"
+          mkdir -p "$output/evaluator-runtime"
+          touch "$output/runtime-start.marker"
+          echo "MATLAB_FULL100_OUTPUT=$output" >> "$GITHUB_ENV"
+          echo "MATLAB_EVAL_NONCE=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Run licensed MATLAB plotting, reporting and interaction gates
+        uses: matlab-actions/run-command@v3
+        with:
+          command: addpath('codex-runtime/matlab/tests'); run_github_full100('${{ matrix.release }}', getenv('MATLAB_FULL100_OUTPUT'), getenv('MATLAB_EVAL_NONCE'))
+      - name: Validate MATLAB evidence and compute runtime score
         shell: bash
-        run: bash scripts/matlab-github-full100.sh "${{ matrix.release }}" "${RUNNER_TEMP}/ocean-matlab-full100-${{ matrix.release }}"
+        run: bash scripts/matlab-github-full100.sh "${{ matrix.release }}" "$MATLAB_FULL100_OUTPUT" "$MATLAB_EVAL_NONCE" "$MATLAB_FULL100_OUTPUT/runtime-start.marker"
       - name: Upload MATLAB evidence
         if: always()
         uses: actions/upload-artifact@v4
