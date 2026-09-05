@@ -102,8 +102,9 @@ entries = append_entry(entries,oi_export_figure(figureHandle,outputDirectory, ..
 clear cleanup;
 
 run_negative_contracts(theme);
+uncertaintyEntry = test_comparison_uncertainty(outputDirectory);
 save(fullfile(outputDirectory,"family-b-runtime-evidence.mat"),"entries", ...
-    "timeResult","comparisonResult","tsResult");
+    "timeResult","comparisonResult","tsResult","uncertaintyEntry");
 fprintf("FAMILY_B_MATLAB_RUNTIME=passed\n");
 fprintf("FAMILY_B_EXPORT_COUNT=%d\n",numel(entries));
 end

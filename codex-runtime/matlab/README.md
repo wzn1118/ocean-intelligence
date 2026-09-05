@@ -8,7 +8,7 @@
 
 第11轮有限探针中，保持宽高比 on 为 2/6 尺寸准确，off 为 6/6；但 pixels/off 实图出现字体缩小和刻度变多，拒绝作为生产方案。inches/off 保留近似原物理字号且所测 3/3 尺寸准确，但轴位置和留白有变化。第12、13轮各通过 57/60 个 CI 阶段，R2021a/R2024b/R2026a 各为 19/20；三版全量原生回归的尺寸检查已通过，包含 R2026a PNG inches/off 路径，不再仅有早期探针证据。三幅 unit-circle 图的局部像素包围框宽高差不超过 2 个边缘像素，但这不是全图视觉保证。仍须逐图核验字体、刻度、裁切与各格式产物，不做导出后 resize、重采样、裁切或填边，不放宽既有门禁。
 
-第14轮 `oi_annotate_svg` 仅对受支持的 SVG 子集进行受限嵌套 viewport 规范化：原生 `viewBox` 和绘图坐标保留在内部 viewport，外层 viewport 被规范化。这是原生导出后的 XML 后处理，不是未经处理的纯原生 SVG；未知或不支持的 SVG 必须拒绝，不能泛化覆盖或降低尺寸门禁。数学检查和单一渲染引擎 12 次零像素变化仅为前置证据，尚未在 MATLAB Java DOM 上完成三版执行，也不能继承前两轮的原生或视觉验收结论。
+第14轮 `oi_annotate_svg` 仅对受支持的 SVG 子集进行受限嵌套 viewport 规范化：原生 `viewBox` 和绘图坐标保留在内部 viewport，外层 viewport 被规范化。这是原生导出后的 XML 后处理，不是未经处理的纯原生 SVG；未知或不支持的 SVG 必须拒绝，不能泛化覆盖或降低尺寸门禁。第15轮命名空间明确的 DOM 检查已在三版通过，包含10个正例和34个拒绝例；主运行阶段60/60通过，但后处理和整体CI仍失败。R2024b额外DISPLAY诊断产生了白名单外的内嵌SVG字体，规范化明确拒绝。两套SVG布局引擎的历史副本对照均零像素差，CairoSVG对四件实际第15轮输出的对照也一致；两引擎共用Cairo，仍不等于浏览器、字体或全图视觉验收。
 
 交互图件使用 `assets/interactive_timeseries_native_template.m`，详细边界见 `INTERACTIONS.md`。该模板以稳定 `ObservationID` 连接 data tip 与 brush 选择，并区分桌面 `uifigure`/`exportapp` 和无界面传统 figure/`exportgraphics` 路径；默认不启用生命周期不明确的 `linkdata`。
 
@@ -21,6 +21,8 @@
 - 基线 PNG 使用与输出 manifest 相同的相对文件名；像素阈值可通过 `inspectMatlabPlotRegression` 的 `pixelChannelThreshold` 与 `pixelDiffRatioThreshold` 配置。
 
 `taskType="interactive"` 的 MATLAB 路由会实际调用原生交互模板；其生成脚本额外接收 `ObservationID`、`Station` 和 `QCFlag`，并在生成前校验逐点对齐。对应 Node 契约测试与 MATLAB 回归均在上述回归入口中覆盖。
+
+`oi_plot_comparison` 新增显式 `UncertaintySides="observation"`，支持只有观测侧的 `standard-uncertainty`。模型不确定度必须省略，不能补零或复制；缺观测不确定度不删除有限且QC接受的散点或改变统计，只是不画该点的水平区间。`result.Uncertainty` 保留对齐原值、提供状态及实际 `GraphicsMask`，原生图例标题说明模型侧未提供。默认双侧契约保持不变。该直接helper能力及新增三格式测试尚待首次MATLAB CI，评测比较图尚未调用此模式或获得v3证明。
 
 第13轮 `paired-interactive` v2 原生完整值、QC、不确定度和 errorbar 数组核对已在三版通过；报告 native proof 覆盖为 3/4 图，`paired-observation-model` 比较散点仍为 `not_verified`。这是输入字节绑定的运行声明核对，不是独立重跑、桌面交互或全图视觉证明，也不代表服务已热更新。
 
