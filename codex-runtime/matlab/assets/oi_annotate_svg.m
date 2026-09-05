@@ -8,10 +8,10 @@ arguments
     widthPixels (1,1) double {mustBeInteger,mustBePositive}
     heightPixels (1,1) double {mustBeInteger,mustBePositive}
 end
-assert(~isempty(which("xmlread")) && ~isempty(which("xmlwrite")), ...
+assert(~isempty(which("xmlwrite")), ...
     "oi_annotate_svg:ParserUnavailable", ...
-    "SVG metadata requires MATLAB XML parsing and serialization support");
-document = xmlread(char(svgPath));
+    "SVG metadata requires MATLAB XML serialization support");
+document = read_svg_document(svgPath);
 documentType = document.getDoctype();
 if ~isempty(documentType)
     document.removeChild(documentType);
@@ -89,11 +89,23 @@ descriptionNode.appendChild(document.createTextNode(char(description)));
 root.insertBefore(descriptionNode, root.getFirstChild());
 root.insertBefore(titleNode, descriptionNode);
 xmlwrite(char(svgPath), document);
-verifiedDocument = xmlread(char(svgPath));
+verifiedDocument = read_svg_document(svgPath);
 verifiedRoot = verifiedDocument.getDocumentElement();
 assert(strcmp(char(verifiedRoot.getAttribute('width')), char(string(widthPixels) + "px")) ...
     && strcmp(char(verifiedRoot.getAttribute('height')), char(string(heightPixels) + "px")), ...
     "oi_annotate_svg:Serialization", "SVG output dimensions did not survive XML serialization");
+end
+
+function document = read_svg_document(path)
+factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+factory.setNamespaceAware(true);
+factory.setFeature('http://apache.org/xml/features/nonvalidating/load-external-dtd', false);
+factory.setFeature('http://xml.org/sax/features/external-general-entities', false);
+factory.setFeature('http://xml.org/sax/features/external-parameter-entities', false);
+factory.setXIncludeAware(false);
+factory.setExpandEntityReferences(false);
+parser = factory.newDocumentBuilder();
+document = parser.parse(char(path));
 end
 
 function validate_normalization_profile(document, root)
@@ -182,6 +194,9 @@ end
 end
 
 function validate_render_value(name, value, root)
+assert(~any(strcmpi(strtrim(value), {'inherit', 'initial', 'unset', 'revert', 'revert-layer'})), ...
+    "oi_annotate_svg:UnsupportedNormalization", ...
+    "SVG viewport normalization does not support CSS-wide computed-style keywords");
 assert(isempty(regexp(lower(value), 'var\s*\(|calc\s*\(|env\s*\(|[{}@!\\]', 'once')), ...
     "oi_annotate_svg:UnsupportedNormalization", ...
     "SVG viewport normalization does not support dynamic or escaped values");

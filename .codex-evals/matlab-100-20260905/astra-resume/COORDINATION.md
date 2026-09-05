@@ -175,3 +175,11 @@
 - 报告新增显式外部审计输入，逐项重验manifest和十二产物的实际bytes/hash、完整检查覆盖、字体/文本叶子及汇总状态。CI先运行外部检查再生成报告；合法失败仍生成报告并在首段列出失败，缺失或矛盾输入拒绝，不把工具声明当成独立重跑或人工视觉通过。
 - 对第十三批原件的临时复制完成三版新报告集成：构建成功，自动审计分别failed/failed/passed。输出在 `/tmp/matlab-round14-report-bl3krpjx`，全部源运行文件哈希保持不变；这是离线兼容核验，不算新MATLAB执行。本轮代码、测试及独立复核仍在收尾，尚未推送。
 - 本批本地验证：243项Python、全部已跟踪服务器Node测试、8项生成器smoke、资产/技能及导出静态检查通过；57个MATLAB文件通过R2021a语法检查，冻结清单28文件复核通过。完整静态评分70/100、runtime_pending，不能与先前CI原始90分混称本轮实跑结果。新DOM回归含9个正例和28个负例，仍待MATLAB执行。
+
+## 第十五批接续
+
+- 第十四批本地提交 `fe95f89`，远端提交 `25d14176c752ac7b8bfd9d77edab0358c6296bf6`，运行 [33994158131](https://github.com/wzn1118/ocean-intelligence/actions/runs/33994158131) 已结束，仍为57/60，各版19/20、原始90/100，全部CI失败。原件 `/tmp/matlab-run-33994158131`，汇总 `/tmp/matlab-ci-summary-33994158131/summary.md`。新报告三版均在CI真实构建，旧版四PDF字体失败明确列出；R26自动图件12/12通过但视觉仍未验证。
+- 新DOM测试发现默认XML读取没有填充namespace字段，合法SVG被严格检查拒绝，出版导出尚未执行。下一候选使用标准JAXP DocumentBuilderFactory显式setNamespaceAware(true)，读取和序列化复核一致；禁用外部DTD、外部实体和XInclude。没有把空namespace直接当合法，也没有放宽SVG白名单。
+- 独立审计 `svg-independent-review-33993011601.md` 确认显式opacity继承在增加viewport后会改变计算值。新候选拒绝CSS-wide继承/重置关键字，增加固定数值透明度正例及拒绝后原件hash不变负例，共10正34负。第二渲染器没有成功启动，不能借用既有单引擎结果补签。
+- `comparison-proof-protocol.md`为后续v3草案，未实施。实际能力缺口是仅有观测侧标准不确定度时helper强制双侧输入、R21缺少可读取记录身份、缺完整原始QC返回。拟增加明确的观测侧水平原生区间及版本无关ID绑定，模型侧保持not_provided，不能补零或复制观测误差；本轮不把比较图升级为verified。
+- 本批修复通过57个MATLAB文件的R2021a语法检查、全部已跟踪服务器Node测试、8项生成器smoke及资产/导出静态检查。评测Python未改，28文件冻结清单仍一致；尚未宣称新的namespace-aware或透明度DOM回归已在MATLAB通过。

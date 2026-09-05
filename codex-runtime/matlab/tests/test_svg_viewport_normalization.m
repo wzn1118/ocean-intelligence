@@ -6,14 +6,14 @@ mkdir(temporaryDirectory);
 cleanup = onCleanup(@() rmdir(temporaryDirectory, "s"));
 names = ["old-native" "modern-native" "display-native" "missing-viewbox" ...
     "matching-ratio" "matching-origin" "family-characters" "matching-stylesheet" ...
-    "mismatched-origin"];
+    "mismatched-origin" "absolute-opacity"];
 nativeBoxes = [0 0 239 147; 0 0 240 148; 0 0 267 200; 0 0 239 147; ...
-    0 0 200 150; 10 20 240 148; 0 0 239 147; 0 0 200 150; 10 20 240 148];
-targets = [997 613; 997 613; 400 300; 997 613; 400 300; 480 296; 997 613; 400 300; 997 613];
-resolutions = [300 300 150 300 150 150 300 150 300];
+    0 0 200 150; 10 20 240 148; 0 0 239 147; 0 0 200 150; 10 20 240 148; 0 0 239 147];
+targets = [997 613; 997 613; 400 300; 997 613; 400 300; 480 296; 997 613; 400 300; 997 613; 997 613];
+resolutions = [300 300 150 300 150 150 300 150 300 300];
 aspects = ["xMidYMid meet" "" "xMidYMid meet" "xMidYMid meet" ...
-    "none" "xMinYMin meet" "" "" "xMidYMid meet"];
-normalize = [true true true true false false true false true];
+    "none" "xMinYMin meet" "" "" "xMidYMid meet" ""];
+normalize = [true true true true false false true false true true];
 for caseIndex = 1:numel(names)
     run_positive_case(temporaryDirectory, names(caseIndex), nativeBoxes(caseIndex, :), ...
         targets(caseIndex, :), resolutions(caseIndex), aspects(caseIndex), ...
@@ -25,7 +25,8 @@ rejected = ["unknown-node" "stylesheet" "stylesheet-instruction" "script" ...
     "root-style-filter" "root-style-mask" "nested-svg" "percent-geometry" ...
     "percent-style" "percent-font-size" "em-font-size" "rem-font-size" ...
     "aspect-none" "aspect-alignment" "aspect-slice" "style-calc" "style-var" ...
-    "style-important" "style-escape"];
+    "style-important" "style-escape" "opacity-inherit-attribute" ...
+    "style-inherit" "style-initial" "style-unset" "style-revert" "style-revert-layer"];
 for caseIndex = 1:numel(rejected)
     run_rejected_case(temporaryDirectory, rejected(caseIndex), ...
         "oi_annotate_svg:UnsupportedNormalization");
@@ -49,9 +50,12 @@ if name == "family-characters"
         + ";font-size:12px;stroke-linecap:round;fill:#182c33"));
 elseif name == "matching-stylesheet"
     append_stylesheet(document, root);
+elseif name == "absolute-opacity"
+    root.setAttribute('opacity', '0.5');
+    root.getElementsByTagName('rect').item(1).setAttribute('opacity', '0.25');
 end
 xmlwrite(char(filePath), document);
-source = xmlread(char(filePath));
+source = read_test_document(filePath);
 sourcePayload = payload_signature(source.getDocumentElement(), true);
 titleText = "Synthetic SVG < 20 & 12.5 > 2";
 description = "Synthetic DOM fixture; not observations or visual validation; ""quoted"".";
@@ -59,11 +63,14 @@ points = target * 72 / dpi;
 for iteration = 1:2
     returnedBox = oi_annotate_svg(filePath, titleText, description, ...
         points(1), points(2), target(1), target(2));
-    verified = xmlread(char(filePath));
+    verified = read_test_document(filePath);
     result = verified.getDocumentElement();
     assert(isempty(verified.getDoctype()));
     assert(strcmp(char(result.getNamespaceURI()), 'http://www.w3.org/2000/svg'));
     assert(strcmp(char(result.getAttribute('id')), 'synthetic-root'));
+    if name == "absolute-opacity"
+        assert(strcmp(char(result.getAttribute('opacity')), '0.5'));
+    end
     assert_metadata(result, target, points / 72, titleText, description, fontFamily);
     if normalize
         expectedBox = [0 0 target];
@@ -180,6 +187,13 @@ switch name
         textNode.setAttribute('style', 'font-size:12px !important');
     case "style-escape"
         textNode.setAttribute('style', 'font-family:Synthetic\ Font');
+    case "opacity-inherit-attribute"
+        root.setAttribute('opacity', '0.5');
+        root.getElementsByTagName('rect').item(1).setAttribute('opacity', 'inherit');
+    case {"style-inherit", "style-initial", "style-unset", "style-revert", "style-revert-layer"}
+        root.setAttribute('opacity', '0.5');
+        value = extractAfter(name, "style-");
+        root.getElementsByTagName('rect').item(1).setAttribute('style', char("opacity:" + value));
     otherwise
         error("test_svg_viewport_normalization:UnknownCase", "Unknown synthetic case: %s", name);
 end
@@ -270,6 +284,13 @@ end
 
 function element = svg_element(document, name)
 element = document.createElementNS('http://www.w3.org/2000/svg', name);
+end
+
+function document = read_test_document(path)
+factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+factory.setNamespaceAware(true);
+parser = factory.newDocumentBuilder();
+document = parser.parse(char(path));
 end
 
 function append_stylesheet(document, root)
