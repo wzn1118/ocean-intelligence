@@ -94,9 +94,20 @@ apply_export_font(figureHandle);
 drawnow;
 exportGraphicsAvailable = has_exportgraphics();
 directSvgAvailable = options.ExportSVG && has_direct_svg_export();
+pdfApi = "print";
+pdfDevice = "-dpdf -painters";
 if exportGraphicsAvailable
     exportgraphics(figureHandle, pngPath, "Resolution", dpi, "BackgroundColor", "white");
     exportgraphics(figureHandle, pdfPath, "ContentType", "vector", "BackgroundColor", "white");
+    [probeWidthPoints, probeHeightPoints, probePages] = pdf_geometry(pdfPath);
+    if probePages == 1 && abs(probeWidthPoints - widthPoints) <= 1 ...
+            && abs(probeHeightPoints - heightPoints) <= 1
+        pdfApi = "exportgraphics";
+        pdfDevice = "";
+    else
+        delete(pdfPath);
+        print(figureHandle, char(pdfPath), "-dpdf", "-painters");
+    end
 else
     warning("oi_export_figure:LegacyPrintFallback", ...
         "exportgraphics is unavailable; using the documented print fallback");
@@ -225,7 +236,7 @@ entry.interaction = struct("requested", false, "enabled", false, ...
     "headless", struct("supported", true, "mode", "static_export", ...
         "verified", string(figureHandle.Visible) == "off"));
 entry.runtime = runtime_evidence(figureHandle, requiredToolboxes, installedToolboxes, ...
-    exportGraphicsAvailable, options.ExportSVG, directSvgAvailable);
+    exportGraphicsAvailable, pdfApi, pdfDevice, options.ExportSVG, directSvgAvailable);
 entry.exports = struct( ...
     "png", struct("figure_id", figureId, "title", options.Title, ...
         "source", options.Source, "theme", options.Theme, ...
@@ -406,16 +417,16 @@ assert(isempty(missingToolboxes), "oi_export_figure:MissingToolbox", ...
     "Required MATLAB product is not installed: %s", strjoin(missingToolboxes, ", "));
 end
 
-function evidence = runtime_evidence(figureHandle, requiredToolboxes, installedToolboxes, exportGraphicsAvailable, svgRequested, directSvgAvailable)
+function evidence = runtime_evidence(figureHandle, requiredToolboxes, installedToolboxes, exportGraphicsAvailable, pdfApi, pdfDevice, svgRequested, directSvgAvailable)
 batchMode = false;
 if exist("batchStartupOptionUsed", "file") == 2 ...
         || exist("batchStartupOptionUsed", "builtin") == 5
     batchMode = logical(batchStartupOptionUsed());
 end
 if exportGraphicsAvailable
-    pngPdfApi = "exportgraphics";
+    pngApi = "exportgraphics";
 else
-    pngPdfApi = "print";
+    pngApi = "print";
 end
 svgApi = "not_requested";
 svgDevice = "";
@@ -444,8 +455,8 @@ evidence = struct("minimum_release", "R2019b", ...
     "toolbox_installation_verified", true, ...
     "toolbox_license_verified", false, ...
     "toolbox_invocation_verified", false, ...
-    "export_api", struct("png", pngPdfApi, "pdf", pngPdfApi, "svg", svgApi), ...
-    "export_device", struct("png", "", "pdf", "", "svg", svgDevice));
+    "export_api", struct("png", pngApi, "pdf", pdfApi, "svg", svgApi), ...
+    "export_device", struct("png", "", "pdf", pdfDevice, "svg", svgDevice));
 end
 
 function annotate_svg(svgPath, requestedTitle, description, widthPoints, heightPoints, widthPixels, heightPixels)

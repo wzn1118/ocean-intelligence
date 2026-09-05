@@ -45,8 +45,11 @@ assert(isscalar(after) && ~after.isdir && byteCount == before.bytes ...
 end
 
 function digest = system_sha256(filePath)
-quotedPath = "'" + replace(filePath, "'", "'\"'\"'") + "'";
-[status, output] = system("sha256sum -- " + quotedPath);
+singleQuote = char(39);
+doubleQuote = char(34);
+embeddedQuote = [singleQuote doubleQuote singleQuote doubleQuote singleQuote];
+quotedPath = [singleQuote strrep(char(filePath), singleQuote, embeddedQuote) singleQuote];
+[status, output] = system(['sha256sum -- ' quotedPath]);
 assert(status == 0, "oi_sha256_file:JVMRequired", ...
     "SHA-256 requires either the MATLAB JVM or a working sha256sum command");
 tokens = regexp(strtrim(output), "^([0-9A-Fa-f]{64})\\s", "tokens", "once");
