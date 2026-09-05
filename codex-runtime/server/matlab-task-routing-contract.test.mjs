@@ -182,20 +182,22 @@ for (const [targetRelease, exportApi, generalStatus] of [
         assert.equal(plan.status, 'fallback');
         assert.equal(plan.strategy, 'explicit-fallback');
         assert.match(plan.reason, /explicit figure and paper geometry/u);
+        assert.doesNotMatch(plan.syntax, /PreserveAspectRatio|'Units'/u);
         if (generalStatus === 'native') {
           assert.match(plan.reason, /exportgraphics exists/u);
           assert.doesNotMatch(plan.reason, /unavailable/u);
         }
       } else {
         assert.equal(plan.status, 'preferred');
+        assert.match(plan.syntax, /'Units','inches','Width',widthPixels\/dpi,'Height',heightPixels\/dpi/u);
+        assert.doesNotMatch(plan.syntax, /'pixels'/u);
         if (format === 'png') {
-          assert.match(plan.syntax, /'Units','pixels','Width',widthPixels,'Height',heightPixels/u);
           assert.match(plan.syntax, /'Resolution',dpi/u);
+          assert.match(plan.syntax, /'Padding','figure','PreserveAspectRatio','off'/u);
         } else {
-          assert.match(plan.syntax, /'Units','inches','Width',widthPixels\/dpi,'Height',heightPixels\/dpi/u);
           assert.doesNotMatch(plan.syntax, /'Resolution',dpi/u);
+          assert.match(plan.syntax, /'Padding','figure','PreserveAspectRatio','on'/u);
         }
-        assert.match(plan.syntax, /'Padding','figure','PreserveAspectRatio','on'/u);
       }
     }
     assert.equal(selectMatlabExportStrategy(targetRelease, 'png').api,
@@ -208,6 +210,23 @@ for (const [targetRelease, exportApi, generalStatus] of [
     assert.equal(perFormatOnly.status, 'ready', perFormatOnly.error?.reason);
   });
 }
+
+test('native inches/off policy stays scoped to audited exports and remains an unverified plan', () => {
+  for (const targetRelease of ['R2025a', 'R2026a']) {
+    const general = routeMatlabTask({ runtime: 'matlab', targetRelease, outputFormats: ['png', 'pdf', 'svg'] });
+    assert.equal(general.status, 'ready');
+    for (const format of ['png', 'pdf', 'svg']) {
+      assert.equal(general.outputContract.exportStrategies[format].syntax,
+        selectMatlabExportStrategy(targetRelease, format).syntax);
+      assert.equal(general.outputContract.exportStrategies[format].asset, undefined);
+    }
+  }
+  const block = matlabTaskRoutingInstructionBlock();
+  assert.match(block, /PNG 使用 Units inches、Width=widthPixels\/dpi、Height=heightPixels\/dpi、Resolution=dpi 和 PreserveAspectRatio off/u);
+  assert.match(block, /PDF\/SVG 使用相同物理 Width\/Height 的 Units inches 和 PreserveAspectRatio on/u);
+  assert.match(block, /新 PNG inches\/off 策略尚待跨版本全量 CI 验证，不得声称已修复或视觉满分/u);
+  assert.match(block, /不采用会缩小字体并增加刻度的 pixels\/off 路径/u);
+});
 
 test('manifest requirement and physical sizing alone preserve general routing and do not authorize legacy print', () => {
   for (const targetRelease of ['R2021a', 'R2024b']) {

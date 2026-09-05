@@ -10,6 +10,7 @@ import {
 import { matlabPlotRoutingInstructionBlock } from './matlab-plot-router.mjs';
 
 const repositorySkill = readFileSync(new URL('../matlab/SKILL.md', import.meta.url), 'utf8');
+const repositoryReadme = readFileSync(new URL('../matlab/README.md', import.meta.url), 'utf8');
 const matlabAssetDirectory = new URL('../matlab/assets/', import.meta.url);
 const matlabAssets = readdirSync(matlabAssetDirectory, { withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.endsWith('.m'))
@@ -318,24 +319,45 @@ test('distinguishes general API availability from the repository exact export po
   assert.match(repositorySkill, /`export_size_units`/u);
 });
 
-test('injects per-format native export units without claiming the PNG adjustment is verified', () => {
+test('injects native PNG inches/off and vector inches/on without claiming full validation', () => {
   for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions(),
     ...['R2021a', 'R2024b', 'R2026a'].map((matlabRelease) =>
       matlabPlottingInstructions({ runtime: 'matlab', matlabRelease }))]) {
     const repositoryBlock = instructions.slice(instructions.indexOf('【MATLAB 仓库实跑约束】'));
     assert.match(repositoryBlock, /R2025a\+ 的 exact exportgraphics 按格式指定尺寸/u);
-    assert.match(repositoryBlock, /PNG 使用 Units="pixels"、整数 Width\/Height 和 Resolution=dpi/u);
-    assert.match(repositoryBlock, /PDF\/SVG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi/u);
-    assert.match(repositoryBlock, /两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
+    assert.match(repositoryBlock, /PNG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi、Resolution=dpi 和 PreserveAspectRatio="off"/u);
+    assert.match(repositoryBlock, /PDF\/SVG 使用相同物理尺寸的 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi 和 PreserveAspectRatio="on"/u);
+    assert.match(repositoryBlock, /两类均保留 Padding="figure"/u);
     assert.match(repositoryBlock, /绘图前的 figure\/layout 仍保持最终 inches/u);
     assert.match(repositoryBlock, /不能把原生 PNG 的尺寸参数误作屏幕画布单位/u);
-    assert.match(repositoryBlock, /runtime\.export_size_units 按实际路径记录：原生 PNG 为 pixels，print PNG 为 inches，PDF 及请求的 SVG 为 inches/u);
+    assert.match(repositoryBlock, /runtime\.export_size_units 按实际路径记录：原生 PNG、print PNG、PDF 及请求的 SVG 均为 inches/u);
+    assert.match(repositoryBlock, /inches\/off 保留物理字体且所测 3\/3 尺寸准确/u);
+    assert.match(repositoryBlock, /pixels\/off 实图字体缩小、刻度变多，不采用该路径/u);
     assert.match(repositoryBlock, /不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误/u);
-    assert.match(repositoryBlock, /本次 PNG 单位策略调整尚待 CI 验证，不得声称尺寸偏差已经修复/u);
-    assert.match(repositoryBlock, /必须重新检查真实 PNG 像素\/DPI、PDF 页尺寸及 SVG 几何，未验证项保持 unverified/u);
-    assert.doesNotMatch(instructions, /Width\/Height、Units inches|exact exportgraphics 显式传 Units="inches"/u);
+    assert.match(repositoryBlock, /本次 PNG inches\/off 策略尚待跨版本全量 CI 验证，不得声称尺寸偏差已经修复或视觉满分/u);
+    assert.match(repositoryBlock, /必须重新检查真实 PNG 像素\/DPI、字体、刻度、裁切、PDF 页尺寸及 SVG 几何，未验证项保持 unverified/u);
+    assert.doesNotMatch(instructions, /PNG 使用 Units="?pixels|两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
   }
-  assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /runtime\.export_size_units|本次 PNG 单位策略调整/u);
+  assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /runtime\.export_size_units|本次 PNG inches\/off 策略/u);
+});
+
+test('repository entry documents the limited raster probe and pending cross-release validation', () => {
+  assert.match(repositoryReadme, /先读本目录的 `SKILL\.md` 与本文/u);
+  assert.match(repositoryReadme, /用 `which` 核对同名函数来源/u);
+  assert.match(repositoryReadme, /不代表本目录已被 Codex 自动发现为技能/u);
+  for (const document of [repositorySkill, repositoryReadme]) {
+    for (const term of ['Units="inches"', 'Width=widthPixels/dpi', 'Height=heightPixels/dpi',
+      'Resolution=dpi', 'PreserveAspectRatio="off"', 'PreserveAspectRatio="on"',
+      'Padding="figure"', 'export_size_units', '2/6', '6/6', '3/3', 'pixels/off', 'inches/off']) {
+      assert.ok(document.includes(term), `Missing repository export guidance: ${term}`);
+    }
+    assert.doesNotMatch(document, /Units="pixels"/u);
+  }
+  assert.match(repositorySkill, /still requires full cross-release CI validation/u);
+  assert.match(repositorySkill, /Do not claim the size defect is fixed or that visual quality is approved/u);
+  assert.match(repositorySkill, /shrank fonts and increased tick counts/u);
+  assert.match(repositoryReadme, /仍待跨版本全量 CI 验证，不能声称尺寸问题已修复或视觉满分/u);
+  assert.match(repositoryReadme, /不放宽既有门禁/u);
 });
 
 test('requires exact installed fonts without claiming PDF embedding or CJK readability', () => {

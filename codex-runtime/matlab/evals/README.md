@@ -84,7 +84,7 @@ The two older primary jobs remain no-display. Desktop interaction stays unverifi
 Run 33989846546 passed all twelve external evaluator artifact checks on R2026a
 under that display setup, including PDF text and font checks. This is not a
 manual visual approval. Native raster output still failed exact dimensions in
-two other suites. The exporter now requests integer pixel dimensions for PNG
+two other suites. The next candidate requested integer pixel dimensions for PNG
 and inches for PDF/SVG, recording `runtime.export_size_units` per format. The
 publication suite exercises 400x300 at 150 DPI, 1200x675 at 180 DPI, and 997x613
 at 300 DPI, with actual dimensions and embedded DPI checked before promotion.
@@ -99,6 +99,25 @@ The existing publication gate still rejects incorrect raster dimensions.
 The added fractional-inch case also exposed PDF physical-size metadata copied
 from the request rather than the actual MediaBox. Record the measured page size;
 the existing one-point PDF request tolerance and strict metadata checks remain.
+
+Run 33991563211 completed 52/60 runtime stages. Its twelve native raster
+diagnostics returned exact dimensions in all six PreserveAspectRatio="off"
+cases, compared with two of six "on" cases. However, the pixel/off images
+visibly reduced physical font sizes and changed ticks, so that combination was
+rejected. The next production candidate uses inches/off for PNG and keeps
+inches/on for PDF/SVG. The three inches/off diagnostics had exact dimensions
+and retained large physical typography, but this is not full-layout approval.
+The publication suite now checks native equal-data-scale circle pixels,
+unchanged source arrays and point sizes, in addition to dimensions and DPI.
+No raster resizing, clipping, artificial padding, or relaxed size check is used.
+
+The same run confirmed the PDF metadata fix; older releases then reached a
+native SVG aspect-ratio mismatch. A separate raw SVG print probe compares
+default resolution with explicit -rDPI on fresh figures, in both primary and
+DISPLAY diagnostics. XML attributes and hashes are read without rewriting SVG.
+The existing strict SVG gate remains unchanged. The points-based text test also
+exposed a row/column broadcasting bug; normalizing both extents to four-element
+rows fixes the comparison without changing its 1e-6-pixel threshold.
 
 ## Commands
 

@@ -23,7 +23,7 @@ report = struct("schema_version", 1, "scope", "virtual_display_diagnostics_only"
 template = struct("id", "", "status", "pending", "error_identifier", "", "error_message", "");
 report.cases = repmat(template, 3, 1);
 identifiers = ["publication", "native-pdf-page-probe", "vector-text-alignment-probe"];
-callbacks = {@() full100_export_contracts(fullfile(outputDirectory, "publication"), true), ...
+callbacks = {@() run_publication_diagnostics(outputDirectory), ...
     @() test_native_pdf_page_probe(fullfile(outputDirectory, "native-pdf-page-probe")), ...
     @() test_vector_text_alignment(fullfile(outputDirectory, "vector-text-alignment-probe"))};
 reportPath = fullfile(outputDirectory, "display-rendering.json");
@@ -54,6 +54,11 @@ write_report(reportPath, report);
 fprintf("MATLAB_DISPLAY_DIAGNOSTICS=%s\n", reportPath);
 assert(report.failed_count == 0, "test_display_rendering:FailedCases", ...
     "Virtual-display export checks failed; partial diagnostic files are retained");
+end
+
+function run_publication_diagnostics(outputDirectory)
+diagnose_svg_print_sizes(fullfile(outputDirectory, "svg-print-sizes-probe"));
+full100_export_contracts(fullfile(outputDirectory, "publication"), true);
 end
 
 function write_report(filePath, report)

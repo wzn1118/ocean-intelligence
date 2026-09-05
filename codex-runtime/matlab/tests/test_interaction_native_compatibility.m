@@ -14,6 +14,7 @@ test_static_or_headless_path(data, desktopAvailable);
 cjkDefaultFontExecuted = test_publication_layout(data);
 test_explicit_font(data);
 test_standard_uncertainty(data);
+test_time_axis_padding(data);
 traditionalDesktopExecuted = false;
 uiAxesDesktopExecuted = false;
 if desktopAvailable
@@ -284,6 +285,198 @@ outputs = interactive_timeseries_native_template(data, "unused", ...
     "Interactive", false, "Export", false, "TimeZone", "UTC", ...
     "ValueLabel", "Temperature", "ValueUnit", "degC", ...
     "UncertaintyType", uncertaintyType, "UncertaintyUnit", "degC", varargin{:});
+end
+
+function test_time_axis_padding(data)
+data.Uncertainty = [0.11; 0.14; 0.17; 0.23];
+data.Properties.VariableUnits{end} = 'degC';
+missingData = data;
+missingData.Value(2) = NaN;
+missingData.Uncertainty(2:3) = NaN;
+missingData.SecondaryValue = [35.1; 35.3; NaN; 35.5];
+missingData.Properties.VariableUnits{end} = 'g/kg';
+subsecondData = removevars(data, 'Uncertainty');
+subsecondData.Time = datetime(2026, 9, 5, 'TimeZone', 'Asia/Shanghai') ...
+    + seconds([0; 0.25; 0.5; 0.75]);
+subsecondData.Time.Format = 'yyyy-MM-dd HH:mm:ss.SSS';
+subsecondData.UncertaintyLower = subsecondData.Value - [0.1; 0.2; 0.15; 0.25];
+subsecondData.UncertaintyUpper = subsecondData.Value + [0.2; 0.15; 0.3; 0.4];
+subsecondData.Properties.VariableUnits(end-1:end) = {'degC', 'degC'};
+singletonData = data(1, :);
+singletonData.Time.TimeZone = 'Asia/Shanghai';
+fixtures = {data, missingData, subsecondData, singletonData};
+caseNames = ["magnitude", "missing-linked", "subsecond-bounds", "singleton"];
+outputDirectory = tempname;
+mkdir(outputDirectory);
+directoryCleanup = onCleanup(@() rmdir(outputDirectory, 's'));
+for caseIndex = 1:numel(fixtures)
+    source = fixtures{caseIndex};
+    extraOptions = {};
+    if ismember('SecondaryValue', source.Properties.VariableNames)
+        extraOptions = {'SecondaryValueLabel', 'Salinity', 'SecondaryValueUnit', 'g/kg', ...
+            'PublicationWidthPixels', 1400, 'PublicationHeightPixels', 1200, ...
+            'PublicationDPI', 200};
+    end
+    uncertaintyType = "standard-uncertainty";
+    if ismember('UncertaintyLower', source.Properties.VariableNames)
+        uncertaintyType = "confidence-interval";
+        extraOptions = [extraOptions, {'ConfidenceLevel', 0.95}]; %#ok<AGROW>
+    end
+    outputs = interactive_timeseries_native_template(source, ...
+        fullfile(outputDirectory, caseNames(caseIndex)), ...
+        'Interactive', false, 'Export', true, 'ExportSVG', true, ...
+        'TimeZone', string(source.Time.TimeZone), ...
+        'ValueLabel', 'Temperature', 'ValueUnit', 'degC', ...
+        'UncertaintyType', uncertaintyType, 'UncertaintyUnit', 'degC', extraOptions{:});
+    figureCleanup = onCleanup(@() close_if_valid(outputs.Figure));
+    drawnow;
+    imageInfo = imfinfo(outputs.PNG);
+    assert(outputs.ExportPerformed && isfile(outputs.PDF) && isfile(outputs.SVG) ...
+        && imageInfo.Width == outputs.PublicationWidthPixels ...
+        && imageInfo.Height == outputs.PublicationHeightPixels, ...
+        "test_interaction_native_compatibility:PaddingExports", ...
+        "Time padding must render all three formats at the unchanged final size");
+    verify_publication_layout(outputs, ...
+        [outputs.PublicationPhysicalWidthIn outputs.PublicationPhysicalHeightIn]);
+    verify_default_font(outputs);
+    verify_time_axis_clearance(outputs, source, caseNames(caseIndex));
+    verify_time_padding_data(outputs, source);
+    limits = outputs.Axes(1).XLim;
+    if height(source) == 1
+        xlim(outputs.Axes(1), 'auto');
+        drawnow;
+        nativeLimits = xlim(outputs.Axes(1));
+        nativeMargin = seconds(0.04 * seconds(nativeLimits(2) - nativeLimits(1)));
+        expectedLimits = [nativeLimits(1) - nativeMargin nativeLimits(2) + nativeMargin];
+        assert(all(abs(seconds(limits - expectedLimits)) < 1e-9), ...
+            "test_interaction_native_compatibility:SingletonTimeLimits", ...
+            "Singleton padding must extend native auto limits without a calendar-unit guess");
+        xlim(outputs.Axes(1), limits);
+    elseif numel(outputs.Axes) == 2
+        assert(outputs.ValidCount == 2 && outputs.MissingCount == 2 ...
+            && outputs.UncertaintyMissingCount == 1, ...
+            "test_interaction_native_compatibility:PaddingMissingCounts", ...
+            "Padding must not change the missing-value or incomplete-uncertainty counts");
+        shiftedLimits = limits + seconds(0.1 * seconds(limits(2) - limits(1)));
+        xlim(outputs.Axes(2), shiftedLimits);
+        drawnow;
+        assert(isequal(outputs.Axes(1).XLim, shiftedLimits), ...
+            "test_interaction_native_compatibility:PaddingLinkedLimits", ...
+            "Changing the secondary time limits must still update the primary axes");
+        xlim(outputs.Axes(1), limits);
+        assert(isequal(outputs.Axes(2).XLim, limits), ...
+            "test_interaction_native_compatibility:PaddingLinkedRestore", ...
+            "Changing primary time limits must still update the secondary axes");
+        verify_stable_selection(outputs, source);
+    end
+    verify_time_padding_data(outputs, source);
+    clear figureCleanup;
+end
+duplicateData = data;
+duplicateData.Time(:) = duplicateData.Time(1);
+assert_interaction_error(@() render_uncertainty(duplicateData, "standard-uncertainty"), ...
+    "Time must be unique and strictly increasing");
+clear directoryCleanup;
+end
+
+function verify_time_axis_clearance(outputs, data, caseName)
+figurePixels = getpixelposition(outputs.Figure);
+for axesIndex = 1:numel(outputs.Axes)
+    axesHandle = outputs.Axes(axesIndex);
+    limits = axesHandle.XLim;
+    assert(isdatetime(limits) && strcmp(limits.TimeZone, data.Time.TimeZone) ...
+        && limits(1) < data.Time(1) && limits(2) > data.Time(end) ...
+        && isequal(limits, outputs.Axes(1).XLim), ...
+        "test_interaction_native_compatibility:TimeLimits", ...
+        "%s panel %d must keep both endpoints strictly inside shared zoned limits", ...
+        caseName, axesIndex);
+    if height(data) > 1
+        expectedMargin = seconds(0.04 * seconds(data.Time(end) - data.Time(1)));
+        expectedLimits = [data.Time(1) - expectedMargin data.Time(end) + expectedMargin];
+        assert(all(abs(seconds(limits - expectedLimits)) < 1e-9), ...
+            "test_interaction_native_compatibility:TimeMarginDuration", ...
+            "Time limits must reserve exactly four percent of elapsed duration at each end");
+    end
+    axesPixels = getpixelposition(axesHandle, true);
+    axesWidthPoints = axesPixels(3) / figurePixels(3) ...
+        * outputs.PublicationPhysicalWidthIn * 72;
+    endpointMargins = seconds([data.Time(1) - limits(1), limits(2) - data.Time(end)]) ...
+        / seconds(limits(2) - limits(1)) * axesWidthPoints;
+    lineHandle = outputs.Lines(axesIndex);
+    glyphHalfWidth = (lineHandle.MarkerSize + lineHandle.LineWidth) / 2;
+    if isgraphics(outputs.UncertaintyHandles(axesIndex))
+        errorHandle = outputs.UncertaintyHandles(axesIndex);
+        glyphHalfWidth = max(glyphHalfWidth, (errorHandle.CapSize + errorHandle.LineWidth) / 2);
+    end
+    clearancePoints = endpointMargins - glyphHalfWidth - axesHandle.LineWidth / 2;
+    fprintf('MATLAB_INTERACTION_TIME_MARGIN case=%s panel=%d axes_width_pt=%.9g clearance_pt=%s\n', ...
+        caseName, axesIndex, axesWidthPoints, mat2str(clearancePoints, 12));
+    assert(all(isfinite(clearancePoints)) && all(clearancePoints > 0), ...
+        "test_interaction_native_compatibility:EndpointClearance", ...
+        "%s panel %d has no physical clearance: margins_pt=%s glyph_half_width_pt=%g axis_width_pt=%g", ...
+        caseName, axesIndex, mat2str(endpointMargins, 12), glyphHalfWidth, axesHandle.LineWidth);
+end
+end
+
+function verify_time_padding_data(outputs, data)
+identityFields = ["Time", "ObservationID", "Station", "QCFlag", "SourceRow"];
+uncertaintyFields = ["Uncertainty", "UncertaintyLower", "UncertaintyUpper"];
+for lineIndex = 1:numel(outputs.Lines)
+    lineHandle = outputs.Lines(lineIndex);
+    metadata = lineHandle.UserData;
+    expectedValues = data.Value;
+    if lineIndex == 2
+        expectedValues = data.SecondaryValue;
+    end
+    assert(isequal(lineHandle.XData(:), data.Time) ...
+        && strcmp(lineHandle.XData.TimeZone, data.Time.TimeZone) ...
+        && strcmp(metadata.Time.TimeZone, data.Time.TimeZone) ...
+        && strcmp(metadata.Time.Format, data.Time.Format) ...
+        && isequaln(lineHandle.YData(:), expectedValues) ...
+        && isequaln(metadata.PlottedValue, expectedValues) ...
+        && metadata.SourceRowOrigin == "supplied_pre_filter_identity", ...
+        "test_interaction_native_compatibility:PaddingRawSeries", ...
+        "Padding must preserve every original time, zone, format, value, and source-row identity");
+    for fieldName = identityFields
+        assert(isequaln(metadata.(fieldName), data.(fieldName)), ...
+            "test_interaction_native_compatibility:PaddingIdentity", ...
+            "Time padding changed aligned metadata %s", fieldName);
+    end
+    for fieldName = uncertaintyFields
+        expectedValues = nan(height(data), 1);
+        if ismember(fieldName, string(data.Properties.VariableNames))
+            expectedValues = data.(fieldName);
+        end
+        assert(isequaln(metadata.(fieldName), expectedValues), ...
+            "test_interaction_native_compatibility:PaddingUncertainty", ...
+            "Time padding changed raw uncertainty metadata %s", fieldName);
+    end
+end
+errorHandle = outputs.UncertaintyHandles(1);
+if ismember('Uncertainty', data.Properties.VariableNames)
+    expectedLowerDelta = data.Uncertainty;
+    expectedUpperDelta = data.Uncertainty;
+else
+    expectedLowerDelta = data.Value - data.UncertaintyLower;
+    expectedUpperDelta = data.UncertaintyUpper - data.Value;
+end
+assert(isequal(errorHandle.XData(:), data.Time) ...
+    && strcmp(errorHandle.XData.TimeZone, data.Time.TimeZone) ...
+    && isequaln(errorHandle.YData(:), data.Value) ...
+    && isequaln(errorHandle.YNegativeDelta(:), expectedLowerDelta) ...
+    && isequaln(errorHandle.YPositiveDelta(:), expectedUpperDelta), ...
+    "test_interaction_native_compatibility:PaddingErrorBars", ...
+    "Padding must not insert observations or change plotted errors, times, or missing masks");
+expectedFlags = unique(data.QCFlag, 'stable');
+expectedCounts = zeros(numel(expectedFlags), 1);
+for flagIndex = 1:numel(expectedFlags)
+    expectedCounts(flagIndex) = sum(data.QCFlag == expectedFlags(flagIndex));
+end
+assert(outputs.QCPolicy == "preserve" ...
+    && isequal(outputs.QCSummary.Flag, expectedFlags) ...
+    && isequal(outputs.QCSummary.Count, expectedCounts), ...
+    "test_interaction_native_compatibility:PaddingQC", ...
+    "Time padding must preserve every QC flag and count");
 end
 
 function assert_interaction_error(callback, expectedMessage)

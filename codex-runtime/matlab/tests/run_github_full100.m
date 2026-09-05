@@ -176,6 +176,7 @@ function run_export_gate(export_directory)
 working_directory = string(pwd);
 artifact_directory = fullfile(export_directory, "full100-export-artifacts");
 diagnose_native_raster_sizes(fullfile(export_directory, "native-raster-sizing-probe"));
+diagnose_svg_print_sizes(fullfile(export_directory, "svg-print-sizes-probe"));
 full100_export_contracts(artifact_directory, true);
 assert(string(pwd) == working_directory, ...
     "run_github_full100:ExportWorkingDirectory", ...

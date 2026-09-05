@@ -262,19 +262,20 @@ test('routing instruction builder recommends only real MATLAB assets and native 
   assert.doesNotMatch(block, /surface_3d_native_template|oi_resolve_font|oi_configure_graphics|oi_plot_timeseries/u);
 });
 
-test('routing instructions separate native raster pixels from vector inches and unverified rendering', () => {
+test('routing instructions separate native raster inches/off from vector inches/on and unverified rendering', () => {
   const block = matlabPlotRoutingInstructionBlock();
-  assert.match(block, /PNG 使用 Units="pixels"、整数 Width\/Height 和 Resolution=dpi/u);
-  assert.match(block, /PDF\/SVG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi/u);
-  assert.match(block, /两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
+  assert.match(block, /PNG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi、Resolution=dpi 和 PreserveAspectRatio="off"/u);
+  assert.match(block, /PDF\/SVG 使用相同物理尺寸的 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi 和 PreserveAspectRatio="on"/u);
+  assert.match(block, /两类均保留 Padding="figure"/u);
   assert.match(block, /绘图前的 figure\/layout 仍按像素\/DPI 设置最终 inches，不把屏幕像素作为输出尺寸/u);
-  assert.match(block, /runtime\.export_size_units 按实际路径记录：原生 PNG 为 pixels，print PNG 为 inches，PDF 及请求的 SVG 为 inches/u);
+  assert.match(block, /runtime\.export_size_units 按实际路径记录：原生 PNG、print PNG、PDF 及请求的 SVG 均为 inches/u);
+  assert.match(block, /不采用会缩小字体并增加刻度的 pixels\/off 路径/u);
   assert.match(block, /不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误/u);
-  assert.match(block, /本次 PNG 单位策略调整尚待 CI 验证，不得声称尺寸偏差已经修复/u);
+  assert.match(block, /本次 PNG inches\/off 策略尚待跨版本全量 CI 验证，不得声称尺寸偏差已经修复或视觉满分/u);
   assert.match(block, /目标策略不能冒充运行证据/u);
   assert.match(block, /结合源图实测边界与导出器几何证据检查布局，保留未测覆盖/u);
   assert.match(block, /不得冒充 PNG\/PDF 裁剪、重叠、中文字形、灰度、色觉或字体嵌入验收/u);
-  assert.doesNotMatch(block, /Width\/Height、Units inches/u);
+  assert.doesNotMatch(block, /PNG 使用 Units="pixels"|两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
 });
 
 test('returns unresolved metadata instead of inventing units, timezone or missingness', () => {
@@ -1328,6 +1329,15 @@ for (const [targetRelease, expectedApi] of [
       assert.equal(route.apiPlan.exportFormats[format].api, expectedApi);
       assert.equal(resolved.outputContract.exportStrategies[format].api, expectedApi);
       assert.equal(resolved.outputContract.exportStrategies[format].exactSizingRequired, true);
+      assert.equal(resolved.outputContract.exportStrategies[format].syntax, route.apiPlan.exportFormats[format].syntax);
+      if (expectedApi === 'exportgraphics') {
+        const syntax = scriptContract.strategies[format].syntax;
+        assert.match(syntax, /'Units','inches','Width',widthPixels\/dpi,'Height',heightPixels\/dpi/u);
+        assert.match(syntax, format === 'png'
+          ? /'PreserveAspectRatio','off'/u
+          : /'PreserveAspectRatio','on'/u);
+        assert.doesNotMatch(syntax, /'pixels'/u);
+      }
     }
     assert.match(resolved.script, new RegExp(`release-aware APIs: png=${expectedApi}, pdf=${expectedApi}, svg=${expectedApi}`, 'u'));
     assert.match(resolved.script, /actual_png_pdf_api = exportEntry\.runtime\.export_api\.png/u);
@@ -1392,10 +1402,10 @@ test('audited export metadata matches asset exact geometry and callable P-code p
   assert.match(asset, /exist\('exportgraphics', 'builtin'\) == 5/u);
   assert.match(asset, /"Units", "inches", "Width", widthInches, "Height", heightInches/u);
   assert.match(asset, /"Padding", "figure", "PreserveAspectRatio", "on"/u);
-  assert.match(asset, /exportgraphics\(figureHandle, pngPath, "Units", "pixels", \.\.\.\s+"Width", widthPixels, "Height", heightPixels, "Resolution", dpi, \.\.\.\s+"Padding", "figure", "PreserveAspectRatio", "on"/u);
+  assert.match(asset, /exportgraphics\(figureHandle, pngPath, "Units", "inches", \.\.\.\s+"Width", widthInches, "Height", heightInches, "Resolution", dpi, \.\.\.\s+"Padding", "figure", "PreserveAspectRatio", "off"/u);
   assert.match(asset, /exportgraphics\(figureHandle, pdfPath, geometryArgs\{:\}, "ContentType", "vector"\)/u);
   assert.match(asset, /exportgraphics\(figureHandle, svgPath, geometryArgs\{:\}\)/u);
-  assert.match(asset, /pngApi = "exportgraphics";\s+pngSizeUnits = "pixels";\s+else\s+pngApi = "print";\s+pngSizeUnits = "inches";/u);
+  assert.match(asset, /pngApi = "exportgraphics";\s+pngSizeUnits = "inches";\s+else\s+pngApi = "print";\s+pngSizeUnits = "inches";/u);
   assert.match(asset, /"export_size_units", struct\("png", pngSizeUnits, "pdf", "inches"\)/u);
   assert.match(asset, /if svgRequested\s+evidence\.export_size_units\.svg = "inches";/u);
   assert.doesNotMatch(asset, /exportgraphics\(figureHandle, pngPath, geometryArgs|\bimresize\s*\(/u);

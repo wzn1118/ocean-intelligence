@@ -311,6 +311,19 @@ if has_secondary
   configure_series(axes_handles(2), line_handles(2), secondary_metadata, ...
     secondary_value, secondary_label, secondary_unit, theme, font_name, ...
     data_tip_template_mode);
+end
+if numel(time) > 1
+  time_limits = [time(1) time(end)];
+else
+  drawnow;
+  time_limits = xlim(axes_handles(1));
+end
+time_margin = seconds(0.04 * seconds(time_limits(2) - time_limits(1)));
+for axes_index = 1:numel(axes_handles)
+  xlim(axes_handles(axes_index), ...
+    [time_limits(1) - time_margin time_limits(2) + time_margin]);
+end
+if has_secondary
   linkaxes(axes_handles, 'x');
 end
 title(layout, title_text, 'FontWeight', 'normal', 'Interpreter', 'none', ...

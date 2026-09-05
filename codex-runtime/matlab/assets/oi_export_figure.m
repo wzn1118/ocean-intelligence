@@ -102,9 +102,9 @@ pdfDevice = "-dpdf -painters";
 geometryArgs = {"Units", "inches", "Width", widthInches, "Height", heightInches, ...
     "Padding", "figure", "PreserveAspectRatio", "on", "BackgroundColor", "white"};
 if useExactExportGraphics
-    exportgraphics(figureHandle, pngPath, "Units", "pixels", ...
-        "Width", widthPixels, "Height", heightPixels, "Resolution", dpi, ...
-        "Padding", "figure", "PreserveAspectRatio", "on", "BackgroundColor", "white");
+    exportgraphics(figureHandle, pngPath, "Units", "inches", ...
+        "Width", widthInches, "Height", heightInches, "Resolution", dpi, ...
+        "Padding", "figure", "PreserveAspectRatio", "off", "BackgroundColor", "white");
     exportgraphics(figureHandle, pdfPath, geometryArgs{:}, "ContentType", "vector");
     pdfApi = "exportgraphics";
     pdfDevice = "";
@@ -461,7 +461,7 @@ if exist("batchStartupOptionUsed", "file") == 2 ...
 end
 if exportGraphicsAvailable
     pngApi = "exportgraphics";
-    pngSizeUnits = "pixels";
+    pngSizeUnits = "inches";
 else
     pngApi = "print";
     pngSizeUnits = "inches";

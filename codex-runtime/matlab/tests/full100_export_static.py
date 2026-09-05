@@ -27,7 +27,8 @@ test_text = TEST.read_text(encoding="utf-8")
 for marker in [
     "embedded_dpi_x", "exports.pdf.width", "svgRecord.width", "assert_svg_geometry",
     "ByteMismatch", "HashMismatch", "oi_sha256_file", "ActualPdfDimensions",
-    "invalidPhysicalEntry", "1 / 720",
+    "invalidPhysicalEntry", "1 / 720", "test_native_raster_aspect",
+    "RasterSourceChanged", "RasterAspectDistortion", "curveMask",
 ]:
     assert marker in test_text, f"full100 export test missing {marker}"
 probe_text = TEST.with_name("diagnose_native_raster_sizes.m").read_text(encoding="utf-8")
@@ -44,4 +45,17 @@ for marker in [
 assert "imresize(" not in probe_text
 runner_text = TEST.with_name("run_github_full100.m").read_text(encoding="utf-8")
 assert 'diagnose_native_raster_sizes(fullfile(export_directory, "native-raster-sizing-probe"))' in runner_text
+assert 'diagnose_svg_print_sizes(fullfile(export_directory, "svg-print-sizes-probe"))' in runner_text
+svg_probe = TEST.with_name("diagnose_svg_print_sizes.m").read_text(encoding="utf-8")
+for marker in [
+    '"default", "explicit-resolution"', '"requested_print_options"',
+    '"invoked_print_options"', '"native_file_unchanged_after_xml"',
+    '"exact_page_verified", false', '"visual_verified", false',
+    'xmlread(', 'oi_sha256_file(', "'-dsvg', '-painters', resolutionOption",
+]:
+    assert marker in svg_probe, f"native SVG probe missing {marker}"
+assert "xmlwrite(" not in svg_probe
+assert "oi_annotate_svg(" not in svg_probe
+display_test = TEST.with_name("test_display_rendering.m").read_text(encoding="utf-8")
+assert 'diagnose_svg_print_sizes(fullfile(outputDirectory, "svg-print-sizes-probe"))' in display_test
 print("MATLAB_FULL100_EXPORT_STATIC=passed")
