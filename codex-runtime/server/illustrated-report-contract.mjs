@@ -95,7 +95,8 @@ export function illustratedReportInstructions(contract) {
     'Every analytical <figure> must also declare data-snapshot-id, data-variable, data-unit, data-time-start, data-time-end, data-spatial-coverage, data-qc-summary, data-uncertainty, data-anomaly-status and data-matlab-release. These values must agree with the figure scientific_context and runtime evidence in figures.json.',
     `The manifest ocean_report object must record the named sea area, numeric bounds, all ${contract.requiredZoneCount} named zones, requested and effective UTC coverage, data sources with versions/access times, variables with quantities/units/source ids, and explicit anomaly, uncertainty and conclusion limitations. Unknown or unavailable evidence must remain explicit rather than fabricated.`,
     `Every figure must provide freshly hashed ${contract.requiredExportFormats.join(' and ').toUpperCase()} exports from the same snapshot. At least ${contract.minimumInteractiveFigures} point-capable figure must additionally provide a self-contained HTML export that passes complete hover/focus, stable ObservationID, scientific-context and MATLAB-evidence checks.`,
-    `The manifest matlab_ci matrix must contain ${contract.requiredMatlabReleases.join(', ')}. Each release must identify MATLAB as the authoritative runtime, record a reproducible command and toolboxes, and prove execution, artifact validation and visual inspection passed. pending, static-only, failed or Octave evidence must not satisfy the report gate.`,
+    `The manifest matlab_ci matrix must contain ${contract.requiredMatlabReleases.join(', ')} exactly once in required_releases and in runs. Each release must identify MATLAB as the authoritative runtime, record a reproducible command and toolboxes, and prove execution, artifact validation and visual inspection passed. Duplicate or conflicting release records, pending, static-only, failed or Octave evidence must not satisfy the report gate.`,
+    'Manifest figure ids, data-source ids and variable names must be nonempty and unique. Every variable source_ids entry must reference a declared data source; mixed invalid entries or ambiguous identifiers do not establish an evidence link.',
     'Freeze scripts, reports, and visual artifacts first, then generate the manifest last. The manifest generated_at and file mtime must not predate any referenced report or artifact, and every declared byte count and SHA-256 must match the current file.',
     'Make the HTML publication-quality and responsive: include a strong cover, executive summary, table of contents, clearly paced sections, highlighted findings, captions, source notes, methodology, limitations, and references when evidence is available.',
     `This is a deep report, not a short briefing: the Markdown must be at least ${contract.minimumMarkdownBytes} bytes, the HTML at least ${contract.minimumHtmlBytes} bytes, and the main report must contain at least ${contract.minimumHeadings} meaningful section headings and ${contract.minimumHtmlFigures} figure/visual placements. Expand the analysis with real evidence, comparisons, mechanisms, uncertainty, data tables, and an appendix; never pad with repeated sentences.`,
@@ -176,6 +177,8 @@ export function inspectIllustratedReportEvidence(options = {}) {
 
   const figureEvidence = manifestFigures.map((figure, figureIndex) => inspectFigureScientificEvidence(figure, figureIndex));
   const figureEvidenceViolations = figureEvidence.flatMap((entry) => entry.violations);
+  const nonemptyManifestFigureIds = manifestFigures.map((figure) => stringValue(figure?.id)).filter(Boolean);
+  if (manifestFigureIds.size !== nonemptyManifestFigureIds.length) figureEvidenceViolations.push('manifest.figures.id.duplicate');
   const artifactChecks = manifestFigures.flatMap((figure, figureIndex) => normalizeReportExports(figure?.exports)
     .map((artifact, artifactIndex) => inspectReportArtifact({
       artifact,
@@ -291,15 +294,35 @@ function inspectOceanReportMetadata(report) {
   inspectCoverage(report.effective_coverage, 'ocean_report.effective_coverage', violations, true);
   const sources = Array.isArray(report.data_sources) ? report.data_sources : [];
   if (sources.length === 0) violations.push('ocean_report.data_sources');
+  const sourceIds = new Set();
   sources.forEach((source, index) => {
     for (const key of ['id', 'name', 'version', 'accessed_at']) if (!stringValue(source?.[key])) violations.push(`ocean_report.data_sources[${index}].${key}`);
     if (stringValue(source?.accessed_at) && !Number.isFinite(Date.parse(source.accessed_at))) violations.push(`ocean_report.data_sources[${index}].accessed_at.invalid`);
+    const sourceId = stringValue(source?.id);
+    if (sourceId && sourceIds.has(sourceId)) violations.push(`ocean_report.data_sources[${index}].id.duplicate`);
+    if (sourceId) sourceIds.add(sourceId);
   });
   const variables = Array.isArray(report.variables) ? report.variables : [];
   if (variables.length === 0) violations.push('ocean_report.variables');
+  const variableNames = new Set();
   variables.forEach((variable, index) => {
     for (const key of ['name', 'quantity', 'unit']) if (!stringValue(variable?.[key])) violations.push(`ocean_report.variables[${index}].${key}`);
-    if (!Array.isArray(variable?.source_ids) || variable.source_ids.filter(stringValue).length === 0) violations.push(`ocean_report.variables[${index}].source_ids`);
+    const variableName = stringValue(variable?.name);
+    if (variableName && variableNames.has(variableName)) violations.push(`ocean_report.variables[${index}].name.duplicate`);
+    if (variableName) variableNames.add(variableName);
+    if (!Array.isArray(variable?.source_ids) || variable.source_ids.length === 0) {
+      violations.push(`ocean_report.variables[${index}].source_ids`);
+    } else {
+      const referencedSources = new Set();
+      variable.source_ids.forEach((value, sourceIndex) => {
+        const sourceId = stringValue(value);
+        const prefix = `ocean_report.variables[${index}].source_ids[${sourceIndex}]`;
+        if (!sourceId) violations.push(prefix);
+        else if (!sourceIds.has(sourceId)) violations.push(`${prefix}.unknown_reference`);
+        if (sourceId && referencedSources.has(sourceId)) violations.push(`${prefix}.duplicate`);
+        if (sourceId) referencedSources.add(sourceId);
+      });
+    }
   });
   inspectExplicitAssessment(report.anomaly, 'ocean_report.anomaly', violations);
   inspectExplicitAssessment(report.uncertainty, 'ocean_report.uncertainty', violations);
@@ -312,10 +335,20 @@ function inspectMatlabRuntimeMatrix(matrix) {
   const violations = [];
   if (!matrix || typeof matrix !== 'object') return { ok: false, violations: ['matlab_ci.missing'], releases: {} };
   const required = Array.isArray(matrix.required_releases) ? matrix.required_releases.map(stringValue) : [];
+  if (required.some((release) => !release)) violations.push('matlab_ci.required_releases.invalid');
+  if (new Set(required).size !== required.length) violations.push('matlab_ci.required_releases.duplicate');
   for (const release of REQUIRED_MATLAB_REPORT_RELEASES) if (!required.includes(release)) violations.push(`matlab_ci.required_releases.${release}`);
   const runs = Array.isArray(matrix.runs) ? matrix.runs : [];
+  const runCounts = new Map();
+  runs.forEach((run, index) => {
+    const release = stringValue(run?.release);
+    if (!release) violations.push(`matlab_ci.runs[${index}].release`);
+    else runCounts.set(release, (runCounts.get(release) || 0) + 1);
+  });
+  for (const [release, count] of runCounts) if (count > 1) violations.push(`matlab_ci.runs.${release}.duplicate`);
   const releases = {};
   for (const release of REQUIRED_MATLAB_REPORT_RELEASES) {
+    if ((runCounts.get(release) || 0) > 1) continue;
     const run = runs.find((entry) => stringValue(entry?.release) === release);
     releases[release] = run;
     if (!run) { violations.push(`matlab_ci.runs.${release}.missing`); continue; }
@@ -323,7 +356,7 @@ function inspectMatlabRuntimeMatrix(matrix) {
     if (run.runtime_status !== 'passed') violations.push(`matlab_ci.runs.${release}.status`);
     if (run.execution_verified !== true) violations.push(`matlab_ci.runs.${release}.execution_verified`);
     if (!stringValue(run.command)) violations.push(`matlab_ci.runs.${release}.command`);
-    if (!Array.isArray(run.toolboxes) || run.toolboxes.filter(stringValue).length === 0) violations.push(`matlab_ci.runs.${release}.toolboxes`);
+    if (!Array.isArray(run.toolboxes) || run.toolboxes.length === 0 || run.toolboxes.some((toolbox) => !stringValue(toolbox))) violations.push(`matlab_ci.runs.${release}.toolboxes`);
     if (run.artifact_validation?.status !== 'passed') violations.push(`matlab_ci.runs.${release}.artifact_validation`);
     if (run.visual_inspection?.status !== 'passed') violations.push(`matlab_ci.runs.${release}.visual_inspection`);
     if (!stringValue(run.evidence_id)) violations.push(`matlab_ci.runs.${release}.evidence_id`);
@@ -334,6 +367,7 @@ function inspectMatlabRuntimeMatrix(matrix) {
 function inspectFigureScientificEvidence(figure, index) {
   const violations = [];
   const prefix = `manifest.figures[${index}]`;
+  if (!stringValue(figure?.id)) violations.push(`${prefix}.id`);
   if (!stringValue(figure?.source)) violations.push(`${prefix}.source`);
   const context = figure?.scientific_context;
   if (!stringValue(context?.snapshot_id)) violations.push(`${prefix}.scientific_context.snapshot_id`);

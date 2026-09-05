@@ -10,9 +10,9 @@
 
 第14轮 `oi_annotate_svg` 仅对受支持的 SVG 子集进行受限嵌套 viewport 规范化：原生 `viewBox` 和绘图坐标保留在内部 viewport，外层 viewport 被规范化。这是原生导出后的 XML 后处理，不是未经处理的纯原生 SVG；未知或不支持的 SVG 必须拒绝，不能泛化覆盖或降低尺寸门禁。第15轮命名空间明确的 DOM 检查已在三版通过，包含10个正例和34个拒绝例；主运行阶段60/60通过，但后处理和整体CI仍失败。R2024b额外DISPLAY诊断产生了白名单外的内嵌SVG字体，规范化明确拒绝。两套SVG布局引擎的历史副本对照均零像素差，CairoSVG对四件实际第15轮输出的对照也一致；两引擎共用Cairo，仍不等于浏览器、字体或全图视觉验收。
 
-第16轮 run33995525791 的 R2021a/R2024b/R2026a 各通过 19/20 个主阶段，`family-b-runtime` 因 `Legend.Title` 的 `FontUnits` 不受支持而失败。该对象是 `matlab.graphics.illustration.legend.Text`，不是普通 axes Text；当前代码已删除该参数，直接使用固定 points 的 `FontSize`，修正后的成功 licensed CI 仍待验证。三版 `artifact_validation.verified` 修复已生效，runtime contract 仅剩 `visual_inspection.required` 失败；旧版外部 PDF 检查仍有未嵌入 Courier 等失败，不能合并为已通过。R2026a 评测十二产物外检通过，不等于视觉或整体CI通过。
+第17轮 run33996694221 全矩阵已完成且整体 CI 失败：R2021a/R2024b/R2026a 各为 18/20，合计 54/60。三版的 `family-b-runtime` 与 `evaluator-runtime` 均被 `oi_export_figure:ColorAccessibility` 拒绝，原因是新单侧不确定度短线设置了 `HandleVisibility="off"`，却没有明确的 audit role。三版均缺少 `evaluator-runtime/matlab-runtime.json`，原始评分均为 0，没有新比较图 v3 声明或完整报告，不能沿用历史 90 分或 3/4 覆盖。旧 `Legend.Title.FontUnits` 错误已越过，但旧版 PDF 未嵌入 Courier 等历史失败仍未解决。
 
-布局覆盖须显式记录可见、非空但没有公开 `Extent`/`Position` 的图例标题：加入 `unmeasured_text_objects`，保留 `role="legend.title"`、`class="matlab.graphics.illustration.legend.Text"`，并令 `bounds_audit_complete=false`。这是“未测量”的正面声明，不能用零矩形补齐，也不是视觉或裁切修复。
+布局覆盖须显式记录可见、非空但没有公开 `Extent`/`Position` 的图例标题：加入 `unmeasured_text_objects`，保留 `role="legend.title"`、`class="matlab.graphics.illustration.legend.Text"`，并令 `bounds_audit_complete=false`。第17轮三版的 visible、hidden-title、hidden-legend、empty 四个原生用例及 `text-bounds` 阶段均通过；可见标题仍明确未测量，其他三例不列为未测标题。这不是视觉或裁切修复，不能用零矩形补齐。
 
 交互图件使用 `assets/interactive_timeseries_native_template.m`，详细边界见 `INTERACTIONS.md`。该模板以稳定 `ObservationID` 连接 data tip 与 brush 选择，并区分桌面 `uifigure`/`exportapp` 和无界面传统 figure/`exportgraphics` 路径；默认不启用生命周期不明确的 `linkdata`。
 
@@ -26,10 +26,10 @@
 
 `taskType="interactive"` 的 MATLAB 路由会实际调用原生交互模板；其生成脚本额外接收 `ObservationID`、`Station` 和 `QCFlag`，并在生成前校验逐点对齐。对应 Node 契约测试与 MATLAB 回归均在上述回归入口中覆盖。
 
-`oi_plot_comparison` 的显式 `UncertaintySides="observation"` 支持只有观测侧的 `standard-uncertainty`。模型不确定度必须省略，不能补零或复制；缺观测不确定度不删除有限且 QC 接受的散点或改变统计，只是不画该点的水平区间。`result.Uncertainty` 保留对齐原值、提供状态及实际 `GraphicsMask`，原生图例标题说明模型侧未提供。默认双侧契约保持不变。
+`oi_plot_comparison` 的显式 `UncertaintySides="observation"` 支持只有观测侧的 `standard-uncertainty`。模型不确定度必须省略，不能补零或复制；缺观测不确定度不删除有限且 QC 接受的散点或改变统计，只是不画该点的水平区间。`result.Uncertainty` 保留对齐原值、提供状态及实际 `GraphicsMask`，原生图例标题说明模型侧未提供。默认双侧契约保持不变。第18轮候选仅在 helper 实际创建的不确定度 Line 上设置既有 appdata `OI_ColorAccessibilityRole="uncertainty"`，不改 audit 算法、数据、尺寸或视觉门禁；仍待第18轮 CI，不能把隐藏 handle 当作免审依据。
 
 第17轮新增严格可选的 `RecordMetadata`，仅支持 numeric row-aligned 输入，不支持 table/timetable 配对。该 scalar struct 必须且只能含 `ID`、`Time`、`Depth`、`DepthUnit`、`DepthDirection`：每行唯一非空 string ID、非 NaT 的 UTC datetime、有限非负深度，单位 `m`、方向 `positive_down`；显式 `SampleLabels` 必须与 ID 一致，不能同时用 `SampleLabelVariable`。完整 `result.RecordData` 与 `result.QC` 保留原始行、值、身份和实际 QC 提供状态，原生 Scatter/水平 Line 的 `UserData` 绑定选中记录 ID 与调用入口行号。省略 metadata 时保留原 numeric/tabular 调用兼容性，不造身份，也不生成 `RecordData`。
 
-第13轮 `paired-interactive` v2 原生完整值、QC、不确定度和 errorbar 数组核对已在三版通过；最近 licensed 报告的 native proof 仍为 3/4 图，旧包的 `paired-observation-model` 比较散点仍为 `not_verified`。第17轮候选已在 `run_matlab_gate.m` 接入比较图 v3，读取原生 Scatter 和水平 Line 的坐标、端点、归属与身份；报告/evaluator 消费者和 mutation tests 核对完整 12 条合成记录、11 个散点、未绘值、QC/不确定度掩膜、统计及 release/input hash。模型 QC 和模型不确定度保持 `not_provided`，不补零、不复制观测值。新增 metadata/v3 全链路尚待首次 licensed CI，不能将合成测试通过写成已实跑 4/4；旧包缺 v3 仍兼容，错误或不匹配的声明必须拒绝。输入仍是合成 fixture，不是真实海况；声明核对不是独立重跑、桌面交互、全图视觉证明或服务热更新。
+第13轮 `paired-interactive` v2 原生完整值、QC、不确定度和 errorbar 数组核对已在三版通过；此前归档报告的 native proof 为 3/4 图，比较散点仍为 `not_verified`，这是历史结果，不是第17轮覆盖。`run_matlab_gate.m` 已接入比较图 v3，计划在导出后读取原生 Scatter 和水平 Line 的坐标、端点、归属与身份；报告/evaluator 消费者和 mutation tests 核对完整 12 条合成记录、11 个散点、未绘值、QC/不确定度掩膜、统计及 release/input hash。模型 QC 和不确定度保持 `not_provided`。首次 licensed CI 已在三版进入比较图导出，但均被颜色可访问性门禁拒绝，未生成 v3，不能将合成测试通过写成已实跑 4/4。旧包缺 v3 仍兼容，错误声明必须拒绝；合成 fixture 和声明核对不是海况观测、独立重跑、桌面交互或全图视觉证明。
 
-报告构建通过 `evals/build_ocean_report.py --runtime-output <运行产物目录> --rendered-audit <外部检查JSON>` 显式接收外部检查文件，核对审计文件 bytes/SHA-256、manifest/产物绑定、检查条件与状态一致性，不自动寻找审计文件。shell 工作流先执行图件检查，再将该文件传入报告；报告只验证外部自动检查声明，不重跑或认证检查工具，不是 trusted 视觉审计。缺证据保持 `not_verified`，旧版 `pdf_font_embedding=failed` 必须明确显示，不能被未验证的文本或视觉项掩盖。本轮三版报告集成都已构建，源 CI 产物未改；报告构建成功不代表其中的图件失败已消除。
+报告构建通过 `evals/build_ocean_report.py --runtime-output <运行产物目录> --rendered-audit <外部检查JSON>` 显式接收外部检查文件，核对审计文件 bytes/SHA-256、manifest/产物绑定、检查条件与状态一致性，不自动寻找审计文件。shell 工作流先执行图件检查，再将该文件传入报告；报告只验证外部自动检查声明，不重跑或认证检查工具，不是 trusted 视觉审计。缺证据保持 `not_verified`，旧版 `pdf_font_embedding=failed` 必须明确显示，不能被未验证的文本或视觉项掩盖。第14轮对旧包的三版报告集成曾构建成功，不能充当第17轮的新报告，也不代表图件失败已消除。

@@ -556,6 +556,9 @@ for pointIndex = 1:numel(selectedIndices)
             [uncertainty.ModelLower(sourceIndex) uncertainty.ModelUpper(sourceIndex)], ...
             "-","Color",color,"LineWidth",0.8,"HandleVisibility","off");
     end
+    for segmentIndex = handleIndex:handleIndex+segmentsPerPoint-1
+        setappdata(handles(segmentIndex), "OI_ColorAccessibilityRole", "uncertainty");
+    end
     if ~isempty(recordData)
         set(handles(handleIndex:handleIndex+segmentsPerPoint-1), ...
             "UserData",record_identity(recordData,sourceIndex));

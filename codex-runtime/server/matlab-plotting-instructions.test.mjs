@@ -276,6 +276,13 @@ test('routes an explicit Octave context to Octave templates without changing MAT
     assert.doesNotMatch(instructions, /默认优先 WenQuanYi Zen Hei/u);
     assert.doesNotMatch(instructions, /字体探针 33985570222/u);
     assert.doesNotMatch(instructions, /figureHandle\.Position\(3:4\) = \[widthPixels heightPixels\] \/ dpi/u);
+    for (const matlabOnlyTerm of ['oi_annotate_svg', 'RecordMetadata', 'UncertaintySides',
+      'ObservationUncertaintyVariable', 'SourceRowOrigin', 'paired-interactive',
+      'paired-observation-model', 'plot_data_evidence', 'runtime_declaration_verified',
+      'legend.title', 'matlab.graphics.illustration.legend.Text', 'unmeasured_text_objects',
+      '--rendered-audit', 'pdf_font_embedding', '3/4', '4/4', '33996694221']) {
+      assert.ok(!instructions.includes(matlabOnlyTerm), `MATLAB-only evidence leaked into Octave: ${matlabOnlyTerm}`);
+    }
     assert.deepEqual(repositoryExportTable(instructions), []);
   }
 });
@@ -319,7 +326,7 @@ test('distinguishes general API availability from the repository exact export po
   assert.match(repositorySkill, /`export_size_units`/u);
 });
 
-test('injects native PNG inches/off and vector inches/on without claiming full validation', () => {
+test('injects verified native sizing without treating it as full visual or CI approval', () => {
   for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions(),
     ...['R2021a', 'R2024b', 'R2026a'].map((matlabRelease) =>
       matlabPlottingInstructions({ runtime: 'matlab', matlabRelease }))]) {
@@ -332,13 +339,138 @@ test('injects native PNG inches/off and vector inches/on without claiming full v
     assert.match(repositoryBlock, /不能把原生 PNG 的尺寸参数误作屏幕画布单位/u);
     assert.match(repositoryBlock, /runtime\.export_size_units 按实际路径记录：原生 PNG、print PNG、PDF 及请求的 SVG 均为 inches/u);
     assert.match(repositoryBlock, /inches\/off 保留物理字体且所测 3\/3 尺寸准确/u);
+    assert.match(repositoryBlock, /包含 R2026a PNG inches\/off 的三版全量原生尺寸回归/u);
+    assert.match(repositoryBlock, /第15\/16轮也已有 PNG\/SVG 尺寸实跑证据/u);
+    assert.match(repositoryBlock, /三幅 unit-circle 的局部像素宽高差不超过 2 个边缘像素/u);
+    assert.match(repositoryBlock, /不是全图视觉保证/u);
     assert.match(repositoryBlock, /pixels\/off 实图字体缩小、刻度变多，不采用该路径/u);
     assert.match(repositoryBlock, /不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误/u);
-    assert.match(repositoryBlock, /本次 PNG inches\/off 策略尚待跨版本全量 CI 验证，不得声称尺寸偏差已经修复或视觉满分/u);
+    assert.doesNotMatch(repositoryBlock, /本次 PNG inches\/off 策略尚待跨版本全量 CI 验证/u);
     assert.match(repositoryBlock, /必须重新检查真实 PNG 像素\/DPI、字体、刻度、裁切、PDF 页尺寸及 SVG 几何，未验证项保持 unverified/u);
     assert.doesNotMatch(instructions, /PNG 使用 Units="?pixels|两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
   }
   assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /runtime\.export_size_units|本次 PNG inches\/off 策略/u);
+});
+
+test('scopes tested SVG DOM normalization to XML postprocessing and retains failed CI evidence', () => {
+  for (const repositoryBlock of repositoryInstructionBlocks()) {
+    assert.match(repositoryBlock, /oi_annotate_svg 只对受支持的 SVG 子集/u);
+    assert.match(repositoryBlock, /保留内部原生 viewBox 和绘图坐标/u);
+    assert.match(repositoryBlock, /XML 后处理，不是未经处理的纯原生 SVG/u);
+    assert.match(repositoryBlock, /未知或不支持的 SVG 必须拒绝/u);
+    assert.match(repositoryBlock, /不得泛化覆盖或降低尺寸门禁/u);
+    assert.match(repositoryBlock, /MATLAB Java DOM 检查在 R2021a\/R2024b\/R2026a 通过/u);
+    assert.match(repositoryBlock, /10 个正例、34 个拒绝例/u);
+    assert.match(repositoryBlock, /主阶段 60\/60 通过但后处理和整体 CI 仍失败/u);
+    assert.match(repositoryBlock, /共用 Cairo 后端，不是独立浏览器、字体或全图视觉验收/u);
+    assert.match(repositoryBlock, /33995525791 三版各 19\/20 主阶段通过/u);
+    assert.match(repositoryBlock, /family-b-runtime 因 Legend\.Title 不支持 FontUnits 失败/u);
+    assert.match(repositoryBlock, /runtime contract 仅剩 visual_inspection\.required 失败/u);
+    assert.match(repositoryBlock, /R2026a 的十二产物外检通过也不等于视觉或整体 CI 通过/u);
+    assert.match(repositoryBlock, /不代表本次会话已执行、已部署或既有会话热更新/u);
+    assert.match(repositoryBlock, /33996694221 三版各 18\/20，合计 54\/60/u);
+    assert.match(repositoryBlock, /oi_export_figure:ColorAccessibility 拒绝/u);
+    assert.match(repositoryBlock, /原始评分均为 0，不能拼接历史产物或沿用上一轮 90 分/u);
+    assert.match(repositoryBlock, /OI_ColorAccessibilityRole="uncertainty"/u);
+    assert.match(repositoryBlock, /不改变数据、掩码或审计算法/u);
+    assert.match(repositoryBlock, /不能用角色标记豁免任意数据线/u);
+  }
+});
+
+test('documents observation-only uncertainty as an explicit native API without inventing model inputs', () => {
+  for (const repositoryBlock of repositoryInstructionBlocks()) {
+    assert.match(repositoryBlock, /oi_plot_comparison 必须显式 opt-in/u);
+    for (const term of ['UncertaintySides="observation"', 'ObservationUncertainty',
+      'ObservationUncertaintyVariable', 'UncertaintyType', '"standard-uncertainty"',
+      '与 QuantityUnit 相同的 UncertaintyUnit', 'result.Uncertainty',
+      'provided/not_provided', 'GraphicsMask']) {
+      assert.ok(repositoryBlock.includes(term), `Missing observation uncertainty contract: ${term}`);
+    }
+    assert.match(repositoryBlock, /完全省略 ModelUncertainty\/ModelUncertaintyVariable，不能补零或复制/u);
+    assert.match(repositoryBlock, /ModelQC 仅可来自真实输入，未提供保持 not_provided，不得造值/u);
+    assert.match(repositoryBlock, /缺观测不确定度保留有限且 QC 接受的散点和统计/u);
+    assert.match(repositoryBlock, /只是不画该点的水平区间/u);
+    assert.match(repositoryBlock, /默认 UncertaintySides="both" 的双侧契约不变/u);
+  }
+  const comparisonAsset = readFileSync(new URL('oi_plot_comparison.m', matlabAssetDirectory), 'utf8');
+  assert.match(comparisonAsset, /oi_get_option\(options,"UncertaintySides","both"\)/u);
+  assert.match(comparisonAsset, /"ObservationUncertaintyVariable"/u);
+  assert.match(comparisonAsset, /~isfield\(options,"ModelUncertainty"\) && ~isfield\(options,"ModelUncertaintyVariable"\)/u);
+  assert.match(comparisonAsset, /uncertaintyUnit == quantityUnit/u);
+});
+
+test('keeps comparison record metadata strict, row-aligned and optional', () => {
+  for (const repositoryBlock of repositoryInstructionBlocks()) {
+    assert.match(repositoryBlock, /RecordMetadata 仅适用于 numeric row-aligned 输入，不适用于 table\/timetable 配对/u);
+    assert.match(repositoryBlock, /scalar struct，且只能包含 ID、Time、Depth、DepthUnit、DepthDirection/u);
+    assert.match(repositoryBlock, /ID 是每输入行一个、唯一非空的 string 向量/u);
+    assert.match(repositoryBlock, /Time 是逐行对齐、非 NaT 的 UTC datetime 向量/u);
+    assert.match(repositoryBlock, /Depth 是逐行对齐、实数有限非负的 numeric 向量/u);
+    assert.match(repositoryBlock, /DepthUnit="m"、DepthDirection="positive_down"/u);
+    assert.match(repositoryBlock, /SampleLabels 必须与全部 ID 一致，不能同时使用 SampleLabelVariable/u);
+    assert.match(repositoryBlock, /result\.RecordData 保留全部原始行、观测\/模型值、时间、深度和身份/u);
+    assert.match(repositoryBlock, /result\.QC 保留实际提供的 flags 或 not_provided/u);
+    assert.match(repositoryBlock, /Scatter\/水平 Line 的 UserData 绑定选中 RecordID、SourceRow 和 SourceRowOrigin="call_entry_order"/u);
+    assert.match(repositoryBlock, /省略 RecordMetadata 保持原 numeric\/tabular 调用兼容，不造记录身份，也不生成 RecordData/u);
+  }
+  const comparisonAsset = readFileSync(new URL('oi_plot_comparison.m', matlabAssetDirectory), 'utf8');
+  assert.match(comparisonAsset, /requiredFields = \{'ID', 'Time', 'Depth', 'DepthUnit', 'DepthDirection'\}/u);
+  assert.match(comparisonAsset, /numel\(fieldnames\(metadata\)\) == numel\(requiredFields\)/u);
+  assert.match(comparisonAsset, /"SourceRowOrigin","call_entry_order"/u);
+  assert.match(comparisonAsset, /if ~isempty\(recordData\)\s+result\.RecordData = recordData;/u);
+});
+
+test('separates executed native 3-of-4 coverage from the comparison v3 candidate', () => {
+  for (const repositoryBlock of repositoryInstructionBlocks()) {
+    assert.match(repositoryBlock, /最近已确认原生证据覆盖为 3\/4 图/u);
+    assert.match(repositoryBlock, /第13轮三版通过的 paired-interactive v2 完整值\/QC\/不确定度\/errorbar 数组/u);
+    assert.match(repositoryBlock, /旧包的比较散点仍为 not_verified/u);
+    assert.match(repositoryBlock, /paired-observation-model v3 是当前代码候选/u);
+    assert.match(repositoryBlock, /run_matlab_gate 已接入观测侧不确定度与 RecordMetadata/u);
+    assert.match(repositoryBlock, /读取原生 Scatter 坐标、水平 Line 端点、归属和 UserData 身份/u);
+    assert.match(repositoryBlock, /消费者及 mutation tests 已实现/u);
+    assert.match(repositoryBlock, /完整 12 条合成记录、11 对散点、未绘值、QC\/不确定度掩码、统计、release 和输入哈希/u);
+    assert.match(repositoryBlock, /模型 QC\/不确定度明确为 not_provided/u);
+    assert.match(repositoryBlock, /第17轮 33996694221 在导出阶段失败，尚未执行 v3 读取与原生篡改测试/u);
+    assert.match(repositoryBlock, /角色修复候选仍待下一轮 licensed CI/u);
+    assert.match(repositoryBlock, /不得把本地测试通过写成 4\/4 已实跑/u);
+    assert.match(repositoryBlock, /无 v3 的旧包保持兼容且比较图未验证/u);
+    assert.match(repositoryBlock, /畸形或不匹配声明必须失败，不得绕过校验/u);
+    assert.match(repositoryBlock, /不是独立重执行或视觉验证，也不是桌面交互验证/u);
+    assert.match(repositoryBlock, /synthetic_benchmark\/合成数据/u);
+    assert.match(repositoryBlock, /不能将其描述为真实海况、实测趋势或海区机制证据/u);
+  }
+});
+
+test('uses supported legend title typography and declares missing geometry instead of zero bounds', () => {
+  for (const repositoryBlock of repositoryInstructionBlocks()) {
+    assert.match(repositoryBlock, /Legend\.Title 的实际类型是 matlab\.graphics\.illustration\.legend\.Text/u);
+    assert.match(repositoryBlock, /FontSize 固定使用 points，不得设置不支持的 FontUnits/u);
+    assert.match(repositoryBlock, /第17轮已越过该属性错误，三版四种标题覆盖测试通过，但整体 CI 失败/u);
+    assert.match(repositoryBlock, /旧版所测 PDF 图例标题仍有字体和越框问题/u);
+    assert.match(repositoryBlock, /可见且非空的标题若无公开 Extent\/Position，必须加入 unmeasured_text_objects/u);
+    assert.match(repositoryBlock, /role="legend\.title"/u);
+    assert.match(repositoryBlock, /class="matlab\.graphics\.illustration\.legend\.Text"/u);
+    assert.match(repositoryBlock, /bounds_audit_complete=false/u);
+    assert.match(repositoryBlock, /不能补零矩形或忽略对象/u);
+    assert.match(repositoryBlock, /未测量覆盖声明，不是视觉或裁切修复/u);
+  }
+});
+
+test('binds explicit rendered audit declarations and never hides known older PDF failures', () => {
+  for (const repositoryBlock of repositoryInstructionBlocks()) {
+    assert.match(repositoryBlock, /显式 --rendered-audit 文件/u);
+    assert.match(repositoryBlock, /审计文件 bytes\/SHA-256、manifest\/产物绑定、检查条件与状态一致性/u);
+    assert.match(repositoryBlock, /不自动发现文件/u);
+    assert.match(repositoryBlock, /先执行 rendered-artifact 检查，再把该文件显式传给报告/u);
+    assert.match(repositoryBlock, /不传选项保持 not_verified/u);
+    assert.match(repositoryBlock, /显式指定的文件缺失、畸形或不一致必须拒绝/u);
+    assert.match(repositoryBlock, /不独立重跑或认证检查工具/u);
+    assert.match(repositoryBlock, /这些声明不是可信视觉审计/u);
+    assert.match(repositoryBlock, /pdf_font_embedding=failed（含未嵌入 Courier）必须显示/u);
+    assert.match(repositoryBlock, /不能被未验证的文本或视觉项掩盖/u);
+    assert.match(repositoryBlock, /报告构建成功、文本可提取都不等于字形可读或视觉通过/u);
+  }
 });
 
 test('repository entry separates verified sizing and SVG contracts from pending visual validation', () => {
@@ -480,6 +612,17 @@ test('instruction injection is closed-world and cannot change MATLAB authority f
   assert.throws(() => matlabPlottingInstructions({ runtime: 'matlab', manifestPath: '../figures.json' }), /traversal/u);
   assert.throws(() => matlabPlottingInstructions({ runtime: 'MATLAB/Octave' }), /must be "matlab" or "octave"/u);
 });
+
+function repositoryInstructionBlocks() {
+  return [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions(),
+    ...['R2021a', 'R2024b', 'R2026a'].map((matlabRelease) =>
+      matlabPlottingInstructions({ runtime: 'matlab', matlabRelease }))]
+    .map((instructions) => {
+      const start = instructions.indexOf('【MATLAB 仓库实跑约束】');
+      assert.ok(start >= 0);
+      return instructions.slice(start).split('【本次可注入路径上下文】')[0];
+    });
+}
 
 function repositoryExportTable(instructions) {
   return instructions.split('\n')

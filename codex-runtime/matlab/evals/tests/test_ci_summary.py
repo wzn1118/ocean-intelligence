@@ -147,6 +147,59 @@ class SummaryTests(unittest.TestCase):
         self.write_json(release, "rendered-artifact-evidence.json", rendered)
         self.write_json(release, "ci-validation-summary.json", validation)
 
+    def early_export_abort(self, release: str) -> None:
+        """Synthetic R17 early-stop shape, not MATLAB execution or inspection evidence."""
+        payload = self.stages(release)
+        payload["stages"].extend({"id": identifier, "status": "passed"} for identifier in (
+            "font-export-probe", "native-pdf-page-probe", "vector-text-alignment-probe",
+            "generated-router-runtime", "comparison-statistics-layout", "hovmoller-time-axis",
+            "export-metadata", "manifest-evidence-integrity", "text-bounds", "font-availability",
+            "color-accessibility", "series-style-preservation", "interaction-native-compatibility",
+        ))
+        for stage in payload["stages"]:
+            if stage["id"] in ("family-b-runtime", "evaluator-runtime"):
+                stage.update(status="failed", error_identifier="oi_export_figure:ColorAccessibility",
+                             error_message="Final series require non-color redundant encoding: "
+                             "ambiguous hidden line needs explicit role or series appdata")
+        self.write_json(release, "ci-stage-status.json", payload)
+        self.probe(release)
+        self.write_json(release, "evaluator-result.json", {
+            "schema_version": 1, "status": "failed", "score": 0, "maximum_score": 100,
+            "error": json.dumps({"status": "failed", "error":
+                                 "regular file required: evaluator-runtime/matlab-runtime.json"}),
+        })
+        rendered = copy.deepcopy(RENDERED_EVIDENCE_FIXTURE)
+        rendered.update(
+            manifest="evaluator-runtime/figures.json", manifest_sha256=None,
+            checks=[{"name": "input_validation", "status": "failed",
+                     "reason": "No such file or directory: evaluator-runtime/figures.json"}],
+            artifacts=[], artifact_sha256={},
+            summary={"passed": 0, "failed": 0, "not_verified": 0, "artifact_count": 0},
+        )
+        self.write_json(release, "rendered-artifact-evidence.json", rendered)
+        validation = copy.deepcopy(VALIDATION_SUMMARY_FIXTURE)
+        validation["expected_release"] = release
+        details = {
+            "evaluator-runtime-record": "missing nonempty regular file: evaluator-runtime/matlab-runtime.json",
+            "regression-contract": "exit 1; log: regression-contract.log",
+            "evaluator-runtime": "exit 1; log: evaluator-runtime.log",
+            "rendered-artifacts": "exit 1; log: rendered-artifacts.log",
+            "ocean-report": "exit 1; log: ocean-report.log",
+        }
+        validation["checks"] = [{"id": "stage-status", "status": "passed", "detail": "ci-stage-status.json"},
+                                *({"id": identifier, "status": "failed", "detail": detail}
+                                  for identifier, detail in details.items())]
+        validation["failures"] = [f"{identifier}: {detail}" for identifier, detail in details.items()]
+        self.write_json(release, "ci-validation-summary.json", validation)
+        self.write_json(release, "ocean-report.log", {
+            "status": "failed", "error": "required figures.json missing: evaluator-runtime/figures.json",
+        })
+        runtime = self.root / ("matlab-full100-" + release) / "evaluator-runtime"
+        runtime.mkdir()
+        for identifier in ("crossed-time-depth-temperature", "repeat-cast-salinity-profiles"):
+            for extension in ("png", "pdf", "svg"):
+                (runtime / f"{identifier}.{extension}").write_bytes(b"unit-only partial export placeholder")
+
     def release_result(self, release: str = "R2021a") -> dict:
         return next(result for result in ci_summary.summarize(self.root)["releases"] if result["release"] == release)
 
@@ -403,6 +456,92 @@ class SummaryTests(unittest.TestCase):
         self.assertNotIn("不应显示的堆栈", report)
         self.assertNotIn("stack trace", report)
         self.assertNotIn("长报告", report)
+
+    def test_early_export_abort_keeps_raw_zero_and_failed_postprocessing(self) -> None:
+        for release in ci_summary.RELEASES:
+            self.early_export_abort(release)
+            runtime = self.root / ("matlab-full100-" + release) / "evaluator-runtime"
+            self.assertEqual(len(list(runtime.iterdir())), 6)
+            for name in ("matlab-runtime.json", "figures.json", "report.md", "report-evidence.json"):
+                self.assertFalse((runtime / name).exists())
+        before = self.fingerprint()
+        process = self.run_cli("--format", "json")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        summary = json.loads(process.stdout)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["stage_counts"], {"total": 60, "passed": 54, "failed": 6, "pending": 0, "running": 0})
+        self.assertEqual(summary["release_counts"], {"total": 3, "passed": 0, "failed": 3, "pending": 0, "running": 0})
+        for result in summary["releases"]:
+            self.assertEqual(result["runtime_status"], "failed")
+            self.assertEqual(result["evaluator"]["status"], "failed")
+            self.assertEqual(result["evaluator"]["reported_status"], "failed")
+            self.assertEqual(result["evaluator"]["reported_score"], 0)
+            self.assertEqual(result["evaluator"]["maximum_score"], 100)
+            self.assertEqual(result["evaluator"]["visual_status"], "pending")
+            self.assertEqual(result["stage_counts"], {"total": 20, "passed": 18, "failed": 2, "pending": 0, "running": 0})
+            self.assertEqual({stage["id"] for stage in result["stages"] if stage["status"] == "failed"},
+                             {"family-b-runtime", "evaluator-runtime"})
+            self.assertEqual(result["postprocessing"]["status"], "failed")
+            self.assertEqual({item["source"]: item["status"] for item in result["postprocessing"]["sources"]},
+                             {name: "failed" for name in ci_summary.POSTPROCESSING_FILES})
+            for identifier in ("input_validation", "evaluator-runtime-record", "rendered-artifacts", "ocean-report"):
+                self.assertTrue(any(item["identifier"] == identifier and item["status"] == "failed"
+                                    for item in result["issues"]))
+            self.assertTrue(any(item["identifier"] == "ci_summary:MissingArtifacts" and item["status"] == "pending"
+                                for item in result["issues"]))
+        report = ci_summary.markdown(summary)
+        self.assertEqual(report.count("failed (0/100)"), 3)
+        self.assertEqual(report.count("oi_export_figure:ColorAccessibility"), 6)
+        self.assertNotIn("90/100", report)
+        self.assertNotIn("3/4", report)
+        self.assertEqual(before, self.fingerprint())
+
+    def test_early_abort_never_borrows_other_release_or_archived_run(self) -> None:
+        self.early_export_abort("R2021a")
+        before = self.release_result()
+        passed_stages = [{"id": stage["id"], "status": "passed"} for stage in before["stages"]]
+        self.stages("R2024b", {"stages": passed_stages})
+        self.probe("R2024b")
+        self.evaluator("R2024b", status="passed", score=100, visual_audit={"status": "passed"},
+                       gates=[{"id": "artifact_visual_audit", "status": "passed"}])
+        self.postprocessing("R2024b", passed=True)
+        self.assertEqual(self.release_result("R2024b")["status"], "passed")
+        self.write_json("R2021a", "previous-run/ci-stage-status.json", {
+            "schema_version": 1, "expected_release": "R2021a", "stages": passed_stages,
+        })
+        self.write_json("R2021a", "previous-run/evaluator-result.json", {
+            "status": "runtime_pending", "score": 90, "maximum_score": 100,
+            "runtime": {"status": "passed"}, "visual_audit": {"status": "pending"},
+        })
+        self.write_json("R2021a", "previous-run/evaluator-runtime/figures.json", {
+            "execution_verified": True, "fixture_binding": "verified", "unit_only": True,
+        })
+        self.write_json("R2021a", "previous-run/evaluator-runtime/report-evidence.json", {
+            "status": "passed", "plot_data_summary": "3/4", "unit_only": True,
+        })
+        self.assertEqual(self.release_result(), before)
+        package = self.root / "matlab-full100-R2021a"
+        for name in ("figures.json", "report-evidence.json"):
+            archived = package / "previous-run/evaluator-runtime" / name
+            (package / "evaluator-runtime" / name).write_bytes(archived.read_bytes())
+        other_runtime = self.write_json("R2024b", "evaluator-runtime/matlab-runtime.json", {
+            "success": True, "matlab_release": "R2024b", "unit_only": True,
+        })
+        (package / "evaluator-runtime/matlab-runtime.json").write_bytes(other_runtime.read_bytes())
+        self.assertEqual(self.release_result(), before)
+        (package / "evaluator-result.json").unlink()
+        result = self.release_result()
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["runtime_status"], "failed")
+        self.assertEqual(result["postprocessing"]["status"], "failed")
+        self.assertIsNone(result["evaluator"]["reported_score"])
+        self.assertIsNone(result["evaluator"]["reported_status"])
+        self.assertEqual(result["evaluator"]["status"], "pending")
+        self.assertTrue((package / "evaluator-runtime/figures.json").exists())
+        self.assertTrue((package / "evaluator-runtime/matlab-runtime.json").exists())
+        report = ci_summary.markdown(ci_summary.summarize(self.root))
+        self.assertNotIn("90/100", report)
+        self.assertNotIn("3/4", report)
 
     def test_dynamic_stage_union_pending_running_and_ignores_summary(self) -> None:
         self.complete_runtime()

@@ -46,7 +46,10 @@ Visible, nonempty legend titles without public `Extent`/`Position` also belong
 in `unmeasured_text_objects`, with `role="legend.title"` and
 `class="matlab.graphics.illustration.legend.Text"`; their presence requires
 `bounds_audit_complete=false`. This declares missing measurement coverage,
-not a repaired visual defect or a verified title boundary.
+not a repaired visual defect or a verified title boundary. Run 33996694221
+passed the four native legend-title cases (visible, hidden-title, hidden-legend,
+empty) and the text-bounds stage on R2021a/R2024b/R2026a. Only the visible, nonempty
+case records an unmeasured title; its geometry and visual status stay unverified.
 
 For the temperature field and salinity profiles, the MATLAB gate passes the
 fixture's complete QC and uncertainty arrays to the plotting helpers without
@@ -65,9 +68,9 @@ units, uncertainty and separate missing masks against the complete 50 m fixture
 row. The report independently reconstructs that row; single-element shape and
 dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
-Round 13 passed this v2 path on R2021a/R2024b/R2026a. The latest licensed
-native-proof coverage is 3/4 figures; the paired scatter in existing packages
-remains `not_verified`, rather than inheriting the interactive proof.
+Round 13 passed this v2 path on R2021a/R2024b/R2026a. Those earlier archived
+reports had 3/4 native-proof coverage, with comparison `not_verified`.
+That historical coverage does not apply to the failed round-17 packages.
 
 Round 17 adds a comparison v3 candidate for `paired-observation-model`.
 `oi_plot_comparison` accepts optional strict `RecordMetadata` only for numeric
@@ -87,11 +90,12 @@ synthetic records, all 11 scatter pairs, unplotted input values, complete masks,
 statistics, release and input hashes. Model QC and uncertainty stay
 `not_provided`: never fill them with zeros or copy observation values. Missing
 observation uncertainty does not remove otherwise accepted scatter pairs.
-This new metadata/v3 path still awaits its first licensed CI run; synthetic
-consumer tests are not executed 4/4 proof, independent MATLAB execution or
-visual approval. Legacy packages without v3 remain compatible at 3/4, while
-malformed or inconsistent declarations fail. The fixtures remain synthetic,
-not measurements of real ocean conditions.
+The first licensed attempt, run 33996694221, reached comparison export on
+R2021a/R2024b/R2026a but failed its color-accessibility gate before producing v3.
+Synthetic consumer tests are not executed 4/4 proof, independent MATLAB
+execution or visual approval. Legacy packages without v3 remain compatible,
+with comparison unverified; malformed or inconsistent declarations fail.
+The fixtures remain synthetic, not measurements of real ocean conditions.
 
 The evaluator reuses the same report validator for all provided native array
 declarations. It rejects misplaced, malformed or inconsistent evidence before
@@ -167,17 +171,23 @@ The existing strict SVG gate remains unchanged. The points-based text test also
 exposed a row/column broadcasting bug; normalizing both extents to four-element
 rows fixes the comparison without changing its 1e-6-pixel threshold.
 
-Round-16 run 33995525791 completed 19/20 primary stages on each of R2021a,
-R2024b and R2026a. `family-b-runtime` failed on the unsupported `Legend.Title.FontUnits`
-setter: the object is `matlab.graphics.illustration.legend.Text`, whose
-`FontSize` is points-based. Current code removes `FontUnits`; the corrected
-comparison path still needs successful licensed validation. All three releases
-already include the `artifact_validation.verified` fix, leaving only
-`visual_inspection.required` among runtime-contract violations. External PDF
-checks still fail on the older releases, including unembedded Courier; neither
-flag correctness nor report construction is visual or PDF approval. R2026a
-passed all twelve external evaluator artifact checks, not the visual gate or
-overall CI.
+Round-17 run 33996694221 completed with overall CI failure: 18/20 primary stages
+on each of R2021a/R2024b/R2026a, 54/60 in total.
+Both `family-b-runtime` and `evaluator-runtime` failed with
+`oi_export_figure:ColorAccessibility`: new observation-only uncertainty Lines
+had `HandleVisibility="off"` without an explicit audit role. All three original
+`evaluator-result.json` scores are 0 because `evaluator-runtime/matlab-runtime.json`
+is absent; no new comparison v3 evidence or complete report was produced. Do not reuse
+earlier 90-point scores or 3/4 coverage as this run's result. All three releases got
+past the previous FontUnits error and passed the legend-title text-bounds contracts.
+Historical older-release PDF failures, including unembedded Courier, are not
+resolved by these scoped results.
+
+The round-18 candidate annotates actual helper-created uncertainty Lines with
+existing appdata `OI_ColorAccessibilityRole="uncertainty"`. It does not change
+the audit algorithm, data, dimension gates or visual gates, and still awaits
+round-18 licensed CI. Hidden handles alone must not exempt finite data from
+the audit. Neither role declarations nor static tests establish visual approval.
 
 ## Commands
 

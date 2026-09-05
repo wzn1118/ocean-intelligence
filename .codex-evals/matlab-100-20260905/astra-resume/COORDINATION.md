@@ -210,3 +210,17 @@
 - 新报告对第16轮三版evaluator副本的兼容检查完成，输出在 `/tmp/matlab-round17-report-kme52f`；每版17个输入/图件文件与原件哈希一致，旧包仍3/4，比较图未验证。构建均成功但外检failed/failed/passed，未改源包或生成伪v3声明。
 - 独立读端审查发现字符矩阵标题先展平会丢行，以及透明度未与实际marker颜色联合判断；已修正候选，拆出原生reader用于真实句柄篡改测试，不能用Python声明负例代替MATLAB读端测试。审查原始快照及范围保留于 `comparison-native-reader-review-round17.md`。
 - 推送前全部十项已收齐：279项Python、全部已跟踪服务器Node、8项生成器smoke、资产/技能/Family B/导出静态检查及workflow YAML解析通过；61个MATLAB文件通过R2021a语法检查，CI语法范围同步覆盖整个evals目录。冻结29文件后静态评分70/100、runtime_pending。新增原生记录/篡改回归、图例覆盖和v3仍待本批首次licensed CI，不称已恢复60/60或达到100分。
+
+## 第十八批接续
+
+- 第十七批本地提交 `7fc420e`，远端 `a77a247c846ad52e979661d0e9fa2c41d592aa80`，运行 [33996694221](https://github.com/wzn1118/ocean-intelligence/actions/runs/33996694221) 已全部结束。三版均18/20，合计54/60；family-b-runtime和evaluator-runtime都因新单侧水平线缺少明确语义标记，被ColorAccessibility检查拒绝。原件 `/tmp/matlab-run-33996694221`，全量汇总 `/tmp/matlab-ci-summary-33996694221/summary.md`。
+- 本批原始评分三版均0，原因是比较图导出早停后没有完整evaluator运行记录、manifest或新报告；不能把历史90分、3/4绑定或旧产物拼接成本批通过。FontUnits错误已越过，但v3原生读取与篡改回归尚未执行。
+- 候选修复仅在helper实际创建的U线写入既有 `OI_ColorAccessibilityRole="uncertainty"`，由原audit识别为辅助区间；不改变点位、缺测、QC、统计、UserData或审计算法。新增单双侧角色与零/缺U断言，移除角色或加入任意未分类短线仍必须失败，恢复后数据和审计状态一致。独立复核未发现该三行修复改变科学语义，仍待新MATLAB执行。
+- 海区报告证据新增唯一性与引用校验：拒绝重复/冲突MATLAB release、重复或空figure id、重复source id/variable name及无效、未知或重复的source引用；不新增无依据的QC求和规则。55个新增合成contract用例通过，不等于真实海区报告已验收。CI触发范围覆盖illustrated-report和ocean-report文件。
+- 内置提示同步已实测PNG/SVG范围、单侧U和严格RecordMetadata接口、历史3/4与本批失败边界、显式外检和图例未测几何；Octave路径不获得MATLAB专属要求。提示候选与仓库技能不冒充当前会话已执行。
+- 新legend-title四状态的text-bounds回归三版通过，公开几何缺口继续标为unverified。独立原件审计见 `legend-title-review-round18.md`；旧版PDF仍未嵌入字体，可见英文标题越出图例框，不把原生测试通过当视觉修复。
+- `runtime-activation-review-round18.md`确认helper/技能文件已通过挂载可见，但常驻Node进程仍缓存17:44启动时的提示和路由，既有线程续轮不重建基础提示。尚未重启运行服务或核实产品内置Astra turn；不将桌面代理模型、磁盘文件或模型列表视作产品生效证据。
+- 十个原代理本批均已续派：提示同步、报告身份测试、helper语义复核、U角色测试、原生reader前置检查、早停汇总验证、图例产物审计、运行服务生效审计、真实结果文档、PDF字体候选实验；按六并发上限分批运行，不声称十个侧边栏会话同时活跃。主线程负责最小生产修复、CI原件回收及跨模块整合。
+- 三版12个图例case的原件复核完成，42个原件hash未变；所测R26可见PDF没有观察到旧版标题越框，中英文可提取、WenQuanYi嵌入，但仍不签完整视觉或公开bounds。`pdf-embedding-review-round18.md`的八旧PDF副本实验虽嵌入Nimbus替代字体，却改变颜色/透明度/轮廓并保留旧裁切，拒绝直接用于生产或评分。
+- 早停汇总新增两项回归，原始0分和现有失败不被跨版本/旧包补位覆盖；全部892个本批原文件hash保持不变。汇总仍只是本地声明转述，不认证run或完整替换的元数据。
+- 推送前281项Python、全部已跟踪服务器Node、8项生成器smoke、资产/技能/Family B/导出静态检查通过；61个MATLAB文件通过R2021a语法检查。29文件冻结与workflow YAML/报告触发范围复核通过，完整静态评分70/100、runtime_pending；不与本批失败CI原始0分混称。本轮最小U修复和新增原生负例待新licensed CI。

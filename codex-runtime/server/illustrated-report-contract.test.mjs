@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -321,6 +321,182 @@ for (const status of ['missing', 'failed', 'unknown', 'static-only']) {
     assert.equal(result.figureLinksOk, false);
     assert.deepEqual(result.figureViolations, ['figures[0].data-matlab-release.mismatch']);
   });
+}
+
+for (const release of REQUIRED_MATLAB_REPORT_RELEASES) {
+  for (const statuses of [['passed', 'passed'], ['passed', 'failed'], ['failed', 'passed']]) {
+    test(`synthetic identity rejects duplicate ${release} runs ordered ${statuses.join('/')}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context, release);
+      fixture.manifest.matlab_ci.runs = fixture.manifest.matlab_ci.runs.flatMap((run) => (
+        run.release === release ? statuses.map((runtime_status) => ({ ...structuredClone(run), runtime_status })) : [run]
+      ));
+      if (statuses[0] === statuses[1]) {
+        const duplicates = fixture.manifest.matlab_ci.runs.filter((run) => run.release === release);
+        assert.deepEqual(duplicates[0], duplicates[1]);
+      }
+      const result = assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', `matlab_ci.runs.${release}.duplicate`);
+      assert.equal(Object.hasOwn(result.matlabRuntime.releases, release), false);
+      assert.equal(result.figureLinksOk, false);
+      assert.ok(result.figureViolations.includes('figures[0].data-matlab-release.mismatch'));
+    });
+  }
+
+  test(`synthetic identity rejects a missing required ${release} run`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context, release);
+    fixture.manifest.matlab_ci.runs = fixture.manifest.matlab_ci.runs.filter((run) => run.release !== release);
+    assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', `matlab_ci.runs.${release}.missing`);
+  });
+
+  test(`synthetic identity rejects duplicate ${release} in required_releases`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.matlab_ci.required_releases = [...fixture.manifest.matlab_ci.required_releases, release];
+    assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', 'matlab_ci.required_releases.duplicate');
+  });
+
+  for (const reversed of [false, true]) {
+    test(`synthetic identity accepts ${release} with distinct sources and variables, reversed=${reversed}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context, release);
+      fixture.manifest.ocean_report.data_sources.push({
+        id: 'source-2', name: 'Synthetic second source', version: 'unit-fixture-v2', accessed_at: '2026-09-05T00:00:00Z',
+      });
+      fixture.manifest.ocean_report.variables[0].source_ids.push('source-2');
+      fixture.manifest.ocean_report.variables.push({
+        name: 'sea_water_salinity', quantity: 'sea water salinity', unit: 'g kg-1', source_ids: ['source-2'],
+      });
+      if (reversed) {
+        fixture.manifest.matlab_ci.required_releases = [...fixture.manifest.matlab_ci.required_releases].reverse();
+        fixture.manifest.matlab_ci.runs.reverse();
+        fixture.manifest.ocean_report.data_sources.reverse();
+        fixture.manifest.ocean_report.variables.forEach((variable) => variable.source_ids.reverse());
+        fixture.manifest.ocean_report.variables.reverse();
+      }
+      writeFixtureManifest(fixture);
+      const result = inspectIllustratedReportEvidence(fixture);
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.matlabRuntimeOk, true);
+      assert.equal(result.figureEvidenceOk, true);
+      assert.equal(result.oceanReportOk, true);
+      assert.equal(result.oceanReport.sourceCount, 2);
+      assert.equal(result.oceanReport.variableCount, 2);
+      assert.deepEqual(Object.keys(result.matlabRuntime.releases).sort(), [...REQUIRED_MATLAB_REPORT_RELEASES].sort());
+    });
+  }
+}
+
+test('synthetic identity rejects identical manifest figure ids despite valid exports', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  fixture.manifest.figures.push(structuredClone(fixture.manifest.figures[0]));
+  assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk', 'manifest.figures.id.duplicate');
+});
+
+for (const id of ['', ' \t\n ']) {
+  test(`synthetic identity rejects an extra blank figure id ${JSON.stringify(id)} with valid exports`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures.push({ ...structuredClone(fixture.manifest.figures[0]), id });
+    assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk', 'manifest.figures[1].id');
+  });
+}
+
+for (const [collection, field] of [['data_sources', 'id'], ['variables', 'name']]) {
+  test(`synthetic identity rejects identical ocean_report.${collection}.${field} duplicates`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const entries = fixture.manifest.ocean_report[collection];
+    entries.push(structuredClone(entries[0]));
+    assertSyntheticIdentityRejected(fixture, 'oceanReportOk', `ocean_report.${collection}[1].${field}.duplicate`);
+  });
+}
+
+for (const sourceIds of [['unknown-source'], ['source-1', 'unknown-source'], ['unknown-source', 'source-1']]) {
+  test(`synthetic identity rejects unknown source references ${JSON.stringify(sourceIds)}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.ocean_report.variables[0].source_ids = sourceIds;
+    const badIndex = sourceIds.indexOf('unknown-source');
+    assertSyntheticIdentityRejected(fixture, 'oceanReportOk', `ocean_report.variables[0].source_ids[${badIndex}]`);
+  });
+}
+
+test('synthetic identity rejects a duplicate variable source reference', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  fixture.manifest.ocean_report.variables[0].source_ids.push('source-1');
+  assertSyntheticIdentityRejected(fixture, 'oceanReportOk', 'ocean_report.variables[0].source_ids[1].duplicate');
+});
+
+for (const [kind, value] of [['null', null], ['number', 42], ['empty', ''], ['whitespace', ' \t\n ']]) {
+  test(`synthetic identity rejects a mixed ${kind} required_releases entry`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.matlab_ci.required_releases = [...fixture.manifest.matlab_ci.required_releases, value];
+    assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', 'matlab_ci.required_releases');
+  });
+
+  test(`synthetic identity rejects an extra run with a ${kind} release`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.matlab_ci.runs.push({ ...structuredClone(fixture.manifest.matlab_ci.runs[0]), release: value });
+    assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', 'matlab_ci.runs[3].release');
+  });
+
+  test(`synthetic identity rejects a mixed ${kind} toolbox entry`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.matlab_ci.runs.find((run) => run.release === 'R2026a').toolboxes.push(value);
+    assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', 'matlab_ci.runs.R2026a.toolboxes');
+  });
+
+  for (const [collection, field] of [['data_sources', 'id'], ['variables', 'name']]) {
+    test(`synthetic identity rejects ${kind} ocean_report.${collection}.${field}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      fixture.manifest.ocean_report[collection][0][field] = value;
+      assertSyntheticIdentityRejected(fixture, 'oceanReportOk', `ocean_report.${collection}[0].${field}`);
+    });
+  }
+
+  test(`synthetic identity rejects a mixed ${kind} variable source reference`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    if (typeof value === 'number') {
+      fixture.manifest.ocean_report.data_sources.push({
+        ...structuredClone(fixture.manifest.ocean_report.data_sources[0]), id: String(value),
+      });
+      fixture.manifest.ocean_report.variables[0].source_ids.push(String(value));
+      writeFixtureManifest(fixture);
+      assert.equal(inspectIllustratedReportEvidence(fixture).ok, true);
+      fixture.manifest.ocean_report.variables[0].source_ids[1] = value;
+    } else {
+      fixture.manifest.ocean_report.variables[0].source_ids.push(value);
+    }
+    assertSyntheticIdentityRejected(fixture, 'oceanReportOk', 'ocean_report.variables[0].source_ids[1]');
+  });
+}
+
+test('synthetic identity rejects an extra run with no release field', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  const run = structuredClone(fixture.manifest.matlab_ci.runs[0]);
+  delete run.release;
+  fixture.manifest.matlab_ci.runs.push(run);
+  assertSyntheticIdentityRejected(fixture, 'matlabRuntimeOk', 'matlab_ci.runs[3].release');
+});
+
+function createSyntheticIdentityFixture(context, release = 'R2026a') {
+  const fixture = createReportEvidenceFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  fixture.manifest.generator = 'Synthetic contract test only; not MATLAB execution, real rendering or 100-point evidence';
+  fixture.manifest.figures[0].runtime.matlab_release = release;
+  setReportFigureAttribute(fixture, 'data-matlab-release', release);
+  writeFixtureManifest(fixture);
+  const baseline = inspectIllustratedReportEvidence(fixture);
+  assert.equal(baseline.ok, true, JSON.stringify(baseline));
+  return fixture;
+}
+
+function assertSyntheticIdentityRejected(fixture, okField, expectedPath) {
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  const violations = okField === 'matlabRuntimeOk' ? result.matlabRuntime.violations
+    : okField === 'oceanReportOk' ? result.oceanReport.violations : result.figureEvidenceViolations;
+  const diagnostics = JSON.stringify({ ok: result.ok, [okField]: result[okField], violations });
+  assert.equal(result.ok, false, diagnostics);
+  assert.equal(result[okField], false, diagnostics);
+  assert.ok(violations.some((violation) => violation.includes(expectedPath)), `${expectedPath}: ${diagnostics}`);
+  assert.equal(result.artifactsOk, true, JSON.stringify(result.artifactChecks));
+  assert.equal(result.manifestFreshnessOk, true, JSON.stringify(result.freshness));
+  return result;
 }
 
 function setReportFigureAttribute(fixture, attribute, value) {
