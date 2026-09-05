@@ -102,7 +102,9 @@ pdfDevice = "-dpdf -painters";
 geometryArgs = {"Units", "inches", "Width", widthInches, "Height", heightInches, ...
     "Padding", "figure", "PreserveAspectRatio", "on", "BackgroundColor", "white"};
 if useExactExportGraphics
-    exportgraphics(figureHandle, pngPath, geometryArgs{:}, "Resolution", dpi);
+    exportgraphics(figureHandle, pngPath, "Units", "pixels", ...
+        "Width", widthPixels, "Height", heightPixels, "Resolution", dpi, ...
+        "Padding", "figure", "PreserveAspectRatio", "on", "BackgroundColor", "white");
     exportgraphics(figureHandle, pdfPath, geometryArgs{:}, "ContentType", "vector");
     pdfApi = "exportgraphics";
     pdfDevice = "";
@@ -459,8 +461,10 @@ if exist("batchStartupOptionUsed", "file") == 2 ...
 end
 if exportGraphicsAvailable
     pngApi = "exportgraphics";
+    pngSizeUnits = "pixels";
 else
     pngApi = "print";
+    pngSizeUnits = "inches";
 end
 svgApi = "not_requested";
 svgDevice = "";
@@ -490,7 +494,11 @@ evidence = struct("minimum_release", "R2019b", ...
     "toolbox_license_verified", false, ...
     "toolbox_invocation_verified", false, ...
     "export_api", struct("png", pngApi, "pdf", pdfApi, "svg", svgApi), ...
+    "export_size_units", struct("png", pngSizeUnits, "pdf", "inches"), ...
     "export_device", struct("png", "", "pdf", pdfDevice, "svg", svgDevice));
+if svgRequested
+    evidence.export_size_units.svg = "inches";
+end
 end
 
 function apply_export_font(figureHandle)

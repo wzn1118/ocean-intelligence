@@ -6,10 +6,50 @@ import {
   matlabTaskRoutingInstructionBlock,
 } from './matlab-task-routing-contract.mjs';
 
-const MATLAB_PLOTTING_BASE_INSTRUCTIONS = String.raw`
-【Octave/MATLAB 专业绘图运行规范】
+const RUNTIME_PLOTTING_GUIDANCE = {
+  matlab: {
+    authority: 'MATLAB',
+    repository: String.raw`
+- 先检查注入的 MATLAB 模板根目录下 README.md、SKILL.md、assets 和 tests。assets 中可复用 oi_ocean_theme、oi_figure、oi_apply_axes、oi_apply_color_scale、oi_font_available、oi_export_figure、oi_write_manifest、oi_text_bounds 和 oi_color_accessibility_audit；核对实际 .m 文件及输入/输出契约后最小适配，不重复实现主题、字体、画布、导出或 manifest。
+- MATLAB 仓库现有 9 个绘图 helper：oi_plot_time_series、oi_plot_profile、oi_plot_section、oi_plot_hovmoller、oi_plot_comparison、oi_plot_vector_field、oi_plot_ts_diagram、oi_plot_spectrum、oi_plot_direction_rose。资产存在只代表可按其契约调用，不代表当前路由生成器已接线或产物已验证。
+- 多系列图显式保留图形句柄和标签，使用 MATLAB 原生 legend(axesHandle, seriesHandles, labels)，图例顺序必须与数据系列和交互提示一致，不引入其他运行时的图例修补 helper。
+- 两个及以上面板优先采用 MATLAB 原生 tiledlayout/nexttile，声明 Padding、TileSpacing、共享标签、图例/色条占位、从左到右且从上到下的阅读顺序及 (a)(b)(c) 标签；不得依赖 subplot 默认挤压，也不得手工复制互相重叠的 Position 数组。目标 release 不支持时才声明 subplot 或显式 axes 布局回退；单图生成器收到多面板请求仍须拒绝，不能只画第一面板。
+- MATLAB 时间序列优先检查 oi_plot_time_series(axesHandle, data, options)：data 为 table/timetable，显式声明 ValueVariables、ValueUnits、时区、QC 与不确定度语义；保留观测值 NaN 缺口，输入时间不得 NaT，必须严格递增且唯一；不跨缺测连接不确定性带，采样长间隔通过 GapThreshold 明确分段，返回有效/缺测计数并为原始点保留 marker。当前服务器静态时间序列仍为内联 plot/errorbar 路径，不得把该资产的可调用性描述为已完成生成器接线。
+- MATLAB 仓库尚无经纬度场或通用标量场专用 helper；按原生 surface/view(2)、contourf 或满足规则等间隔条件的 imagesc 实现。声明经度约定、坐标顺序、单位、色限和掩膜，未经声明不得自动重排字段列；站点叠加保留名称、经纬度、数值和单位元数据。不得把普通 Cartesian 坐标轴描述成地图投影；投影需求须核对产品、工具箱与 release。
+- MATLAB 仓库尚无 Taylor、target、ensemble、reliability 专用绘图 helper。先明确各图的统计量、参考值、配对样本、单位、QC 和不确定度契约，再按实际可用的 plot/scatter/errorbar/patch/polaraxes 等原生 API 实现；3-D 仅在科学问题确需时使用 surf。缺少科学输入或目标 release/产品能力时报告 needs-input、missing-toolbox 或相应不支持状态，不得臆造仓库 helper、模板或强行通过现有路由。
+- MATLAB 原生任务保持 timetable/datetime、tiledlayout/nexttile；导出按通用能力与仓库严格尺寸路径分别选策略，只有目标 release、格式或集成约束不支持时才显式降级。误差带按缺测和长时间间隔分段，不能跨空档闭合 patch。PNG/PDF 双格式交付使用 oi_export_figure，从同一最终 figure 导出。
+`,
+    fonts: String.raw`- 中文文本保持 UTF-8。MATLAB 使用 oi_ocean_theme 与 oi_font_available，按用户显式字体及 fallback 候选顺序精确探测，不用其他运行时的字体/图形初始化 helper。用 oi_figure 创建画布后将实际选中 FontName 写回 theme 和 OI_OceanTheme 缓存，并应用到 axes、标签、图例、色条及交互对象；不得让导出器恢复过时默认字体。安装证据与默认字体适用范围遵循 MATLAB 仓库实跑约束，候选命中不等于字形或嵌入通过。普通中英文标签使用 interpreter='none'，混合公式单独验证；最终尺寸下检查文字清晰度和裁切。`,
+    headless: '- MATLAB 使用 -batch 或等价无头模式，并关闭交互窗口；不探测或配置 GNU Octave 图形工具包。',
+    interaction: String.raw`
+- MATLAB 原生交互任务（taskType="interactive"）必须复用 interactive_timeseries_native_template.m：用 DataTipTemplate 和 dataTipTextRow 绑定逐点 ID、站位、时间与 QC 元数据；普通 create/export 时间序列保持非交互路径。桌面路径才启用显式句柄的 datacursormode(figureHandle, "on") 与 brush(figureHandle, "on")，多面板使用 linkaxes 协同视图。
+- 交互与导出必须双路径：Interactive=true 供桌面探索，Interactive=false 供 matlab -batch 无界面导出；静态导出不得依赖点击、hover、桌面状态或回调。
+- 回调仅作无法由 DataTipTemplate 表达内容时的显式降级；必须从 event.Target 和 event.DataIndex 取值，校验句柄/索引并提供安全兜底，不得在回调中搜索 gca、gcf 或读取全局状态。使用 uifigure/uiaxes 前核对 MATLAB release。
+- brush 选择必须通过图元 BrushData 映射到过滤、排序后仍唯一的 ObservationID，并复制到应用管理状态；关闭图窗时禁用 brush/datacursormode、清空 UpdateFcn 和 appdata。跨面板视图优先 linkaxes；linkdata 只允许调用方长期维护数值、ID、QC 同步映射时显式启用，并在关闭前 linkdata(fig, "off")。
+- uifigure 完整界面交付可使用 exportapp，传统 figure/layout 或 matlab -batch 无界面路径按 release 和严格尺寸合同使用 exportgraphics 或明确 print 策略。自动模式可以从无 desktop 的 uifigure 请求降级到不可见传统 figure，但显式要求 exportapp 时不得静默降级；pinned data tip、brush 高亮和 toolbar 不得被当作静态科学标注。
+`,
+  },
+  octave: {
+    authority: 'GNU Octave',
+    repository: String.raw`
+- 先检查注入上下文给出的 Octave 仓库绘图模板目录，优先复用其中 README、oi_resolve_font、oi_configure_graphics、oi_ocean_theme、oi_figure、oi_apply_axes、oi_panel_grid、oi_stable_legend、oi_plot_timeseries、oi_plot_field、oi_plot_geospatial_field、oi_plot_profile、oi_plot_section、oi_plot_comparison、oi_plot_taylor_diagram、oi_plot_target_diagram、oi_plot_ensemble、oi_plot_reliability_diagram、oi_plot_vector_field、oi_plot_hovmoller、oi_plot_ts_diagram、oi_plot_spectrum、oi_plot_direction_rose、oi_export_png、oi_export_figure、oi_write_manifest、interaction、interactive、examples 和 tests；在已有模板上做最小适配，不重复实现主题、字体、画布、逐点提示、导出或 manifest 逻辑。
+- 多系列图必须显式传入图形句柄和标签；使用 gnuplot 导出时优先调用 oi_stable_legend，避免内置 legend 对象在 PNG/PDF 中丢失。图例顺序必须与数据系列和交互提示一致。
+- 两个及以上面板优先调用 oi_panel_grid，统一外边距、面板间距、从左到右且从上到下的阅读顺序以及 (a)(b)(c) 标签；不得依赖 subplot 默认挤压，也不得手工复制互相重叠的 Position 数组。
+- 小范围经纬度标量场优先调用 oi_plot_geospatial_field：必须声明 [-180, 180] 或 [0, 360] 经度约定，自动重排字段列，明确标注为未投影区域经纬度图；站点叠加必须保留名称、经纬度、数值和单位元数据。不得把普通 Cartesian 坐标轴描述成地图投影。
+- 时间序列优先调用 oi_plot_timeseries：保留 NaN 空档、不跨缺测连接不确定性带、返回有效/缺测计数，并为每个原始点保留 marker。PNG/PDF 双格式交付优先调用 oi_export_figure，确保两种格式来自同一最终 figure。
+`,
+    fonts: String.raw`- 中文文本保持 UTF-8。优先调用 oi_resolve_font，并用 fc-match/fc-list 验证字体；创建原始 figure 前调用 oi_configure_graphics，使用 oi_figure 时由其自动完成。优先 Noto Sans CJK SC，其次 WenQuanYi Zen Hei。普通中英文标签使用 interpreter='none'，混合公式时单独验证字形。最终尺寸下检查中文、拉丁字符、图例和色标是否清晰且未裁切。`,
+    headless: '- Octave 默认使用不可见 figure 和 Qt 工具包；无显示环境通过 UTF-8 locale 下的 xvfb-run 执行 octave --no-gui --quiet，不得依赖 DISPLAY，也不得静默切换到 gnuplot。Qt 不可用时先报告限制，只有验证输出后才可把 gnuplot 作为明确降级方案。',
+    interaction: '- Octave 交互优先核对模板目录的 interaction、interactive、examples 和 tests，验证当前工具包的逐点提示、选择、回调与清理支持。保留稳定 ObservationID、原始行号及对齐 QC；交互与静态导出保持双路径，静态结果不依赖点击、hover 或桌面回调。缺少交互能力时明确报告限制，不将 MATLAB 原生交互模板/API 当作 Octave 已有能力。',
+  },
+};
 
-仅在任务需要生成、修复或复核科学图件时执行本规范。MATLAB 是本规范的权威运行时；绘图脚本、输入数据、导出文件和 manifest 必须可复现；不得用虚构数据、装饰性曲线或未经说明的平滑、插值、裁剪和坐标翻转补足结果。
+function plottingBaseInstructions(runtime) {
+  const guidance = RUNTIME_PLOTTING_GUIDANCE[runtime];
+  return String.raw`
+【${guidance.authority} 专业绘图运行规范】
+
+仅在任务需要生成、修复或复核科学图件时执行本规范。${guidance.authority} 是本规范的权威运行时；绘图脚本、输入数据、导出文件和 manifest 必须可复现；不得用虚构数据、装饰性曲线或未经说明的平滑、插值、裁剪和坐标翻转补足结果。
 
 零、科学数据门禁
 - 数据驱动的 create/repair/refine/export/interactive 请求必须设置 requireScientificContract=true，并通过 scientificDataContract 门禁后再选图。契约至少包含原始 shape、dimensionOrder、observationDimension、MATLAB 数据类型、坐标、物理量和单位。
@@ -43,9 +83,7 @@ const MATLAB_PLOTTING_BASE_INSTRUCTIONS = String.raw`
 - 只有行为确有差异时才用 exist('OCTAVE_VERSION', 'builtin') 分支；需兼容 MATLAB 的文件统一使用 end，不使用 endif、endfor 或 endfunction。
 
 二、仓库模板优先
-- 先检查注入上下文给出的仓库绘图模板目录，优先复用其中 README、oi_resolve_font、oi_configure_graphics、oi_ocean_theme、oi_figure、oi_apply_axes、oi_panel_grid、oi_stable_legend、oi_plot_timeseries、oi_plot_field、oi_plot_geospatial_field、oi_plot_profile、oi_plot_section、oi_plot_comparison、oi_plot_taylor_diagram、oi_plot_target_diagram、oi_plot_ensemble、oi_plot_reliability_diagram、oi_plot_vector_field、oi_plot_hovmoller、oi_plot_ts_diagram、oi_plot_spectrum、oi_plot_direction_rose、oi_export_png、oi_export_figure、oi_write_manifest、interaction、interactive、examples 和 tests；在已有模板上做最小适配，不重复实现主题、字体、画布、逐点提示、导出或 manifest 逻辑。
-- 多系列图必须显式传入图形句柄和标签；使用 gnuplot 导出时优先调用 oi_stable_legend，避免内置 legend 对象在 PNG/PDF 中丢失。图例顺序必须与数据系列和交互提示一致。
-- 两个及以上面板优先调用 oi_panel_grid，统一外边距、面板间距、从左到右且从上到下的阅读顺序以及 (a)(b)(c) 标签；不得依赖 subplot 默认挤压，也不得手工复制互相重叠的 Position 数组。
+${guidance.repository.trim()}
 - 风向、流向和波向玫瑰图优先调用 oi_plot_direction_rose：北向朝上、角度顺时针，必须明确 DirectionConvention 是 from 还是 to，并声明 count、percent 或权重口径；不得混用风来向、流去向和波来向。
 - 频谱图优先调用 oi_plot_spectrum，并只接收可追溯的预计算谱密度；必须声明频率、周期和谱密度单位，报告窗函数、去趋势、分段与自由度口径。零频和非正谱值不得混入对数轴，置信区间不得跨缺测点连接。
 - T–S 图优先调用 oi_plot_ts_diagram：明确温度类型与盐度口径、按深度着色、保留缺测统计和逐点提示。等密度线只能使用数据源或经过说明的海水状态方程计算结果，再通过 DensityValues 显式传入；不得用装饰性曲线冒充密度诊断。
@@ -53,16 +91,9 @@ const MATLAB_PLOTTING_BASE_INSTRUCTIONS = String.raw`
 - 温盐、氧气和营养盐断面优先调用 oi_plot_section：纵轴深度向下为正，海底遮罩只能来自真实 bathymetry，填色和线等值级别必须显式给定或可追溯；站位顺序、距离单位、缺测和是否插值必须明确，禁止用填补值伪造海底以下数据。
 - 观测—模型或仪器—仪器一致性图优先调用 oi_plot_comparison：必须绘制 1:1 参考线并报告有效样本数、Bias、MAE、RMSE 和相关系数；两个坐标轴必须使用相同范围和单位，默认禁止静默裁点，每个点保留样本标签、两侧数值和残差元数据。
 - 矢量场必须报告分量单位、抽样步长、有效/缺测矢量数量，并绘制带单位的参考箭头；缺测 u/v 分量不得被静默当作零值。
-- 小范围经纬度标量场优先调用 oi_plot_geospatial_field：必须声明 [-180, 180] 或 [0, 360] 经度约定，自动重排字段列，明确标注为未投影区域经纬度图；站点叠加必须保留名称、经纬度、数值和单位元数据。不得把普通 Cartesian 坐标轴描述成地图投影。
-- 时间序列优先调用 oi_plot_timeseries：保留 NaN 空档、不跨缺测连接不确定性带、返回有效/缺测计数，并为每个原始点保留 marker。PNG/PDF 双格式交付优先调用 oi_export_figure，确保两种格式来自同一最终 figure。
-- MATLAB 原生任务优先采用 timetable/datetime、tiledlayout/nexttile 和 exportgraphics；只有目标 release、格式或集成约束不支持时，才按能力矩阵显式降级。误差带必须按缺测和长时间间隔分段，不能跨空档闭合 patch。
 - 提示词回归覆盖时间序列、误差带、多面板、海洋断面、经纬度场、频谱、玫瑰图、中文字体、导出失败修复、旧版本兼容以及 MATLAB/Octave 路由；输出代码必须同时满足输入契约、期望特征、禁止行为和验收规则。
 - 使用模板前核对函数在当前运行时是否可用；若模板含 Octave 专用 API，不得未经测试直接宣称 MATLAB 兼容。必须偏离模板时，在交付说明中写明原因和替代实现。
-- MATLAB 原生交互任务（taskType="interactive"）必须复用 interactive_timeseries_native_template.m：用 DataTipTemplate 和 dataTipTextRow 绑定逐点 ID、站位、时间与 QC 元数据；普通 create/export 时间序列保持非交互路径。桌面路径才启用显式句柄的 datacursormode(figureHandle, "on") 与 brush(figureHandle, "on")，多面板使用 linkaxes 协同视图。
-- 交互与导出必须双路径：Interactive=true 供桌面探索，Interactive=false 供 matlab -batch 无界面导出；静态导出不得依赖点击、hover、桌面状态或回调。
-- 回调仅作无法由 DataTipTemplate 表达内容时的显式降级；必须从 event.Target 和 event.DataIndex 取值，校验句柄/索引并提供安全兜底，不得在回调中搜索 gca、gcf 或读取全局状态。使用 uifigure/uiaxes 前核对 MATLAB release。
-- brush 选择必须通过图元 BrushData 映射到过滤、排序后仍唯一的 ObservationID，并复制到应用管理状态；关闭图窗时禁用 brush/datacursormode、清空 UpdateFcn 和 appdata。跨面板视图优先 linkaxes；linkdata 只允许调用方长期维护数值、ID、QC 同步映射时显式启用，并在关闭前 linkdata(fig, "off")。
-- uifigure 完整界面交付可使用 exportapp，传统 figure/layout 或 matlab -batch 无界面路径使用 exportgraphics。自动模式可以从无 desktop 的 uifigure 请求降级到不可见传统 figure，但显式要求 exportapp 时不得静默降级；pinned data tip、brush 高亮和 toolbar 不得被当作静态科学标注。
+${guidance.interaction.trim()}
 - 将科学计算与绘图句柄操作分离，显式传递坐标轴句柄，保留原始数据、QC、掩膜与缺测结构；缺测使用 NaN，并使缺测、陆地或剔除值与有效极值视觉上可区分。
 
 三、专业视觉与科学表达
@@ -72,11 +103,11 @@ const MATLAB_PLOTTING_BASE_INSTRUCTIONS = String.raw`
 - 海洋图遵守坐标约定：正向下深度应把海面置顶并说明单位；时间注明 UTC 或时区；经度采用一致的 [-180, 180] 或 [0, 360] 约定；矢量图给出单位和参考矢量；地图不得暗示未实际应用的投影。
 - 连续量使用感知均匀、色盲友好的顺序或发散色表；发散色表只围绕有科学意义的参考值，并在正负变化可比时采用对称范围。除强制遗留约定外不使用 rainbow/jet，颜色不得是唯一编码。
 - 色限和等值线依据物理阈值或有说明的稳健统计确定，不得用孤立极值压扁主体，也不得隐瞒裁剪。任何平滑、网格化、距平、插值或异常计算都要在图注或报告中说明方法与参数。
-- 中文文本保持 UTF-8。优先调用 oi_resolve_font，并用 fc-match/fc-list 或 MATLAB listfonts 验证字体；创建原始 figure 前调用 oi_configure_graphics，使用 oi_figure 时由其自动完成。优先 Noto Sans CJK SC，其次 WenQuanYi Zen Hei。普通中英文标签使用 interpreter='none'，混合公式时单独验证字形。最终尺寸下检查中文、拉丁字符、图例和色标是否清晰且未裁切。
+${guidance.fonts}
 
 四、无头运行与导出验证
-- Octave 默认使用不可见 figure 和 Qt 工具包；无显示环境通过 UTF-8 locale 下的 xvfb-run 执行 octave --no-gui --quiet，不得依赖 DISPLAY，也不得静默切换到 gnuplot。Qt 不可用时先报告限制，只有验证输出后才可把 gnuplot 作为明确降级方案。
-- MATLAB 使用 -batch 或等价无头模式，并关闭交互窗口。任何运行时都必须让脚本非交互、失败即返回非零状态，不等待人工点击或桌面会话。
+${guidance.headless}
+- 任何运行时都必须让脚本非交互、失败即返回非零状态，不等待人工点击或桌面会话。
 - 显式设置屏幕/纸张几何后，从同一最终 figure 导出所需 PNG 与 PDF；审阅图通常 150–200 DPI，出版图通常 300–600 DPI。优先保留 PDF 文本与矢量线条，透明度或字形后端有缺陷时说明限制并提供高分辨率 PNG。
 - 进程成功不等于图件正确。逐一验证文件存在、非空、格式和像素尺寸符合预期；可视检查坐标方向、单位、时区、色限、掩膜、图例、中文、裁切，以及 PNG/PDF 的一致性。
 
@@ -86,11 +117,12 @@ const MATLAB_PLOTTING_BASE_INSTRUCTIONS = String.raw`
 - 只有已成功生成、验证且列入 manifest 的图件才能进入报告。报告正文使用图号和标题引用图件，并紧邻给出数据来源、变量、单位、有效时间/空间范围、处理方法和关键限制，不能只罗列文件名。
 - Markdown/HTML 和最终答复使用注入上下文给出的用户可见相对引用前缀；不得暴露宿主绝对路径。最终交付列出脚本、manifest、图件路径，以及实际运行命令、运行时版本、图形工具包、字体和兼容性妥协。
 `;
+}
 
 const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 【MATLAB 仓库实跑约束】
 
-本段仅适用于 MATLAB，并优先于共享段落中的通用画布、字体探测和导出建议。通用 release 能力矩阵说明 API 是否可用，不代表本仓库固定尺寸与 manifest 验证已通过。
+本段仅适用于 MATLAB 仓库审计导出，与前述 MATLAB helper、字体和布局建议共同生效。通用 release 能力矩阵说明 API 是否可用，不代表本仓库固定尺寸与 manifest 验证已通过。
 
 - oi_figure(widthPixels, heightPixels, "off") 的输入是屏幕 pixels，不是最终输出的物理尺寸。绘图前、创建 axes/tiledlayout 前设置 figureHandle.Units = "inches"; figureHandle.Position(3:4) = [widthPixels heightPixels] / dpi; 例如 1200 x 675 输出像素在 300 DPI 下是 4 x 2.25 inches。不得等 oi_export_figure 导出时才缩小画布，否则点制字体与标签占位会改变。
 - 在最终 inches 尺寸下，用 axes 的 OuterPosition/外框约束和真实页边距，或 tiledlayout 的 Padding/TileSpacing 为标题、刻度、图例、色条分配空间；不能只固定内框铺满画布。drawnow 后检查布局，导出后再核验；不得放宽裁切/遮挡门禁、忽略对象或改写 manifest 来掩盖失败。
@@ -101,7 +133,8 @@ const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 | R2019b-R2024b | print -dpng | print -dpdf | print -dsvg |
 | R2025a+ | exact exportgraphics | exact exportgraphics | exact exportgraphics |
 
-- 旧版 print 是明确的预选策略，不是失败后的重试。R2025a+ 的 exact exportgraphics 显式传 Units="inches"、Width、Height、Padding="figure"、PreserveAspectRatio="on"；失败必须保留错误并停止，不得静默 print 重试。逐图、逐格式记录实际 export_api，并与 runtime 一致，不得把预选 API 当成实跑证据。
+- 旧版 print 是明确的预选策略，不是失败后的重试。R2025a+ 的 exact exportgraphics 按格式指定尺寸：PNG 使用 Units="pixels"、整数 Width/Height 和 Resolution=dpi；PDF/SVG 使用 Units="inches"、Width=widthPixels/dpi、Height=heightPixels/dpi；两类均保留 Padding="figure" 和 PreserveAspectRatio="on"。绘图前的 figure/layout 仍保持最终 inches，不能把原生 PNG 的尺寸参数误作屏幕画布单位。失败必须保留错误并停止，不得静默 print 重试。逐图、逐格式记录实际 export_api，并与 runtime 一致，不得把预选 API 当成实跑证据。
+- runtime.export_size_units 按实际路径记录：原生 PNG 为 pixels，print PNG 为 inches，PDF 及请求的 SVG 为 inches。不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误；本次 PNG 单位策略调整尚待 CI 验证，不得声称尺寸偏差已经修复。必须重新检查真实 PNG 像素/DPI、PDF 页尺寸及 SVG 几何，未验证项保持 unverified。
 - MATLAB 字体安装证据必须来自 listfonts 或 fc-list 枚举结果的精确字体族名匹配（可忽略大小写），不得用 fc-match fallback 返回了替代字体就认定请求字体已安装。字体候选匹配不等于 PDF 字体嵌入，也不等于 CJK 字形可读；PNG/PDF/SVG 必须分别核验实际产物，未核验项保持 unverified，不得以源码文本或候选字体命中报成功。
 - MATLAB 的 CJK+Latin 输出在用户未指定 FontName 且精确安装检查通过时，默认优先 WenQuanYi Zen Hei，保持主题、导出器和交互字体一致；不覆盖用户显式字体选择。字体探针 33985570222 在 R2021a/R2024b/R2026a 的 WenQuanYi Zen Hei + exportgraphics(..., "ContentType", "vector") PDF 中验证了所测中英文/数字可读、精确文本提取和字体嵌入。这是有限探针证据，不是所有字形或后端的保证。
 - 该探针的原生 PDF 是内容裁剪而非精确页；R2021a/R2024b 的 print PDF 仍未嵌入，改用 WenQuanYi 默认字体不能声称已解决旧版嵌入或精确页合同，也不能据此更换严格导出策略。整图布局、最终尺寸、粗体、中文旋转轴及 PNG/SVG 仍须分别验证，不得沿用探针结果标记完成。两旧版 Noto 原生标题为 ######，Droid 原生 Latin/数字为方框，不能将它们当成等效已验证回退，也不能把这些后端失败伪报为字体未安装。
@@ -113,7 +146,7 @@ const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 `;
 
 export const MATLAB_PLOTTING_INSTRUCTIONS = [
-  MATLAB_PLOTTING_BASE_INSTRUCTIONS.trim(),
+  plottingBaseInstructions('matlab').trim(),
   '',
   matlabTaskRoutingInstructionBlock(),
   '',
@@ -151,14 +184,12 @@ export function matlabPlottingInstructions(options = {}) {
     : '';
 
   return [
-    MATLAB_PLOTTING_BASE_INSTRUCTIONS.trim(),
+    plottingBaseInstructions(runtime).trim(),
     '',
     matlabTaskRoutingInstructionBlock(),
     '',
     capabilityBlock,
-    '',
-    matlabPlotRoutingInstructionBlock(),
-    ...(runtime === 'matlab' ? ['', MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS.trim()] : []),
+    ...(runtime === 'matlab' ? ['', matlabPlotRoutingInstructionBlock(), '', MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS.trim()] : []),
     ...(plotRequestBlock ? ['', plotRequestBlock] : []),
     '',
     '【本次可注入路径上下文】',

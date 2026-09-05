@@ -188,7 +188,13 @@ for (const [targetRelease, exportApi, generalStatus] of [
         }
       } else {
         assert.equal(plan.status, 'preferred');
-        assert.match(plan.syntax, /'Units','inches','Width',widthPixels\/dpi,'Height',heightPixels\/dpi/u);
+        if (format === 'png') {
+          assert.match(plan.syntax, /'Units','pixels','Width',widthPixels,'Height',heightPixels/u);
+          assert.match(plan.syntax, /'Resolution',dpi/u);
+        } else {
+          assert.match(plan.syntax, /'Units','inches','Width',widthPixels\/dpi,'Height',heightPixels\/dpi/u);
+          assert.doesNotMatch(plan.syntax, /'Resolution',dpi/u);
+        }
         assert.match(plan.syntax, /'Padding','figure','PreserveAspectRatio','on'/u);
       }
     }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -7,10 +7,20 @@ import {
   matlabPlotRequestResolutionBlock,
   matlabPlottingInstructions,
 } from './matlab-plotting-instructions.mjs';
+import { matlabPlotRoutingInstructionBlock } from './matlab-plot-router.mjs';
 
 const repositorySkill = readFileSync(new URL('../matlab/SKILL.md', import.meta.url), 'utf8');
+const matlabAssetDirectory = new URL('../matlab/assets/', import.meta.url);
+const matlabAssets = readdirSync(matlabAssetDirectory, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith('.m'))
+  .map((entry) => entry.name);
+const octaveOnlyHelpers = [
+  'oi_resolve_font', 'oi_configure_graphics', 'oi_panel_grid', 'oi_stable_legend',
+  'oi_plot_timeseries', 'oi_plot_field', 'oi_plot_geospatial_field', 'oi_plot_taylor_diagram',
+  'oi_plot_target_diagram', 'oi_plot_ensemble', 'oi_plot_reliability_diagram', 'oi_export_png',
+];
 
-test('exports the complete Chinese Octave and MATLAB plotting contract', () => {
+test('exports the complete Chinese MATLAB plotting contract with native repository helpers', () => {
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /运行时检测与兼容性/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB 是本规范的权威运行时/u);
   const injected = matlabPlottingInstructions();
@@ -20,28 +30,23 @@ test('exports the complete Chinese Octave and MATLAB plotting contract', () => {
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /Octave-first 才探测 octave-cli、octave/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /仓库模板优先/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_ocean_theme/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_timeseries/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_time_series/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_export_figure/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_field/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /surface\/view\(2\)、contourf/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_profile/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_vector_field/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_geospatial_field/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB 仓库尚无经纬度场或通用标量场专用 helper/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_section/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_comparison/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_taylor_diagram/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_target_diagram/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_ensemble/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_reliability_diagram/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB 仓库尚无 Taylor、target、ensemble、reliability 专用绘图 helper/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_hovmoller/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_ts_diagram/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_spectrum/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_plot_direction_rose/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_panel_grid/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_stable_legend/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_resolve_font/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_configure_graphics/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB listfonts/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /内置 legend 对象在 PNG\/PDF 中丢失/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB 原生 tiledlayout\/nexttile/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /legend\(axesHandle, seriesHandles, labels\)/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /oi_font_available/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /实际选中 FontName 写回 theme 和 OI_OceanTheme 缓存/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /不得依赖 subplot 默认挤压/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /不得混用风来向、流去向和波来向/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /零频和非正谱值不得混入对数轴/u);
@@ -53,7 +58,7 @@ test('exports the complete Chinese Octave and MATLAB plotting contract', () => {
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /缺测 u\/v 分量不得被静默当作零值/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /不跨缺测连接不确定性带/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /专业视觉与科学表达/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /xvfb-run/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB 使用 -batch 或等价无头模式/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /JSON manifest/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /用户可见相对引用前缀/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /不得暴露宿主绝对路径/u);
@@ -107,8 +112,79 @@ test('exports the complete Chinese Octave and MATLAB plotting contract', () => {
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /matlab -batch/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /inspectMatlabPlotQuality 八项标准/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /MATLAB 智能选图与脚本生成路由/u);
-  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /listfonts 按声明候选链选择 CJK 字体/u);
+  assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /listfonts 或 fc-list 精确安装证据按声明候选链选择 CJK 字体/u);
   assert.match(MATLAB_PLOTTING_INSTRUCTIONS, /静态 fallback 必须记录 interaction_verified=false/u);
+});
+
+test('every MATLAB helper and template recommendation resolves to a real native asset', () => {
+  const actualPlotHelpers = matlabAssets.filter((name) => name.startsWith('oi_plot_'))
+    .map((name) => name.slice(0, -2)).sort();
+  assert.equal(actualPlotHelpers.length, 9);
+  const contexts = [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions(),
+    ...['R2019b', 'R2021a', 'R2024b', 'R2026a'].map((matlabRelease) =>
+      matlabPlottingInstructions({ runtime: 'MATLAB', matlabRelease }))];
+  for (const instructions of contexts) {
+    const helpers = [...new Set(instructions.match(/\boi_[a-z0-9_]+\b/gu))];
+    assert.deepEqual(helpers.filter((name) => name.startsWith('oi_plot_')).sort(), actualPlotHelpers);
+    for (const helper of helpers) {
+      const filename = `${helper}.m`;
+      assert.ok(matlabAssets.includes(filename), `MATLAB recommendation has no asset: ${filename}`);
+      const asset = readFileSync(new URL(filename, matlabAssetDirectory), 'utf8');
+      assert.match(asset, new RegExp(`^function[^\\n]*\\b${helper}\\(`, 'u'), filename);
+    }
+    const templates = [...new Set(instructions.match(/\b[A-Za-z][A-Za-z0-9_]*\.m\b/gu))];
+    assert.ok(templates.includes('interactive_timeseries_native_template.m'));
+    for (const template of templates) {
+      assert.ok(matlabAssets.includes(template), `MATLAB recommendation has no template: ${template}`);
+    }
+    for (const helper of octaveOnlyHelpers) {
+      assert.ok(!helpers.includes(helper), `Octave-only helper leaked into MATLAB instructions: ${helper}`);
+    }
+    assert.doesNotMatch(instructions, /xvfb-run|优先 Noto Sans CJK SC，其次 WenQuanYi Zen Hei|使用 gnuplot 导出时/u);
+  }
+});
+
+test('native helper guidance preserves data contracts and reports unsupported plot families honestly', () => {
+  const instructions = matlabPlottingInstructions();
+  assert.match(instructions, /oi_plot_time_series\(axesHandle, data, options\)/u);
+  assert.match(instructions, /data 为 table\/timetable/u);
+  assert.match(instructions, /ValueVariables、ValueUnits、时区、QC 与不确定度语义/u);
+  assert.match(instructions, /保留观测值 NaN 缺口，输入时间不得 NaT，必须严格递增且唯一/u);
+  assert.doesNotMatch(instructions, /保留 NaN\/NaT 空档/u);
+  const timeSeriesAsset = readFileSync(new URL('oi_plot_time_series.m', matlabAssetDirectory), 'utf8');
+  assert.match(timeSeriesAsset, /~any\(isnat\(rowTimes\)\), "oi_plot_time_series:InvalidTime"/u);
+  assert.match(timeSeriesAsset, /assert\(all\(diff\(rowTimes\) > seconds\(0\)\), "oi_plot_time_series:TimeOrder"/u);
+  assert.match(instructions, /GapThreshold 明确分段/u);
+  assert.match(instructions, /当前服务器静态时间序列仍为内联 plot\/errorbar 路径/u);
+  assert.match(instructions, /未经声明不得自动重排字段列/u);
+  assert.match(instructions, /投影需求须核对产品、工具箱与 release/u);
+  assert.match(instructions, /plot\/scatter\/errorbar\/patch\/polaraxes/u);
+  assert.match(instructions, /needs-input、missing-toolbox 或相应不支持状态/u);
+  assert.match(instructions, /单图生成器收到多面板请求仍须拒绝/u);
+  assert.match(instructions, /不得臆造仓库 helper、模板或强行通过现有路由/u);
+  assert.match(instructions, /未明确的 3-D 不得路由到 surf/u);
+  assert.match(instructions, /使用原生 surf 并验证维度、坐标与单位/u);
+  const unsupported = matlabPlotRequestResolutionBlock({ runtime: 'matlab', question: 'taylor' });
+  assert.match(unsupported, /状态：invalid-plot-contract/u);
+  assert.doesNotMatch(unsupported, /function result =/u);
+});
+
+test('runtime selection keeps common scientific and interaction gates without foreign helper requirements', () => {
+  for (const runtime of ['matlab', 'octave']) {
+    const instructions = matlabPlottingInstructions({ runtime });
+    for (const term of ['requireScientificContract=true', 'shape', 'dimensionOrder', 'observationDimension',
+      'TimeZone', 'sourceUnit', 'targetUnit', 'formula', 'missing/invalid/suspect', 'uncertainty',
+      'requirePublicationContract=true', 'ObservationID', 'event.Target/DataIndex', '清理',
+      'mode="dual"', 'inspectMatlabPlotQuality', 'MATLAB_REQUEST_INVALID', 'needs-input']) {
+      assert.ok(instructions.includes(term), `${runtime} dropped gate: ${term}`);
+    }
+  }
+  const octave = matlabPlottingInstructions({ runtime: 'octave' });
+  assert.match(octave, /GNU Octave 是本规范的权威运行时/u);
+  assert.doesNotMatch(octave, /MATLAB 是本规范的权威运行时|interactive_timeseries_native_template\.m|oi_font_available|oi_plot_time_series\b/u);
+  assert.match(octave, /interaction、interactive、examples 和 tests/u);
+  assert.match(octave, /交互与静态导出保持双路径/u);
+  assert.match(octave, /静态结果不依赖点击、hover 或桌面回调/u);
 });
 
 test('builds deterministic default injection context without side effects', () => {
@@ -125,6 +201,19 @@ test('builds deterministic default injection context without side effects', () =
   assert.match(first, /MATLAB 智能选图与脚本生成路由/u);
   assert.match(first, /time\+depth 二维场→hovmoller/u);
   assert.equal(Object.keys(options).length, 0);
+});
+
+test('MATLAB injection reuses the single router instruction builder without a copied block', () => {
+  const routingBlock = matlabPlotRoutingInstructionBlock();
+  for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions(),
+    ...['R2021a', 'R2024b', 'R2026a'].map((matlabRelease) =>
+      matlabPlottingInstructions({ runtime: 'matlab', matlabRelease }))]) {
+    assert.equal(instructions.split(routingBlock).length - 1, 1);
+  }
+  assert.ok(!matlabPlottingInstructions({ runtime: 'octave' }).includes(routingBlock));
+  const consumerSource = readFileSync(new URL('./matlab-plotting-instructions.mjs', import.meta.url), 'utf8');
+  assert.match(consumerSource, /import \{ matlabPlotRoutingInstructionBlock, resolveMatlabPlotRequest \} from '\.\/matlab-plot-router\.mjs'/u);
+  assert.doesNotMatch(consumerSource, /MATLAB_ROUTING_INSTRUCTIONS|【MATLAB 智能选图与脚本生成路由】/u);
 });
 
 test('keeps rendered geometry and native array evidence distinct from visual approval', () => {
@@ -168,7 +257,19 @@ test('routes an explicit Octave context to Octave templates without changing MAT
   for (const runtime of ['octave', 'OCTAVE']) {
     const instructions = matlabPlottingInstructions({ runtime });
     assert.match(instructions, /优先模板目录：\.\/codex-runtime\/octave/u);
+    for (const helper of octaveOnlyHelpers) {
+      assert.ok(instructions.includes(helper), `Octave lost its existing helper advice: ${helper}`);
+    }
+    assert.match(instructions, /两个及以上面板优先调用 oi_panel_grid/u);
+    assert.match(instructions, /使用 gnuplot 导出时优先调用 oi_stable_legend/u);
+    assert.match(instructions, /内置 legend 对象在 PNG\/PDF 中丢失/u);
+    assert.match(instructions, /创建原始 figure 前调用 oi_configure_graphics/u);
+    assert.match(instructions, /优先调用 oi_resolve_font，并用 fc-match\/fc-list 验证字体/u);
+    assert.match(instructions, /时间序列优先调用 oi_plot_timeseries/u);
+    assert.match(instructions, /小范围经纬度标量场优先调用 oi_plot_geospatial_field/u);
     assert.match(instructions, /Octave 默认使用不可见 figure 和 Qt 工具包/u);
+    assert.match(instructions, /xvfb-run 执行 octave --no-gui --quiet/u);
+    assert.match(instructions, /不得静默切换到 gnuplot/u);
     assert.match(instructions, /优先 Noto Sans CJK SC，其次 WenQuanYi Zen Hei/u);
     assert.doesNotMatch(instructions, /MATLAB 仓库实跑约束/u);
     assert.doesNotMatch(instructions, /默认优先 WenQuanYi Zen Hei/u);
@@ -214,6 +315,27 @@ test('distinguishes general API availability from the repository exact export po
   assert.match(repositorySkill, /General `exportgraphics` is available from R2020a/u);
   assert.match(repositorySkill, /never silently retry with `print`/u);
   assert.match(repositorySkill, /actual per-figure, per-format `export_api` consistently with runtime evidence/u);
+  assert.match(repositorySkill, /`export_size_units`/u);
+});
+
+test('injects per-format native export units without claiming the PNG adjustment is verified', () => {
+  for (const instructions of [MATLAB_PLOTTING_INSTRUCTIONS, matlabPlottingInstructions(),
+    ...['R2021a', 'R2024b', 'R2026a'].map((matlabRelease) =>
+      matlabPlottingInstructions({ runtime: 'matlab', matlabRelease }))]) {
+    const repositoryBlock = instructions.slice(instructions.indexOf('【MATLAB 仓库实跑约束】'));
+    assert.match(repositoryBlock, /R2025a\+ 的 exact exportgraphics 按格式指定尺寸/u);
+    assert.match(repositoryBlock, /PNG 使用 Units="pixels"、整数 Width\/Height 和 Resolution=dpi/u);
+    assert.match(repositoryBlock, /PDF\/SVG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi/u);
+    assert.match(repositoryBlock, /两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
+    assert.match(repositoryBlock, /绘图前的 figure\/layout 仍保持最终 inches/u);
+    assert.match(repositoryBlock, /不能把原生 PNG 的尺寸参数误作屏幕画布单位/u);
+    assert.match(repositoryBlock, /runtime\.export_size_units 按实际路径记录：原生 PNG 为 pixels，print PNG 为 inches，PDF 及请求的 SVG 为 inches/u);
+    assert.match(repositoryBlock, /不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误/u);
+    assert.match(repositoryBlock, /本次 PNG 单位策略调整尚待 CI 验证，不得声称尺寸偏差已经修复/u);
+    assert.match(repositoryBlock, /必须重新检查真实 PNG 像素\/DPI、PDF 页尺寸及 SVG 几何，未验证项保持 unverified/u);
+    assert.doesNotMatch(instructions, /Width\/Height、Units inches|exact exportgraphics 显式传 Units="inches"/u);
+  }
+  assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /runtime\.export_size_units|本次 PNG 单位策略调整/u);
 });
 
 test('requires exact installed fonts without claiming PDF embedding or CJK readability', () => {

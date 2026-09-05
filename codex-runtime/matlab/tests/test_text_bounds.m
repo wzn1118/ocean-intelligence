@@ -149,21 +149,54 @@ renderEvidence = export_nested_evidence(figureHandle, axesHandle, artifactName, 
 drawnow;
 nativeExtent = double(xlabelHandle.Extent);
 nativeUnits = string(xlabelHandle.Units);
-axesPixels = double(getpixelposition(axesHandle, true));
-figurePixels = double(getpixelposition(figureHandle));
+nativeGeometry = nested_public_geometry(figureHandle, axesHandle);
+nativeGeometry.text_units = nativeUnits;
+nativeGeometry.text_extent = nativeExtent;
+renderEvidence.native_reference_geometry = nativeGeometry;
+write_evidence_json(renderEvidence.json_path, renderEvidence);
 assert(nativeUnits == "data" && axesHandle.XScale == "linear" ...
     && axesHandle.YScale == "linear" && axesHandle.XDir == "normal" ...
-    && axesHandle.YDir == "normal", "test_text_bounds:OriginalFixture", ...
-    "The original fixture must retain its linear data coordinates");
-dataScale = axesPixels(3:4) ./ [diff(axesHandle.XLim) diff(axesHandle.YLim)];
-nativeOrigin = axesPixels(1:2) - 1 ...
-    + (nativeExtent(1:2) - [axesHandle.XLim(1) axesHandle.YLim(1)]) .* dataScale;
+    && axesHandle.YDir == "normal" && axesHandle.DataAspectRatioMode == "auto" ...
+    && axesHandle.PlotBoxAspectRatioMode == "auto" && isequal(axesHandle.View, [0 90]), ...
+    "test_text_bounds:OriginalFixture", ...
+    "The original fixture must retain linear 2-D data coordinates without fixed aspect ratios; geometry=%s", ...
+    jsonencode(nativeGeometry));
+assert(nativeGeometry.axes.Units.succeeded && nativeGeometry.axes.Position.succeeded ...
+    && nativeGeometry.axes.getpixelposition_recursive.succeeded ...
+    && nativeGeometry.figure.getpixelposition.succeeded ...
+    && nativeGeometry.axes.XLim.succeeded && nativeGeometry.axes.YLim.succeeded ...
+    && string(nativeGeometry.axes.Units.value) == "pixels", ...
+    "test_text_bounds:OriginalFixture", ...
+    "The independent reference requires direct public axes Position in pixels; geometry=%s", ...
+    jsonencode(nativeGeometry));
+axesPosition = double(nativeGeometry.axes.Position.value);
+axesPixels = double(nativeGeometry.axes.getpixelposition_recursive.value);
+figurePixels = double(nativeGeometry.figure.getpixelposition.value);
+xLimits = double(nativeGeometry.axes.XLim.value);
+yLimits = double(nativeGeometry.axes.YLim.value);
+assert(numel(axesPosition) == 4 && all(isfinite(axesPosition)) ...
+    && all(axesPosition(3:4) > 0) && all(isfinite([xLimits yLimits])) ...
+    && diff(xLimits) > 0 && diff(yLimits) > 0, ...
+    "test_text_bounds:OriginalFixture", ...
+    "The independent reference requires finite axes dimensions and increasing limits; geometry=%s", ...
+    jsonencode(nativeGeometry));
+dataScale = axesPosition(3:4) ./ [diff(xLimits) diff(yLimits)];
+axesOriginInFigure = axesPixels(1:2) - 1;
+nativeOrigin = axesOriginInFigure ...
+    + (nativeExtent(1:2) - [xLimits(1) yLimits(1)]) .* dataScale;
 nativeSize = nativeExtent(3:4) .* dataScale;
 nativeBounds = [nativeOrigin nativeSize] ./ figurePixels([3 4 3 4]);
 
 [bounds, details] = measure_bounds(xlabelHandle, figureHandle, fontName + " original x label");
 evidence = jsondecode(details);
 evidence.font_listed = oi_font_available(fontName, string(listfonts));
+evidence.native_reference_geometry = nativeGeometry;
+evidence.public_geometry_after_measurement = nested_public_geometry(figureHandle, axesHandle);
+evidence.native_scale_source = "direct axes.Position(3:4) in pixels, not getpixelposition size or inferred text ratios";
+evidence.native_origin_reference = "getpixelposition(axes,true)(1:2) minus one: zero-based figure drawable canvas";
+evidence.native_axes_origin_in_figure_pixels = axesOriginInFigure;
+evidence.native_data_scale_pixels = dataScale;
+evidence.axes_size_minus_getpixelposition = axesPosition(3:4) - axesPixels(3:4);
 evidence.native_bounds = nativeBounds;
 evidence.native_size_pixels = nativeSize;
 evidence.horizontal_metrics_anomalous = nativeSize(1) <= nativeSize(2);
@@ -171,6 +204,8 @@ nativeClipped = nativeBounds(1) < 0 || nativeBounds(2) < 0 ...
     || nativeBounds(1) + nativeBounds(3) > 1 ...
     || nativeBounds(2) + nativeBounds(4) > 1;
 evidence.native_clipped = nativeClipped;
+errorPixels = abs(bounds - nativeBounds) .* figurePixels([3 4 3 4]);
+evidence.error_pixels = errorPixels;
 details = jsonencode(evidence);
 fprintf("MATLAB_ORIGINAL_NESTED_EVIDENCE=%s\n", details);
 renderEvidence.original_geometry_after_export = evidence;
@@ -179,9 +214,8 @@ assert(string(xlabelHandle.FontName) == fontName ...
     && string(xlabelHandle.Units) == nativeUnits, ...
     "test_text_bounds:OriginalMutation", ...
     "Measurement must preserve the selected font and original text units; geometry=%s", details);
-errorPixels = abs(bounds - nativeBounds) .* figurePixels([3 4 3 4]);
 assert(all(errorPixels <= 1e-6), "test_text_bounds:OriginalNativeGeometry", ...
-    "Pixel bounds must match the independently measured native data extent; error_pixels=%s; geometry=%s", ...
+    "Pixel bounds must match native data Extent scaled by direct public axes Position; error_pixels=%s; geometry=%s", ...
     mat2str(errorPixels, 17), details);
 if nativeClipped
     must_throw(@() assert_inside(bounds, "original x label", details), "UnexpectedClipping");
@@ -419,6 +453,7 @@ end
 
 function state = nested_text_state(figureHandle, axesHandle)
 state = struct();
+state.public_geometry = nested_public_geometry(figureHandle, axesHandle);
 [~, state.title] = oi_text_bounds(axesHandle.Title, figureHandle);
 [~, state.xlabel] = oi_text_bounds(axesHandle.XLabel, figureHandle);
 [~, state.ylabel] = oi_text_bounds(axesHandle.YLabel, figureHandle);
@@ -428,6 +463,28 @@ state.pixel_size_roles = ["title" "xlabel" "ylabel" "axes_text"];
 state.pixel_sizes = [state.title.pixel_extent(3:4); state.xlabel.pixel_extent(3:4); ...
     state.ylabel.pixel_extent(3:4); state.axes_text.pixel_extent(3:4)];
 state.all_pixel_sizes_equal = all(abs(state.pixel_sizes - state.pixel_sizes(1, :)) <= 1e-9, "all");
+end
+
+function state = nested_public_geometry(figureHandle, axesHandle)
+state = struct("position_reference", "raw public Position/InnerPosition in each object's recorded Units", ...
+    "axes_origin_reference", "recursive getpixelposition is figure-relative, not screen-relative", ...
+    "figure_origin_reference", "figure Position/getpixelposition origin is screen-relative and is not added to bounds");
+roles = ["figure" "axes" "parent"];
+handles = {figureHandle, axesHandle, axesHandle.Parent};
+for index = 1:numel(roles)
+    handle = handles{index};
+    record = struct("class", class(handle), "parent_class", class(handle.Parent));
+    for propertyName = ["Units" "Position" "InnerPosition"]
+        record.(char(propertyName)) = probe_public_api(@() get(handle, char(propertyName)));
+    end
+    record.getpixelposition = probe_public_api(@() getpixelposition(handle));
+    record.getpixelposition_recursive = probe_public_api(@() getpixelposition(handle, true));
+    state.(char(roles(index))) = record;
+end
+for propertyName = ["XLim" "YLim" "XScale" "YScale" "XDir" "YDir" ...
+        "DataAspectRatioMode" "PlotBoxAspectRatioMode" "View" "PositionConstraint"]
+    state.axes.(char(propertyName)) = probe_public_api(@() get(axesHandle, char(propertyName)));
+end
 end
 
 function record = export_diagnostic_crop(targetHandle, targetName, pngPath)

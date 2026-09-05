@@ -480,16 +480,17 @@ export function matlabPlotRoutingInstructionBlock() {
 - timetable/datetime 保持原生时间；时间必须非 NaT、严格递增且唯一，并标明 UTC 或来源时区。深度只有在非负且正向下时才设置 YDir='reverse'；压力不得无依据改称深度。
 - NaN 保留为线段或面域缺口，Inf 作为非法值拒绝；QC 必须明确 present/absent，存在时提供互斥且完整的 accepted/suspect/rejected 编码并按原样保留、分开统计。不得自动 fillmissing、smooth、sort、squeeze、transpose、插值或把缺测矢量分量置零。
 - 二维字段必须验证 Z 与坐标尺寸、规则/曲线/散点网格类型；只有规则等像素网格可直接 imagesc，断面优先 contourf，散点数据必须先获得明确插值方法和掩膜策略。
-- 生成脚本必须先通过任务层 MATLAB 可用性、目标 release、工具箱和输出格式预检，再消费 publicationContract 并复用路由给出的 helper/template；按声明的 cm/in 物理尺寸与 DPI 换算像素，使用显式 figure/layout/axes 句柄、声明字号线宽、带单位标签、drawnow、同一最终 figure 的 PNG/PDF 基线导出、可选 SVG 和可审计 manifest。单图生成器收到多面板契约时必须拒绝，不得只画第一个面板。
-- 本生成器固定调用 oi_export_figure 严格尺寸审计资产，并向任务预检声明 auditedFigureManifest：R2019b-R2024b 的 PNG/PDF/SVG 均使用明确声明的 print 回退（SVG 为 print -dsvg），因为旧版原生 tight 裁切不能保证指定像素和页尺寸；R2025a 起使用 exportgraphics 的 Width/Height、Units inches、Padding figure、PreserveAspectRatio on。R2020a-R2024b 仍有 exportgraphics，缺少的是严格尺寸参数；apiPlan.export 仅说明通用 API 可用性，实际目标策略见 apiPlan.exportFormats 与 headless.exportApis，不改写其他一般路由的通用能力。
+- 生成脚本必须先通过任务层 MATLAB 可用性、目标 release、工具箱和输出格式预检，再消费 publicationContract 并复用路由给出的真实 helper/template；按声明的 cm/in 物理尺寸与 DPI 换算像素，使用显式 figure/layout/axes 句柄、声明字号线宽、带单位标签、drawnow、同一最终 figure 的 PNG/PDF 基线导出、可选 SVG 和可审计 manifest。单图生成器收到多面板契约时必须拒绝，不得只画第一个面板。
+- 本生成器固定调用 oi_export_figure 严格尺寸审计资产，并向任务预检声明 auditedFigureManifest：R2019b-R2024b 的 PNG/PDF/SVG 均使用明确声明的 print 回退（SVG 为 print -dsvg），因为旧版原生 tight 裁切不能保证指定像素和页尺寸；R2025a 起使用 exportgraphics，PNG 使用 Units="pixels"、整数 Width/Height 和 Resolution=dpi，PDF/SVG 使用 Units="inches"、Width=widthPixels/dpi、Height=heightPixels/dpi；两类均保留 Padding="figure" 和 PreserveAspectRatio="on"。R2020a-R2024b 仍有 exportgraphics，缺少的是严格尺寸参数；apiPlan.export 仅说明通用 API 可用性，实际目标策略见 apiPlan.exportFormats 与 headless.exportApis，不改写其他一般路由的通用能力。
+- 绘图前的 figure/layout 仍按像素/DPI 设置最终 inches，不把屏幕像素作为输出尺寸。runtime.export_size_units 按实际路径记录：原生 PNG 为 pixels，print PNG 为 inches，PDF 及请求的 SVG 为 inches。不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误；本次 PNG 单位策略调整尚待 CI 验证，不得声称尺寸偏差已经修复。
 - headless.exportApi 与逐格式 headless.exportApis 必须匹配所选审计路径，不得静默改声明或换格式。exportgraphics 的 exist(file) 返回 2/3/6（含 P-code）或 exist(builtin) 返回 5 均可调用；实际调用路径由资产探测并写入 runtime.export_api，目标策略不能冒充运行证据。脚本必须拒绝旧于 R2019b 的 arguments-based 资产，并在 MATLAB 内核验实际版本和所需工具箱许可证。
-- 中文标题或标签必须通过 MATLAB listfonts 按声明候选链选择 CJK 字体，普通文本使用 Interpreter='none'；无字体时明确失败。运行时字体存在和最终 PNG/PDF 字形、PDF 嵌入是不同证据，未检查产物时必须记录 not-verified。
+- 中文标题或标签使用 oi_font_available，依据 listfonts 或 fc-list 精确安装证据按声明候选链选择 CJK 字体，普通文本使用 Interpreter='none'；无字体时明确失败。运行时字体存在和最终 PNG/PDF 字形、PDF 嵌入是不同证据，未检查产物时必须记录 not-verified。
 - 字段必须显式声明 sequential/diverging 色彩语义和 colorLimits；发散色图还须声明 colorReference，并让色限关于该参考对称。禁止 jet/hsv/rainbow；等值线、标记、线型、误差棒或几何方向提供冗余编码，灰度和色觉模拟仍须以最终产物验证。
-- 导出前必须在最终尺寸 drawnow，再用 TightInset/Position 检查边界；该运行时检查不得冒充 PNG/PDF 裁剪、重叠、中文字形、灰度、色觉或字体嵌入验收。
+- 导出前在最终物理尺寸 drawnow，结合源图实测边界与导出器几何证据检查布局，保留未测覆盖；该运行时检查不得冒充 PNG/PDF 裁剪、重叠、中文字形、灰度、色觉或字体嵌入验收。
 - interactive 生成必须区分 auto/desktop/headless：desktop 显式要求不可静默降级，auto 无桌面时输出同科学内容的静态图，headless 强制关闭交互；静态 fallback 必须记录 interaction_verified=false。
 - 中英文科学问题和坐标名称仅按内置白名单归一化；未知名称、伪布尔坐标、空维名、非安全整数维度和三坐标立方体必须拒绝，立方体须先显式切片或约简。
 - 未知科学问题、冲突坐标、未声明单位/时区/垂向类型/不确定度类型/二维维度顺序时不得猜测；路由必须返回 unresolvedRequirements，脚本生成器必须拒绝继续。
-- 未明确的 3-D 不得路由到 surf；只有科学问题明确要求表面几何时才使用 surface_3d_native_template.m。`;
+- 未明确的 3-D 不得路由到 surf；科学问题确需表面几何时使用原生 surf 并验证维度、坐标与单位，不声称仓库已有 3D 模板。`;
 }
 
 function normalizeSpec(input) {

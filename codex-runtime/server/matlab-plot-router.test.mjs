@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -214,10 +214,11 @@ test('routing instruction block documents deterministic priority and prohibited 
   const block = matlabPlotRoutingInstructionBlock();
   assert.match(block, /显式科学问题 > 坐标组合 > 数据类型\/维数/u);
   assert.match(block, /time\+depth 二维场→hovmoller/u);
+  assert.match(block, /时间必须非 NaT、严格递增且唯一/u);
   assert.match(block, /不得自动 fillmissing、smooth、sort、squeeze、transpose/u);
   assert.match(block, /R2019b-R2024b 的 PNG\/PDF\/SVG.*print 回退/u);
   assert.match(block, /R2020a-R2024b 仍有 exportgraphics/u);
-  assert.match(block, /Width\/Height、Units inches、Padding figure、PreserveAspectRatio on/u);
+  assert.match(block, /R2025a 起使用 exportgraphics/u);
   assert.match(block, /2\/3\/6（含 P-code）/u);
   assert.doesNotMatch(block, /R2020a 起使用 exportgraphics/u);
   assert.match(block, /工具箱许可证/u);
@@ -225,6 +226,40 @@ test('routing instruction block documents deterministic priority and prohibited 
   assert.match(block, /三坐标立方体必须拒绝/u);
   assert.match(block, /未明确的 3-D 不得路由到 surf/u);
   assert.match(block, /unresolvedRequirements/u);
+});
+
+test('routing instruction builder recommends only real MATLAB assets and native surface geometry', () => {
+  const block = matlabPlotRoutingInstructionBlock();
+  const assets = readdirSync(new URL('../matlab/assets/', import.meta.url))
+    .filter((filename) => filename.endsWith('.m'));
+  for (const helper of new Set(block.match(/\boi_[a-z0-9_]+\b/gu))) {
+    assert.ok(assets.includes(`${helper}.m`), `No MATLAB helper asset: ${helper}`);
+  }
+  for (const template of new Set(block.match(/\b[A-Za-z][A-Za-z0-9_]*\.m\b/gu))) {
+    assert.ok(assets.includes(template), `No MATLAB template asset: ${template}`);
+  }
+  assert.match(block, /oi_font_available/u);
+  assert.match(block, /listfonts 或 fc-list 精确安装证据按声明候选链/u);
+  assert.match(block, /普通文本使用 Interpreter='none'；无字体时明确失败/u);
+  assert.match(block, /字体存在和最终 PNG\/PDF 字形、PDF 嵌入是不同证据/u);
+  assert.match(block, /科学问题确需表面几何时使用原生 surf 并验证维度、坐标与单位/u);
+  assert.match(block, /不声称仓库已有 3D 模板/u);
+  assert.doesNotMatch(block, /surface_3d_native_template|oi_resolve_font|oi_configure_graphics|oi_plot_timeseries/u);
+});
+
+test('routing instructions separate native raster pixels from vector inches and unverified rendering', () => {
+  const block = matlabPlotRoutingInstructionBlock();
+  assert.match(block, /PNG 使用 Units="pixels"、整数 Width\/Height 和 Resolution=dpi/u);
+  assert.match(block, /PDF\/SVG 使用 Units="inches"、Width=widthPixels\/dpi、Height=heightPixels\/dpi/u);
+  assert.match(block, /两类均保留 Padding="figure" 和 PreserveAspectRatio="on"/u);
+  assert.match(block, /绘图前的 figure\/layout 仍按像素\/DPI 设置最终 inches，不把屏幕像素作为输出尺寸/u);
+  assert.match(block, /runtime\.export_size_units 按实际路径记录：原生 PNG 为 pixels，print PNG 为 inches，PDF 及请求的 SVG 为 inches/u);
+  assert.match(block, /不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误/u);
+  assert.match(block, /本次 PNG 单位策略调整尚待 CI 验证，不得声称尺寸偏差已经修复/u);
+  assert.match(block, /目标策略不能冒充运行证据/u);
+  assert.match(block, /结合源图实测边界与导出器几何证据检查布局，保留未测覆盖/u);
+  assert.match(block, /不得冒充 PNG\/PDF 裁剪、重叠、中文字形、灰度、色觉或字体嵌入验收/u);
+  assert.doesNotMatch(block, /Width\/Height、Units inches/u);
 });
 
 test('returns unresolved metadata instead of inventing units, timezone or missingness', () => {
@@ -1193,6 +1228,13 @@ test('audited export metadata matches asset exact geometry and callable P-code p
   assert.match(asset, /exist\('exportgraphics', 'builtin'\) == 5/u);
   assert.match(asset, /"Units", "inches", "Width", widthInches, "Height", heightInches/u);
   assert.match(asset, /"Padding", "figure", "PreserveAspectRatio", "on"/u);
+  assert.match(asset, /exportgraphics\(figureHandle, pngPath, "Units", "pixels", \.\.\.\s+"Width", widthPixels, "Height", heightPixels, "Resolution", dpi, \.\.\.\s+"Padding", "figure", "PreserveAspectRatio", "on"/u);
+  assert.match(asset, /exportgraphics\(figureHandle, pdfPath, geometryArgs\{:\}, "ContentType", "vector"\)/u);
+  assert.match(asset, /exportgraphics\(figureHandle, svgPath, geometryArgs\{:\}\)/u);
+  assert.match(asset, /pngApi = "exportgraphics";\s+pngSizeUnits = "pixels";\s+else\s+pngApi = "print";\s+pngSizeUnits = "inches";/u);
+  assert.match(asset, /"export_size_units", struct\("png", pngSizeUnits, "pdf", "inches"\)/u);
+  assert.match(asset, /if svgRequested\s+evidence\.export_size_units\.svg = "inches";/u);
+  assert.doesNotMatch(asset, /exportgraphics\(figureHandle, pngPath, geometryArgs|\bimresize\s*\(/u);
   assert.match(asset, /export_fallback_reason = "exact sizing parameters require MATLAB R2025a"/u);
 });
 

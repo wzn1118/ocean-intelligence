@@ -34,7 +34,7 @@ General `exportgraphics` is available from R2020a. This API availability does no
 | R2019b-R2024b | print -dpng | print -dpdf | print -dsvg |
 | R2025a+ | exact exportgraphics | exact exportgraphics | exact exportgraphics |
 
-Legacy `print` is an explicit preselected strategy, not a retry after failure. Exact `exportgraphics` uses `Units="inches"`, `Width`, `Height`, `Padding="figure"`, and `PreserveAspectRatio="on"`. Preserve export errors and stop; never silently retry with `print`. Record the actual per-figure, per-format `export_api` consistently with runtime evidence; a selected strategy is not proof of execution. These repository constraints take precedence over generic API recommendations in the capability matrix.
+Legacy `print` is an explicit preselected strategy, not a retry after failure. Exact `exportgraphics` requests PNG with `Units="pixels"`, integer `Width`/`Height`, and `Resolution`; PDF/SVG use `Units="inches"` with the corresponding physical `Width`/`Height`. Both keep `Padding="figure"` and `PreserveAspectRatio="on"`. The PNG pixel path avoids a fractional-inch request; verify its actual pixels and embedded DPI in the target release, without resizing the artifact afterward. Preserve export errors and stop; never silently retry with `print`. Record the actual per-figure, per-format `export_api` consistently with runtime evidence, together with the corresponding `export_size_units`; a selected strategy is not proof of execution. These repository constraints take precedence over generic API recommendations in the capability matrix.
 
 Use these terminal states exactly:
 

@@ -81,6 +81,16 @@ with actual display and screen DPI recorded. This changes the R2026a environment
 not the artifacts or acceptance rules; it is not an all-figure visual approval.
 The two older primary jobs remain no-display. Desktop interaction stays unverified.
 
+Run 33989846546 passed all twelve external evaluator artifact checks on R2026a
+under that display setup, including PDF text and font checks. This is not a
+manual visual approval. Native raster output still failed exact dimensions in
+two other suites. The exporter now requests integer pixel dimensions for PNG
+and inches for PDF/SVG, recording `runtime.export_size_units` per format. The
+publication suite exercises 400x300 at 150 DPI, 1200x675 at 180 DPI, and 997x613
+at 300 DPI, with actual dimensions and embedded DPI checked before promotion.
+These sizing changes still require a new licensed MATLAB run; no resampling or
+relaxed geometry tolerance is used.
+
 ## Commands
 
 ```bash

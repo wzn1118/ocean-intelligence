@@ -115,7 +115,48 @@ assert_throws(@() oi_write_manifest(invalidHashPath, invalidHashEntry), "HashMis
 assert(~isfile(invalidHashPath), ...
     "full100_export_contracts:TamperedManifest", ...
     "Hash-mismatched evidence must not produce a manifest");
+test_raster_dimensions(outputDirectory, theme);
 fprintf("MATLAB_FULL100_EXPORT_CONTRACTS=passed\n");
+end
+
+function test_raster_dimensions(outputDirectory, theme)
+sizes = [400 300 150; 1200 675 180; 997 613 300];
+for caseIndex = 1:size(sizes, 1)
+    width = sizes(caseIndex, 1);
+    height = sizes(caseIndex, 2);
+    dpi = sizes(caseIndex, 3);
+    figureHandle = oi_figure(width, height, "off");
+    figureCleanup = onCleanup(@() close_if_valid(figureHandle));
+    figureHandle.Units = "inches";
+    figureHandle.Position(3:4) = [width height] / dpi;
+    axesHandle = axes("Parent", figureHandle, "Units", "normalized", ...
+        "PositionConstraint", "outerposition", "OuterPosition", [0.05 0.05 0.9 0.9]);
+    plot(axesHandle, [1 2 3], [1 3 2]);
+    xlabel(axesHandle, "Time (s)", "Interpreter", "none");
+    ylabel(axesHandle, "Value (1)", "Interpreter", "none");
+    title(axesHandle, "Raster sizing", "Interpreter", "none");
+    oi_apply_axes(axesHandle, theme);
+    caseDirectory = fullfile(outputDirectory, "raster-" + string(width) + "-" + string(height));
+    entry = oi_export_figure(figureHandle, caseDirectory, "raster-sizing", ...
+        width, height, dpi, "Title", "Raster sizing", ...
+        "Source", "Native raster dimension contract", "Theme", theme.Name, "ExportSVG", true);
+    assert(entry.exports.png.width == width && entry.exports.png.height == height ...
+        && abs(entry.exports.png.embedded_dpi_x - dpi) <= 0.6 ...
+        && abs(entry.exports.png.embedded_dpi_y - dpi) <= 0.6, ...
+        "full100_export_contracts:RasterDimensions", ...
+        "Native output must preserve exact raster pixels and embedded DPI");
+    expectedUnits = "inches";
+    if ~verLessThan('matlab', '25.1')
+        expectedUnits = "pixels";
+    end
+    assert(entry.runtime.export_size_units.png == expectedUnits ...
+        && entry.runtime.export_size_units.pdf == "inches" ...
+        && entry.runtime.export_size_units.svg == "inches", ...
+        "full100_export_contracts:SizeUnits", "Record each format's actual native sizing units");
+    oi_write_manifest(fullfile(caseDirectory, "figures.json"), entry);
+    fprintf("MATLAB_RASTER_DIMENSIONS=%s\n", jsonencode(entry.exports));
+    clear figureCleanup;
+end
 end
 
 function assert_export_api(entry, format, allowedApis)
