@@ -197,6 +197,21 @@ class RuntimeBundle:
         (self.root / "figures.json").write_text(json.dumps(self.manifest), encoding="utf-8")
         (self.root / "matlab-runtime.json").write_text(json.dumps(self.runtime), encoding="utf-8")
 
+    def capture_input_fixtures(self, fixture_directory: Path = ocean_report.DEFAULT_FIXTURE_DIRECTORY) -> None:
+        (self.root / "fixture-inputs").mkdir()
+        inputs = []
+        for identifier, source_file in ocean_report.EXPECTED_FIXTURES.items():
+            content = (fixture_directory / source_file).read_bytes()
+            relative = f"fixture-inputs/{source_file}"
+            with (self.root / relative).open("xb") as handle:
+                handle.write(content)
+            inputs.append({
+                "id": identifier, "file": relative, "source_file": source_file,
+                "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest(),
+            })
+        self.runtime["input_fixtures"] = inputs
+        self.write_metadata()
+
 
 class OceanReportTests(unittest.TestCase):
     def fixture_payload(self, identifier: str) -> dict[str, object]:
@@ -399,6 +414,241 @@ class OceanReportTests(unittest.TestCase):
             self.assertEqual(evidence["runtime_fixture_binding"]["status"], "unverified")
             self.assertIn("运行时数值快照一致性未验证", (root / "report.md").read_text(encoding="utf-8"))
 
+    def test_new_binding_verifies_all_inputs_and_uses_bundle_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            bundle.runtime["input_fixtures"].reverse()
+            bundle.write_metadata()
+            before = {item["file"]: (root / item["file"]).read_bytes() for item in bundle.runtime["input_fixtures"]}
+
+            ocean_report.build_ocean_report(root)
+
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            self.assertEqual(evidence["runtime_fixture_binding"]["status"], "verified")
+            self.assertEqual(evidence["runtime_fixture_binding"]["fixture_count"], 3)
+            inputs = {item["id"]: item for item in evidence["runtime_evidence"]["input_fixtures"]}
+            for fixture in evidence["fixtures"]:
+                snapshot = inputs[fixture["id"]]
+                self.assertEqual(fixture["reference_file"], snapshot["file"])
+                self.assertEqual(fixture["sha256"], snapshot["sha256"])
+                self.assertEqual(fixture["bytes"], snapshot["bytes"])
+            for figure in evidence["runtime_evidence"]["figures"]:
+                binding = figure["fixture_binding"]
+                self.assertTrue(binding["runtime_fixture_hash_verified"])
+                self.assertEqual(binding["fixture_file"], inputs[binding["fixture_id"]]["file"])
+                self.assertEqual(figure["scientific_context"]["fixture_file"], binding["fixture_file"])
+                self.assertEqual(binding["limitations"], "")
+                self.assertEqual(figure["scientific_data"]["qc"]["plot_filtering"], "not_verified")
+                self.assertEqual(figure["scientific_data"]["uncertainty"]["plot_display"], "not_verified")
+            report = (root / "report.md").read_text(encoding="utf-8")
+            for reference in evidence["references"][:3]:
+                self.assertTrue(reference["file"].startswith("fixture-inputs/"))
+                self.assertEqual(reference["sha256"], sha256(root / reference["file"]))
+                self.assertIn(reference["file"], report)
+            self.assertIn("输入字节绑定已验证", report)
+            self.assertIn("源 fixture 元数据存在", report)
+            self.assertIn("未提供模式不确定度", report)
+            self.assertNotIn("运行记录没有 fixture 内容哈希", report)
+            self.assertNotIn("运行清单缺少输入哈希", report)
+            self.assertNotIn(ocean_report.FIXTURE_BINDING_LIMITATION, json.dumps(evidence))
+            self.assertEqual(before, {name: (root / name).read_bytes() for name in before})
+
+    def test_new_binding_rejects_same_shape_same_size_numeric_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            fixture_dir = root / "fixtures"
+            shutil.copytree(ocean_report.DEFAULT_FIXTURE_DIRECTORY, fixture_dir)
+            bundle.capture_input_fixtures(fixture_dir)
+            fixture_path = fixture_dir / "crossed_time_depth_temperature.json"
+            original = fixture_path.read_bytes()
+            changed = original.replace(b"18.15", b"19.15", 1)
+            self.assertNotEqual(changed, original)
+            self.assertEqual(len(changed), len(original))
+            fixture_path.write_bytes(changed)
+            fixtures, contexts = ocean_report.load_fixture_statistics(fixture_dir)
+            self.assertEqual(contexts["crossed-time-depth-temperature"]["shape"], [4, 6])
+            self.assertEqual(fixtures[0]["counts"], {"raw_count": 24, "valid_count": 23, "missing_count": 1})
+            self.assertAlmostEqual(fixtures[0]["statistics"]["mean"], 360.794 / 23)
+            with self.assertRaisesRegex(ocean_report.ReportBuildError, "differs from local statistics input"):
+                ocean_report.build_ocean_report(root, fixture_dir)
+            self.assertFalse((root / "report.md").exists())
+            self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_new_binding_requires_byte_identity_not_only_equal_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            fixture_dir = root / "fixtures"
+            shutil.copytree(ocean_report.DEFAULT_FIXTURE_DIRECTORY, fixture_dir)
+            bundle.capture_input_fixtures(fixture_dir)
+            fixture_path = fixture_dir / "paired_observation_model.json"
+            original = fixture_path.read_bytes()
+            fixture_path.write_bytes(original + b"\n")
+            self.assertEqual(json.loads(original), json.loads(fixture_path.read_bytes()))
+            with self.assertRaisesRegex(ocean_report.ReportBuildError, "differs from local statistics input"):
+                ocean_report.build_ocean_report(root, fixture_dir)
+
+    def test_present_input_fixtures_cannot_fall_back_to_legacy(self) -> None:
+        for invalid in (None, [], {}, "not-records", [None] * 3):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.runtime["input_fixtures"] = invalid
+                bundle.write_metadata()
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, "runtime.input_fixtures"):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_new_binding_requires_exactly_three_distinct_ids(self) -> None:
+        for change in ("duplicate", "missing", "extra", "unknown"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                inputs = bundle.runtime["input_fixtures"]
+                if change == "duplicate":
+                    inputs[1] = dict(inputs[0])
+                elif change == "missing":
+                    inputs.pop()
+                elif change == "extra":
+                    inputs.append(dict(inputs[0]))
+                else:
+                    inputs[0]["id"] = "unknown-fixture"
+                bundle.write_metadata()
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, "runtime.input_fixtures"):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+
+    def test_new_binding_strict_record_fields_paths_hashes_and_sizes(self) -> None:
+        mutations = [
+            ("id", None), ("id", []), ("source_file", "paired_observation_model.json"),
+            ("source_file", "../crossed_time_depth_temperature.json"),
+            ("file", "crossed_time_depth_temperature.json"),
+            ("file", "fixture-inputs/../crossed_time_depth_temperature.json"),
+            ("file", "fixture-inputs/./crossed_time_depth_temperature.json"),
+            ("file", "/fixture-inputs/crossed_time_depth_temperature.json"),
+            ("file", "fixture-inputs\\crossed_time_depth_temperature.json"),
+            ("file", " fixture-inputs/crossed_time_depth_temperature.json"),
+            ("bytes", 0), ("bytes", -1), ("bytes", True), ("bytes", 1.5), ("bytes", "100"),
+            ("bytes", 1), ("sha256", "0" * 64), ("sha256", "f" * 63),
+            ("sha256", "g" * 64), ("sha256", None), ("extra_field", True),
+        ]
+        for field, value in mutations:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                bundle.runtime["input_fixtures"][0][field] = value
+                bundle.write_metadata()
+                with self.assertRaises(ocean_report.ReportBuildError):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+
+    def test_new_binding_rejects_missing_snapshot_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            (root / bundle.runtime["input_fixtures"][0]["file"]).unlink()
+            with self.assertRaisesRegex(ocean_report.ReportBuildError, "fixture input snapshot missing"):
+                ocean_report.build_ocean_report(root)
+            self.assertFalse((root / "report.md").exists())
+            self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_new_binding_rejects_tampered_snapshot_even_with_updated_record(self) -> None:
+        for update_record in (False, True):
+            with self.subTest(update_record=update_record), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                item = bundle.runtime["input_fixtures"][0]
+                path = root / item["file"]
+                original = path.read_bytes()
+                tampered = original.replace(b"18.15", b"19.15", 1)
+                self.assertNotEqual(tampered, original)
+                self.assertEqual(len(tampered), len(original))
+                path.write_bytes(tampered)
+                if update_record:
+                    item["sha256"] = sha256(path)
+                    bundle.write_metadata()
+                message = "differs from local statistics input" if update_record else "snapshot bytes/sha256 mismatch"
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, message):
+                    ocean_report.build_ocean_report(root)
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_new_binding_rejects_snapshot_file_and_parent_symlinks(self) -> None:
+        for link_parent in (False, True):
+            with self.subTest(link_parent=link_parent), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                if link_parent:
+                    path = root / "fixture-inputs"
+                    target = root / "renamed-inputs"
+                    path.rename(target)
+                    path.symlink_to(target, target_is_directory=True)
+                else:
+                    item = bundle.runtime["input_fixtures"][0]
+                    path = root / item["file"]
+                    path.unlink()
+                    path.symlink_to(ocean_report.DEFAULT_FIXTURE_DIRECTORY / item["source_file"])
+                with self.assertRaisesRegex(ocean_report.ReportBuildError, "symlink artifact path"):
+                    ocean_report.build_ocean_report(root)
+
+    def test_used_snapshot_is_rechecked_before_output_write(self) -> None:
+        for mutation in ("bytes", "missing", "symlink"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bundle = RuntimeBundle(root)
+                bundle.capture_input_fixtures()
+                item = bundle.runtime["input_fixtures"][0]
+                original_render = ocean_report.render_report
+                def change_after_render(evidence):
+                    report = original_render(evidence)
+                    path = root / item["file"]
+                    if mutation == "bytes":
+                        path.write_bytes(path.read_bytes().replace(b"18.15", b"19.15", 1))
+                    else:
+                        path.unlink()
+                        if mutation == "symlink":
+                            path.symlink_to(ocean_report.DEFAULT_FIXTURE_DIRECTORY / item["source_file"])
+                    return report
+                with mock.patch.object(ocean_report, "render_report", side_effect=change_after_render):
+                    with mock.patch.object(ocean_report, "write_outputs") as writer:
+                        with self.assertRaises(ocean_report.ReportBuildError):
+                            ocean_report.build_ocean_report(root)
+                        writer.assert_not_called()
+                self.assertFalse((root / "report.md").exists())
+                self.assertFalse((root / "report-evidence.json").exists())
+
+    def test_legacy_runtime_with_unrecorded_copies_remains_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
+            del bundle.runtime["input_fixtures"]
+            bundle.write_metadata()
+            ocean_report.build_ocean_report(root)
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            self.assertEqual(evidence["runtime_fixture_binding"], {
+                "status": "unverified", "reason": ocean_report.FIXTURE_BINDING_LIMITATION,
+            })
+            self.assertEqual(evidence["runtime_evidence"]["input_fixtures"], [])
+            self.assertIn(ocean_report.FIXTURE_BINDING_LIMITATION, evidence["limitations"])
+            for figure in evidence["runtime_evidence"]["figures"]:
+                self.assertFalse(figure["fixture_binding"]["runtime_fixture_hash_verified"])
+            for reference in evidence["references"][:3]:
+                self.assertFalse(reference["file"].startswith("fixture-inputs/"))
+            report = (root / "report.md").read_text(encoding="utf-8")
+            self.assertIn("运行时数值快照一致性未验证", report)
+            self.assertIn("运行清单缺少输入哈希", report)
+            self.assertNotIn("输入字节绑定已验证", report)
+
     def test_input_change_during_generation_rejects_mixed_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -490,7 +740,8 @@ class OceanReportTests(unittest.TestCase):
     def test_cli_writes_the_two_contract_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            RuntimeBundle(root)
+            bundle = RuntimeBundle(root)
+            bundle.capture_input_fixtures()
             process = subprocess.run(
                 [
                     sys.executable,
@@ -510,6 +761,8 @@ class OceanReportTests(unittest.TestCase):
             self.assertEqual(payload["status"], "passed")
             self.assertTrue((root / "report.md").is_file())
             self.assertTrue((root / "report-evidence.json").is_file())
+            evidence = json.loads((root / "report-evidence.json").read_bytes())
+            self.assertEqual(evidence["runtime_fixture_binding"]["status"], "verified")
 
     def test_missing_artifact_fails_without_writing_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

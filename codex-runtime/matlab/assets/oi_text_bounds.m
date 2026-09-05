@@ -22,6 +22,9 @@ assert(isprop(textHandle, "Units") && isprop(textHandle, "Extent"), ...
     "oi_text_bounds:UnsupportedText", ...
     "textHandle must expose Units and Extent properties");
 
+if nargout > 1
+    entryState = text_state(textHandle);
+end
 drawnow;
 assert(isgraphics(textHandle, "text") && isgraphics(figureHandle, "figure"), ...
     "oi_text_bounds:DeletedGraphics", ...
@@ -32,13 +35,15 @@ validate_pixel_rectangle(figurePixels, "figure");
 
 originalUnits = textHandle.Units;
 if nargout > 1
-    originalPosition = double(textHandle.Position);
-    originalExtent = double(textHandle.Extent);
+    sourceState = text_state(textHandle);
+    originalPosition = sourceState.position;
+    originalExtent = sourceState.extent;
 end
 unitsCleanup = onCleanup(@() restore_units(textHandle, originalUnits));
 textHandle.Units = "pixels";
 if nargout > 1
-    positionPixelsBeforeDraw = double(textHandle.Position);
+    pixelsBeforeDraw = text_state(textHandle);
+    positionPixelsBeforeDraw = pixelsBeforeDraw.position;
 end
 drawnow;
 assert(isgraphics(textHandle, "text"), "oi_text_bounds:DeletedGraphics", ...
@@ -46,7 +51,8 @@ assert(isgraphics(textHandle, "text"), "oi_text_bounds:DeletedGraphics", ...
 
 extentPixels = double(textHandle.Extent);
 if nargout > 1
-    positionPixels = double(textHandle.Position);
+    pixelsAfterDraw = text_state(textHandle);
+    positionPixels = pixelsAfterDraw.position;
 end
 validate_pixel_rectangle(extentPixels, "text extent");
 parentPixels = parent_pixel_position(textHandle.Parent, figureHandle, figurePixels);
@@ -66,6 +72,7 @@ if nargout > 1
         "parent_pixels", parentPixels, "source_units", char(originalUnits), ...
         "source_position", originalPosition, "source_extent", originalExtent, ...
         "pixel_position_before_draw", positionPixelsBeforeDraw, ...
+        "pixel_extent_before_draw", pixelsBeforeDraw.extent, ...
         "pixel_position", positionPixels, "pixel_extent", extentPixels, ...
         "bounds", bounds, "font_name", char(textHandle.FontName), ...
         "font_size", double(textHandle.FontSize), ...
@@ -76,9 +83,40 @@ if nargout > 1
         "vertical_alignment", char(textHandle.VerticalAlignment), ...
         "screen_pixels_per_inch", double(get(groot, "ScreenPixelsPerInch")), ...
         "renderer", char(figureHandle.Renderer));
+    diagnostics.string_value = sourceState.string_value;
+    diagnostics.string_class = sourceState.string_class;
+    diagnostics.string_size = sourceState.string_size;
+    diagnostics.position_mode = sourceState.position_mode;
+    diagnostics.entry_state = entryState;
+    diagnostics.source_state = sourceState;
+    diagnostics.pixels_before_draw = pixelsBeforeDraw;
+    diagnostics.pixels_after_draw = pixelsAfterDraw;
 end
 
 clear unitsCleanup;
+if nargout > 1
+    diagnostics.restored_state = text_state(textHandle);
+end
+end
+
+function state = text_state(textHandle)
+state = struct();
+state.units = char(textHandle.Units);
+state.string_value = textHandle.String;
+state.string_class = class(state.string_value);
+state.string_size = size(state.string_value);
+state.string_lengths = strlength(string(state.string_value));
+state.position_mode = "unavailable";
+if isprop(textHandle, "PositionMode")
+    try
+        state.position_mode = char(get(textHandle, "PositionMode"));
+    catch errorDetails
+        state.position_mode_error = errorDetails.message;
+    end
+end
+state.position = double(textHandle.Position);
+state.extent = double(textHandle.Extent);
+state.position_after_extent_read = double(textHandle.Position);
 end
 
 function pixels = parent_pixel_position(parentHandle, figureHandle, figurePixels)

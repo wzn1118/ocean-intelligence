@@ -57,6 +57,41 @@ test('runtime service reports exact MATLAB validation requirements without accep
   assert.ok(rejected.runtimeReport.failures.some((failure) => /Octave|octave/u.test(failure.reason)));
 });
 
+test('runtime service declares the audited generator dependency before preflight without changing general exports', () => {
+  for (const [targetRelease, expectedApi] of [['R2021a', 'print'], ['R2024b', 'print'], ['R2026a', 'exportgraphics']]) {
+    const input = {
+      runtime: 'matlab', targetRelease, matlabAvailable: true,
+      requestedCapabilities: ['tiledlayout', 'exportgraphics'], outputFormats: ['png', 'pdf', 'svg'],
+    };
+    const generic = routeMatlabRuntimeRequest(input);
+    assert.equal(generic.status, 'ready');
+    assert.equal(generic.outputContract.exportStrategies.png.api, 'exportgraphics');
+    assert.equal(generic.outputContract.exportStrategies.png.asset, undefined);
+
+    const audited = routeMatlabRuntimeRequest({
+      ...input,
+      plotInput: {
+        question: 'profile', dimensions: [12], dimensionOrder: ['depth'], coordinates: ['depth'],
+        verticalCoordinate: 'depth', verticalPositive: 'down', verticalReference: 'mean sea level',
+        missing: false, qcStatus: 'absent', units: { depth: 'm', value: 'degC' },
+        quantities: { depth: 'Depth', value: 'Temperature' }, title: 'Profile', source: 'verified fixture',
+        assetDirectory: 'codex-runtime/matlab/assets',
+      },
+    });
+    assert.equal(audited.status, 'ready', audited.error?.reason);
+    assert.equal(audited.runtimeReport.status, 'ready-for-runtime-validation');
+    assert.equal(audited.taskRoute.capabilities.capabilities.auditedFigureManifest.status, 'native');
+    assert.equal(audited.taskRoute.capabilities.capabilities.exportgraphics.status, 'native');
+    for (const format of input.outputFormats) {
+      assert.equal(audited.outputContract.exportStrategies[format].api, expectedApi);
+      assert.equal(audited.outputContract.exportStrategies[format].asset, 'oi_export_figure');
+      assert.equal(audited.plotRoute.publicationPolicy.headless.exportApis[format], expectedApi);
+    }
+    assert.match(audited.script, /exportEntry = oi_export_figure\(/u);
+    assert.deepEqual(input.requestedCapabilities, ['tiledlayout', 'exportgraphics']);
+  }
+});
+
 test('runtime service blocks invalid production releases instead of silently falling back', () => {
   const route = routeMatlabRuntimeRequest({
     runtime: 'matlab', taskType: 'export', targetRelease: 'R2024b', productionRelease: 'R2099a',

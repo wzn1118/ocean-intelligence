@@ -12,6 +12,7 @@ import {
   matlabTaskRoutingInstructionBlock,
   routeMatlabTask,
 } from './matlab-task-routing-contract.mjs';
+import { selectMatlabExportStrategy } from './matlab-release-capabilities.mjs';
 
 test('routes explicit MATLAB-first tasks with release, toolbox and output contracts', () => {
   const route = routeMatlabTask({
@@ -147,6 +148,112 @@ test('requires per-format export APIs when a release mixes exportgraphics and pr
   });
   assert.equal(invalid.status, 'needs-input');
   assert.ok(invalid.unresolvedRequirements.includes('publicationContract.headless.exportApis.svg matching target release (print)'));
+});
+
+for (const [targetRelease, exportApi, generalStatus] of [
+  ['R2019b', 'print', 'fallback'],
+  ['R2020a', 'print', 'native'],
+  ['R2021a', 'print', 'native'],
+  ['R2024b', 'print', 'native'],
+  ['R2025a', 'exportgraphics', 'native'],
+  ['R2026a', 'exportgraphics', 'native'],
+]) {
+  test(`${targetRelease} explicitly requested audited manifest uses exact-size ${exportApi} through preflight`, () => {
+    const publicationContract = completePublicationContract('static');
+    publicationContract.target.formats = ['png', 'pdf', 'svg'];
+    publicationContract.localization.glyphFormats = ['png', 'pdf', 'svg'];
+    publicationContract.headless.exportApi = exportApi;
+    publicationContract.headless.exportApis = { png: exportApi, pdf: exportApi, svg: exportApi };
+    const route = routeMatlabTask({
+      runtime: 'matlab', targetRelease, matlabAvailable: true,
+      requestedCapabilities: ['auditedFigureManifest', 'exportgraphics'],
+      manifestContract: { required: true }, outputFormats: ['png', 'pdf', 'svg'], publicationContract,
+    });
+    assert.equal(route.status, 'ready', route.error?.reason);
+    assert.equal(route.capabilities.capabilities.exportgraphics.status, generalStatus);
+    assert.deepEqual(route.publicationContract.headless.exportApis, { png: exportApi, pdf: exportApi, svg: exportApi });
+    for (const format of ['png', 'pdf', 'svg']) {
+      const plan = route.outputContract.exportStrategies[format];
+      assert.equal(plan.api, exportApi);
+      assert.equal(plan.asset, 'oi_export_figure');
+      assert.equal(plan.exactSizingRequired, true);
+      assert.equal(route.capabilities.exportFormats[format].api, plan.api);
+      if (exportApi === 'print') {
+        assert.equal(plan.status, 'fallback');
+        assert.equal(plan.strategy, 'explicit-fallback');
+        assert.match(plan.reason, /explicit figure and paper geometry/u);
+        if (generalStatus === 'native') {
+          assert.match(plan.reason, /exportgraphics exists/u);
+          assert.doesNotMatch(plan.reason, /unavailable/u);
+        }
+      } else {
+        assert.equal(plan.status, 'preferred');
+        assert.match(plan.syntax, /'Units','inches','Width',widthPixels\/dpi,'Height',heightPixels\/dpi/u);
+        assert.match(plan.syntax, /'Padding','figure','PreserveAspectRatio','on'/u);
+      }
+    }
+    assert.equal(selectMatlabExportStrategy(targetRelease, 'png').api,
+      generalStatus === 'native' ? 'exportgraphics' : 'print');
+    delete publicationContract.headless.exportApi;
+    const perFormatOnly = routeMatlabTask({
+      targetRelease, requestedCapabilities: ['auditedFigureManifest'],
+      outputFormats: ['png', 'pdf', 'svg'], publicationContract,
+    });
+    assert.equal(perFormatOnly.status, 'ready', perFormatOnly.error?.reason);
+  });
+}
+
+test('manifest requirement and physical sizing alone preserve general routing and do not authorize legacy print', () => {
+  for (const targetRelease of ['R2021a', 'R2024b']) {
+    const publicationContract = completePublicationContract('static');
+    const input = { runtime: 'matlab', targetRelease, matlabAvailable: true,
+      manifestRequired: true, publicationContract };
+    const general = routeMatlabTask(input);
+    assert.equal(general.status, 'ready');
+    assert.equal(general.outputContract.exportStrategies.png.api, 'exportgraphics');
+    assert.equal(general.outputContract.exportStrategies.png.asset, undefined);
+    publicationContract.headless.exportApi = 'print';
+    const undeclaredFallback = routeMatlabTask(input);
+    assert.equal(undeclaredFallback.status, 'needs-input');
+    assert.ok(undeclaredFallback.unresolvedRequirements.includes(
+      'publicationContract.headless.exportApi matching target release (exportgraphics)',
+    ));
+  }
+});
+
+test('audited preflight rejects missing, conflicting and release-mismatched headless API declarations', () => {
+  for (const [targetRelease, expectedApi, wrongApi] of [
+    ['R2021a', 'print', 'exportgraphics'], ['R2024b', 'print', 'exportgraphics'],
+    ['R2026a', 'exportgraphics', 'print'],
+  ]) {
+    for (const headlessOverrides of [
+      { exportApi: wrongApi },
+      { exportApis: { png: wrongApi, pdf: expectedApi, svg: expectedApi } },
+      { exportApis: { png: expectedApi, pdf: expectedApi } },
+      { exportApi: '', exportApis: {} },
+      { exportApi: 'saveas' },
+    ]) {
+      const publicationContract = completePublicationContract('static');
+      publicationContract.target.formats = ['png', 'pdf', 'svg'];
+      publicationContract.localization.glyphFormats = ['png', 'pdf', 'svg'];
+      Object.assign(publicationContract.headless, { exportApi: expectedApi,
+        exportApis: { png: expectedApi, pdf: expectedApi, svg: expectedApi } }, headlessOverrides);
+      const route = routeMatlabTask({ runtime: 'matlab', targetRelease,
+        requestedCapabilities: ['auditedFigureManifest'], outputFormats: ['png', 'pdf', 'svg'], publicationContract });
+      assert.equal(route.status, 'needs-input', JSON.stringify({ targetRelease, headlessOverrides }));
+      assert.match(route.unresolvedRequirements.join('\n'), /publicationContract\.headless\.exportApi/u);
+    }
+  }
+});
+
+test('audited selection cannot opt out of its native manifest and PNG/PDF evidence', () => {
+  for (const override of [{ manifestRequired: false }, { manifestContract: { required: false } }, { outputFormats: ['png'] }]) {
+    const input = { targetRelease: 'R2024b', ...override };
+    assert.equal(routeMatlabTask(input).status, 'ready');
+    const audited = routeMatlabTask({ ...input, requestedCapabilities: ['auditedFigureManifest'] });
+    assert.equal(audited.status, 'needs-input');
+    assert.match(audited.unresolvedRequirements.join('\n'), /manifest.required true|must include png and pdf/u);
+  }
 });
 
 test('normalizes and gates the schema-version-2 artifact manifest contract', () => {

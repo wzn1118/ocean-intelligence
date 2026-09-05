@@ -822,7 +822,7 @@ margins(margins < 0 & margins >= -tolerance) = 0;
 end
 
 function tolerance = layout_tolerance()
-tolerance = 0.02;
+tolerance = 1e-9;
 end
 
 function altText = make_alt_text(titleText, axesEvidence)

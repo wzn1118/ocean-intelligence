@@ -45,11 +45,18 @@ P-code (`exist(..., 'file') == 6`) is a callable API, not a missing function.
 Exact dimensions do not establish PDF font embedding or visual fidelity.
 
 The report checks local fixture units, coordinate order, missing/QC counts,
-paired statistics and artifact snapshots independently. Its current runtime
-record binds fixture IDs, not input content hashes; the report states that
-limitation and does not claim to prove which numerical input snapshot MATLAB
-consumed. Source QC and uncertainty presence is not a claim that every plot
-filtered or displayed those fields.
+paired statistics and artifact snapshots independently. MATLAB preserves the
+consumed bytes in `evaluator-runtime/fixture-inputs/` and records their names,
+sizes and SHA-256 hashes in `matlab-runtime.json`. The evaluator requires those
+fresh snapshots to match the frozen source fixtures. The report also checks
+them before claiming input binding; older bundles without snapshots remain
+explicitly unverified. Source QC and uncertainty presence is not a claim that
+every plot filtered or displayed those fields.
+
+The independent `font-export-probe` stage compares up to five installed font
+candidates through `print` PDF, `exportgraphics` vector PDF and `print` PNG.
+Its JSON proves only export completion and file identity. Font embedding and
+CJK/layout quality must still be checked in the resulting artifacts.
 
 For local automated artifact inspection, install the pinned Python packages in
 `codex-runtime/matlab/evals/requirements.txt` and the `poppler-utils` system

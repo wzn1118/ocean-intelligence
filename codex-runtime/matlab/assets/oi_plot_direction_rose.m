@@ -190,7 +190,13 @@ if isa(parent, "matlab.graphics.layout.TiledChartLayout")
         polarAxes.Layout.Tile = tile;
     end
 else
-    polarAxes = polaraxes("Parent", parent, "Position", position);
+    polarAxes = polaraxes("Parent", parent, "Units", axesHandle.Units);
+    if isprop(polarAxes, "PositionConstraint") && isprop(polarAxes, "OuterPosition")
+        polarAxes.PositionConstraint = "outerposition";
+        polarAxes.OuterPosition = axesHandle.OuterPosition;
+    else
+        polarAxes.Position = position;
+    end
     set(axesHandle, "Visible", "off", "HandleVisibility", "off", "HitTest", "off");
     setappdata(axesHandle, "OI_ReplacementAxes", polarAxes);
 end

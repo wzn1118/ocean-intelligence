@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -27,6 +28,11 @@ MATLAB_GATE_PATH = EVAL_ROOT / "run_matlab_gate.m"
 FREEZE_PATH = FRAMEWORK_ROOT / "SOURCE_SHA256SUMS.txt"
 FREEZE_ROOTS = (FRAMEWORK_ROOT, EVAL_ROOT)
 REQUIRED_QC = {"good", "suspect", "missing"}
+EXPECTED_INPUT_FIXTURES = {
+    "crossed-time-depth-temperature": "crossed_time_depth_temperature.json",
+    "repeat-cast-salinity-profiles": "repeat_cast_salinity_profiles.json",
+    "paired-observation-model": "paired_observation_model.json",
+}
 MATLAB_STATIC_TOKENS = (
     "jsondecode",
     "datetime",
@@ -390,6 +396,82 @@ def validate_runtime_releases(runtime_record: dict[str, Any], manifest: Any) -> 
             )
 
 
+def read_input_fixture(path: Path, started_ns: int | None = None) -> tuple[bytes, os.stat_result]:
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+            raise EvaluationError(f"nonempty regular input fixture required (no symlinks): {path}")
+        if started_ns is not None and before.st_mtime_ns < started_ns:
+            raise EvaluationError(f"stale input fixture snapshot: {path}")
+        content = path.read_bytes()
+        after = path.lstat()
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ) or len(content) != before.st_size:
+            raise EvaluationError(f"input fixture changed during inspection: {path}")
+    except OSError as error:
+        raise EvaluationError(f"cannot read input fixture {path}: {error}") from error
+    return content, after
+
+
+def validate_runtime_input_fixtures(
+    output_root: Path, runtime_record: dict[str, Any], started_ns: int,
+) -> list[dict[str, Any]]:
+    records = runtime_record.get("input_fixtures")
+    if not isinstance(records, list) or len(records) != len(EXPECTED_INPUT_FIXTURES):
+        raise EvaluationError("runtime.input_fixtures must contain exactly three input snapshots")
+    fixture_ids = runtime_record.get("fixture_ids")
+    if (not isinstance(fixture_ids, list) or len(fixture_ids) != len(EXPECTED_INPUT_FIXTURES)
+            or not all(isinstance(identifier, str) for identifier in fixture_ids)
+            or set(fixture_ids) != set(EXPECTED_INPUT_FIXTURES)):
+        raise EvaluationError("runtime.fixture_ids must contain the three expected unique fixture ids")
+    root = output_root.resolve()
+    snapshot_directory = root / "fixture-inputs"
+    if snapshot_directory.is_symlink() or not snapshot_directory.is_dir():
+        raise EvaluationError("fixture-inputs must be a real directory, not a symlink")
+    if FIXTURE_ROOT.is_symlink() or not FIXTURE_ROOT.is_dir():
+        raise EvaluationError("frozen fixture inputs must reside in a real directory, not a symlink")
+    checked: list[dict[str, Any]] = []
+    identifiers: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise EvaluationError("runtime.input_fixtures entries must be objects")
+        identifier = record.get("id")
+        if not isinstance(identifier, str) or identifier not in EXPECTED_INPUT_FIXTURES or identifier in identifiers:
+            raise EvaluationError(f"unknown or duplicate input fixture id: {identifier!r}")
+        identifiers.add(identifier)
+        source_file = EXPECTED_INPUT_FIXTURES[identifier]
+        relative = f"fixture-inputs/{source_file}"
+        if record.get("source_file") != source_file:
+            raise EvaluationError(f"input fixture source_file mismatch for {identifier}")
+        if record.get("file") != relative:
+            raise EvaluationError(f"unsafe or mismatched input fixture snapshot path for {identifier}: {record.get('file')!r}")
+        snapshot = snapshot_directory / source_file
+        if snapshot.is_symlink() or not snapshot.resolve().is_relative_to(root):
+            raise EvaluationError(f"input fixture snapshot must stay within the output root without symlinks: {relative}")
+        content, info = read_input_fixture(snapshot, started_ns)
+        actual_hash = hashlib.sha256(content).hexdigest()
+        if (type(record.get("bytes")) is not int or record["bytes"] != len(content)
+                or not isinstance(record.get("sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None
+                or record["sha256"] != actual_hash):
+            raise EvaluationError(f"input fixture snapshot byte/hash mismatch: {relative}")
+        source_content, _ = read_input_fixture(FIXTURE_ROOT / source_file)
+        source_hash = hashlib.sha256(source_content).hexdigest()
+        if actual_hash != source_hash or content != source_content:
+            raise EvaluationError(f"input fixture snapshot differs from frozen fixture input: {source_file}")
+        try:
+            source_payload = json.loads(source_content)
+        except (ValueError, UnicodeError) as error:
+            raise EvaluationError(f"invalid frozen fixture JSON: {source_file}") from error
+        if not isinstance(source_payload, dict) or source_payload.get("id") != identifier:
+            raise EvaluationError(f"frozen fixture id does not match input snapshot record: {source_file}")
+        checked.append({"id": identifier, "file": relative, "source_file": source_file,
+                        "bytes": len(content), "sha256": actual_hash, "source_sha256": source_hash,
+                        "mtime_ns": info.st_mtime_ns, "started_ns": started_ns, "status": "passed"})
+    return sorted(checked, key=lambda item: item["id"])
+
+
 def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> dict[str, Any]:
     runtime_record = load_json(output_root / "matlab-runtime.json")
     if not isinstance(runtime_record, dict) or runtime_record.get("nonce") != nonce:
@@ -399,6 +481,7 @@ def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> d
     require_text(runtime_record.get("matlab_version"), "runtime.matlab_version")
     manifest = load_json(output_root / "figures.json")
     validate_runtime_releases(runtime_record, manifest)
+    input_fixtures = validate_runtime_input_fixtures(output_root, runtime_record, started_ns)
     exports = collect_manifest_exports(manifest)
     checked: list[dict[str, Any]] = []
     for export in exports:
@@ -421,7 +504,10 @@ def validate_runtime_output(output_root: Path, nonce: str, started_ns: int) -> d
                 raise EvaluationError(f"PNG dimension mismatch: {relative}")
             item.update(width=width, height=height)
         checked.append(item)
-    return {"status": "passed", "record": runtime_record, "artifacts": checked, "manifest_sha256": sha256(output_root / "figures.json")}
+    if validate_runtime_input_fixtures(output_root, runtime_record, started_ns) != input_fixtures:
+        raise EvaluationError("input fixture snapshots changed during artifact validation")
+    return {"status": "passed", "record": runtime_record, "input_fixtures": input_fixtures,
+            "artifacts": checked, "manifest_sha256": sha256(output_root / "figures.json")}
 
 
 def validate_visual_audit(path: Path | None, runtime: dict[str, Any]) -> dict[str, Any]:

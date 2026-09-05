@@ -1,6 +1,7 @@
 function test_asset_contracts()
 %TEST_ASSET_CONTRACTS Run focused MATLAB-native contract and lifecycle checks.
 theme = oi_ocean_theme();
+test_small_clipping_rejected(theme);
 assert(oi_get_option(struct("Value", 4), "Value", 0) == 4, ...
     "oi_get_option did not return a present value");
 
@@ -597,6 +598,36 @@ function assert_close(actual, expected, message)
 tolerance = 1e-8 * max([1 abs(actual) abs(expected)]);
 assert(isfinite(actual) && isfinite(expected) && abs(actual - expected) <= tolerance, ...
     "test_asset_contracts:GeometryMismatch", "%s", message);
+end
+
+function test_small_clipping_rejected(theme)
+output_directory = string(tempname);
+mkdir(output_directory);
+cleanup_directory = onCleanup(@() remove_directory(output_directory));
+figure_handle = oi_figure(2400, 1500, "off");
+cleanup_figure = onCleanup(@() close_if_valid(figure_handle));
+figure_handle.Units = "inches";
+figure_handle.Position(3:4) = [8 5];
+axes_handle = axes("Parent", figure_handle, "Units", "normalized", ...
+    "Position", [0.1 0.15 0.8 0.65]);
+plot(axes_handle, [0 1], [0 1]);
+title(axes_handle, "Small clipping regression", "Interpreter", "none");
+oi_apply_axes(axes_handle, theme);
+text_handle = text(axes_handle, -0.13125, 0.5, "Clipped left edge", ...
+    "Units", "normalized", "HorizontalAlignment", "left", ...
+    "FontName", theme.FontName, "FontSize", 10, "Interpreter", "none");
+drawnow;
+bounds = oi_text_bounds(text_handle, figure_handle);
+assert(bounds(1) < -0.001 && bounds(1) > -0.02, ...
+    "The negative fixture must have a real sub-two-percent left overhang: %s", ...
+    mat2str(bounds, 17));
+must_throw(@() oi_export_figure(figure_handle, output_directory, "small-clipping", ...
+    2400, 1500, 300, "Title", "Small clipping regression", ...
+    "Source", "MATLAB clipping contract", "Theme", theme.Name), "ClippedContent");
+assert(~isfile(fullfile(output_directory, "small-clipping.png")) ...
+    && ~isfile(fullfile(output_directory, "small-clipping.pdf")), ...
+    "Clipped artifacts must not be promoted as verified exports");
+clear cleanup_figure cleanup_directory;
 end
 
 function [figure_handle, axes_handle] = make_axes()

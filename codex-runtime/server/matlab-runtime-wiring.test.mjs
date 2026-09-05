@@ -100,7 +100,7 @@ test('end-to-end contract reaches template, release matrix and quality gate', ()
   const route = routeMatlabRuntimeRequest({
     runtime: 'matlab', taskType: 'create', targetRelease: 'R2024b', matlabAvailable: true,
     requireScientificContract: true, requirePublicationContract: true,
-    publicationContract: completePublicationContract('static'),
+    publicationContract: completePublicationContract('static', 'print'),
     requestedCapabilities: ['tiledlayout', 'exportgraphics'], outputFormats: ['png', 'pdf'],
     plotInput: {
       question: 'profile', dimensions: [30], coordinates: ['depth'], missing: false, qcStatus: 'absent',
@@ -114,6 +114,8 @@ test('end-to-end contract reaches template, release matrix and quality gate', ()
   assert.equal(route.status, 'ready');
   assert.equal(route.plotRoute.template, 'oi_plot_profile.m');
   assert.equal(route.taskRoute.capabilities.capabilities.tiledlayout.status, 'native');
+  assert.equal(route.taskRoute.capabilities.capabilities.exportgraphics.status, 'native');
+  assert.equal(route.taskRoute.capabilities.capabilities.auditedFigureManifest.status, 'native');
   assert.equal(route.plotRoute.apiPlan.layout.api, 'tiledlayout');
   assert.equal(route.qualityGate.requiredBoolean, 'plotQualityScoreOk');
   assert.equal(route.scientificDataContract.required, true);
@@ -126,7 +128,9 @@ test('end-to-end contract reaches template, release matrix and quality gate', ()
   assert.equal(route.qualityGate.preflightContract, 'publicationContract');
   assert.equal(route.outputContract.manifest.schemaVersion, 2);
   assert.equal(route.outputContract.manifest.path, 'figures.json');
-  assert.equal(route.outputContract.exportStrategies.png.api, 'exportgraphics');
+  assert.equal(route.outputContract.exportStrategies.png.api, 'print');
+  assert.equal(route.outputContract.exportStrategies.pdf.api, 'print');
+  assert.equal(route.outputContract.exportStrategies.png.asset, 'oi_export_figure');
   assert.match(route.script, /exportEntry\.scientific_data_contract = scientificDataContract/u);
 });
 
@@ -170,7 +174,7 @@ test('runtime composition forwards interactive tasks into the native data-tip te
   const route = routeMatlabRuntimeRequest({
     runtime: 'matlab', taskType: 'interactive', targetRelease: 'R2024b', matlabAvailable: true,
     requireScientificContract: true, requirePublicationContract: true,
-    publicationContract: completePublicationContract('dual'),
+    publicationContract: completePublicationContract('dual', 'print'),
     requestedCapabilities: ['tiledlayout', 'exportgraphics'], outputFormats: ['png', 'pdf'],
     plotInput: {
       question: 'trend', dimensions: [12], dimensionOrder: ['time'], observationDimension: 'time',
@@ -188,6 +192,11 @@ test('runtime composition forwards interactive tasks into the native data-tip te
   });
   assert.equal(route.status, 'ready');
   assert.equal(route.plotRoute.template, 'interactive_timeseries_native_template.m');
+  assert.equal(route.taskRoute.capabilities.capabilities.exportgraphics.status, 'native');
+  assert.equal(route.taskRoute.capabilities.capabilities.auditedFigureManifest.status, 'native');
+  assert.equal(route.outputContract.exportStrategies.png.api, 'print');
+  assert.equal(route.outputContract.exportStrategies.pdf.api, 'print');
+  assert.equal(route.publicationContract.headless.exportApi, 'print');
   assert.equal(route.taskRoute.scientificDataContract.required, true);
   assert.deepEqual(route.scientificDataContract.unresolvedRequirements, []);
   assert.equal(route.publicationContract.interaction.mode, 'dual');
@@ -278,36 +287,59 @@ test('serves the composed MATLAB route through the signed runtime HTTP endpoint'
       'x-ocean-codex-timestamp': timestamp,
       'x-ocean-codex-signature': signature,
     };
+    const request = {
+      runtime: 'matlab', targetRelease: 'R2024b', matlabAvailable: true,
+      requireScientificContract: true, requirePublicationContract: true,
+      publicationContract: completePublicationContract('static', 'print'),
+      requestedCapabilities: ['tiledlayout'],
+      plotInput: {
+        question: 'profile', dimensions: [12], coordinates: ['depth'], missing: false, qcStatus: 'absent',
+        dimensionOrder: ['depth'], observationDimension: 'depth', qcStatus: 'absent', uncertaintyStatus: 'absent',
+        verticalCoordinate: 'depth', verticalPositive: 'down', verticalReference: 'mean sea level',
+        title: 'Temperature profile', source: 'test fixture',
+        assetDirectory: 'codex-runtime/matlab/assets',
+        units: { depth: 'm', value: 'degC' }, quantities: { depth: 'Depth', value: 'Temperature' },
+      },
+    };
     const response = await fetch(`http://127.0.0.1:${port}/api/codex-runtime/matlab/route`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        runtime: 'matlab', targetRelease: 'R2024b', matlabAvailable: true,
-        requireScientificContract: true, requirePublicationContract: true,
-        publicationContract: completePublicationContract('static'),
-        requestedCapabilities: ['tiledlayout'],
-        plotInput: {
-          question: 'profile', dimensions: [12], coordinates: ['depth'], missing: false, qcStatus: 'absent',
-          dimensionOrder: ['depth'], observationDimension: 'depth', qcStatus: 'absent', uncertaintyStatus: 'absent',
-          verticalCoordinate: 'depth', verticalPositive: 'down', verticalReference: 'mean sea level',
-          title: 'Temperature profile', source: 'test fixture',
-          assetDirectory: 'codex-runtime/matlab/assets',
-          units: { depth: 'm', value: 'degC' }, quantities: { depth: 'Depth', value: 'Temperature' },
-        },
-      }),
+      body: JSON.stringify(request),
     });
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.status, 'ready');
     assert.equal(body.plotRoute.template, 'oi_plot_profile.m');
     assert.equal(body.taskRoute.capabilities.capabilities.tiledlayout.status, 'native');
+    assert.equal(body.taskRoute.capabilities.capabilities.auditedFigureManifest.status, 'native');
+    assert.equal(body.plotRoute.apiPlan.export.status, 'native');
     assert.equal(body.qualityGate.evaluator, 'inspectMatlabPlotQuality');
     assert.equal(body.scientificDataContract.required, true);
     assert.deepEqual(body.scientificDataContract.unresolvedRequirements, []);
     assert.equal(body.publicationContract.required, true);
     assert.deepEqual(body.publicationContract.unresolvedRequirements, []);
     assert.equal(body.outputContract.manifest.schemaVersion, 2);
-    assert.equal(body.outputContract.exportStrategies.pdf.api, 'exportgraphics');
+    assert.equal(body.outputContract.exportStrategies.png.api, 'print');
+    assert.equal(body.outputContract.exportStrategies.pdf.api, 'print');
+    assert.equal(body.outputContract.exportStrategies.pdf.asset, 'oi_export_figure');
+    assert.equal(body.outputContract.exportStrategies.pdf.exactSizingRequired, true);
+    assert.equal(body.publicationContract.headless.exportApi, 'print');
+    assert.equal(body.runtimeReport.status, 'ready-for-runtime-validation');
+    assert.match(body.script, /release-aware APIs: png=print, pdf=print/u);
+
+    const mismatchedRequest = structuredClone(request);
+    mismatchedRequest.publicationContract.headless.exportApi = 'exportgraphics';
+    const mismatchedResponse = await fetch(`http://127.0.0.1:${port}/api/codex-runtime/matlab/route`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(mismatchedRequest),
+    });
+    assert.equal(mismatchedResponse.status, 200);
+    const mismatchedBody = await mismatchedResponse.json();
+    assert.equal(mismatchedBody.status, 'needs-input');
+    assert.equal(mismatchedBody.script, null);
+    assert.equal(mismatchedBody.error.code, 'MATLAB_NEEDS_INPUT');
+    assert.match(mismatchedBody.error.reason, /headless.exportApi matching target release \(print\)/u);
 
     const malformedResponse = await fetch(`http://127.0.0.1:${port}/api/codex-runtime/matlab/route`, {
       method: 'POST',
@@ -388,7 +420,7 @@ function waitForStartup(child) {
   });
 }
 
-function completePublicationContract(interactionMode) {
+function completePublicationContract(interactionMode, exportApi = 'exportgraphics') {
   return {
     target: { medium: 'journal', width: 18, height: 12, units: 'cm', dpi: 300, formats: ['png', 'pdf'] },
     layout: {
@@ -417,7 +449,7 @@ function completePublicationContract(interactionMode) {
     },
     headless: {
       supported: true, command: 'matlab -batch', figureVisible: 'off',
-      exportApi: 'exportgraphics', desktopIndependent: true,
+      exportApi, desktopIndependent: true,
     },
   };
 }

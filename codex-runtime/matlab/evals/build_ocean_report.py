@@ -375,6 +375,46 @@ def verify_scientific_contract(figure: dict[str, Any], expected: dict[str, Any])
     }
 
 
+def validate_input_fixtures(
+    runtime_root: Path, runtime: dict[str, Any], figure_contexts: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    if "input_fixtures" not in runtime:
+        return {}
+    inputs = runtime["input_fixtures"]
+    if not isinstance(inputs, list) or len(inputs) != len(EXPECTED_FIXTURES):
+        raise ReportBuildError("runtime.input_fixtures must contain exactly three fixture records")
+    verified: dict[str, dict[str, Any]] = {}
+    for item in inputs:
+        if not isinstance(item, dict) or set(item) != {"id", "file", "source_file", "bytes", "sha256"}:
+            raise ReportBuildError("runtime.input_fixtures record fields must be id/file/source_file/bytes/sha256")
+        identifier = item["id"]
+        if not isinstance(identifier, str) or identifier not in EXPECTED_FIXTURES or identifier in verified:
+            raise ReportBuildError("runtime.input_fixtures contains an unknown or duplicate fixture id")
+        source_file = EXPECTED_FIXTURES[identifier]
+        expected_file = f"fixture-inputs/{source_file}"
+        if item["source_file"] != source_file or item["file"] != expected_file:
+            raise ReportBuildError(f"runtime.input_fixtures path/source_file mismatch for {identifier}")
+        relative, snapshot_path = safe_artifact_path(runtime_root, item["file"], "runtime.input_fixtures.file")
+        byte_count = require_nonnegative_integer(item["bytes"], "runtime.input_fixtures.bytes")
+        if byte_count == 0:
+            raise ReportBuildError("runtime.input_fixtures.bytes must be positive")
+        digest = item["sha256"]
+        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+            raise ReportBuildError("runtime.input_fixtures.sha256 must contain 64 lowercase hexadecimal characters")
+        require_regular_file(snapshot_path, "fixture input snapshot")
+        content = snapshot_path.read_bytes()
+        if len(content) != byte_count or sha256_bytes(content) != digest:
+            raise ReportBuildError(f"fixture input snapshot bytes/sha256 mismatch: {relative}")
+        local = figure_contexts[identifier]
+        if byte_count != local["fixture_bytes"] or digest != local["fixture_sha256"]:
+            raise ReportBuildError(f"runtime fixture input differs from local statistics input: {identifier}")
+        verified[identifier] = {
+            "id": identifier, "file": relative, "source_file": source_file,
+            "bytes": byte_count, "sha256": digest,
+        }
+    return verified
+
+
 def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[str, Any]]) -> dict[str, Any]:
     if runtime_root.is_symlink() or not runtime_root.is_dir():
         raise ReportBuildError(f"runtime output directory is missing or unsafe: {runtime_root}")
@@ -403,6 +443,7 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
     if (not isinstance(fixture_ids, list) or not all(isinstance(identifier, str) for identifier in fixture_ids)
             or len(fixture_ids) != len(EXPECTED_FIXTURES) or set(fixture_ids) != set(EXPECTED_FIXTURES)):
         raise ReportBuildError("runtime.fixture_ids do not match the run_matlab_gate fixtures")
+    input_fixtures = validate_input_fixtures(runtime_root, runtime, figure_contexts)
     interaction = runtime.get("interaction")
     if not isinstance(interaction, dict) or any(
         interaction.get(field) is not True
@@ -443,6 +484,9 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
     seen_paths: set[str] = set()
     for figure in figures:
         figure_id = figure["id"]
+        context = figure_contexts[figure_id]
+        fixture_input = input_fixtures.get(context["fixture_id"])
+        fixture_file = fixture_input["file"] if fixture_input else context["fixture_file"]
         title = require_text(figure.get("title"), f"figure {figure_id}.title")
         if title != figure_contexts[figure_id]["title"]:
             raise ReportBuildError(f"figure {figure_id} title differs from fixture selection")
@@ -477,15 +521,15 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
                 "source": source,
                 "scientific_data": scientific,
                 "fixture_binding": {
-                    "fixture_id": figure_contexts[figure_id]["fixture_id"],
-                    "fixture_file": figure_contexts[figure_id]["fixture_file"],
-                    "fixture_sha256": figure_contexts[figure_id]["fixture_sha256"],
-                    "selection": figure_contexts[figure_id]["selection"],
+                    "fixture_id": context["fixture_id"],
+                    "fixture_file": fixture_file,
+                    "fixture_sha256": context["fixture_sha256"],
+                    "selection": context["selection"],
                     "metadata_match": True,
-                    "runtime_fixture_hash_verified": False,
-                    "limitations": FIXTURE_BINDING_LIMITATION,
+                    "runtime_fixture_hash_verified": fixture_input is not None,
+                    "limitations": "" if fixture_input else FIXTURE_BINDING_LIMITATION,
                 },
-                "scientific_context": figure_contexts[figure_id],
+                "scientific_context": {**context, "fixture_file": fixture_file},
                 "exports": checked_exports,
             }
         )
@@ -496,6 +540,12 @@ def validate_runtime_bundle(runtime_root: Path, figure_contexts: dict[str, dict[
         "manifest_generated_at": manifest_generated_at.isoformat().replace("+00:00", "Z"),
         "manifest_file": {"file": "figures.json", **manifest_snapshot},
         "runtime_file": {"file": "matlab-runtime.json", **runtime_snapshot},
+        "input_fixtures": [input_fixtures[identifier] for identifier in sorted(input_fixtures)],
+        "runtime_fixture_binding": (
+            {"status": "verified", "method": "runtime_snapshot_sha256_and_bytes_match_local_statistics_inputs",
+             "fixture_count": len(input_fixtures)}
+            if input_fixtures else {"status": "unverified", "reason": FIXTURE_BINDING_LIMITATION}
+        ),
         "figures": figure_evidence,
         "artifacts": artifacts,
     }
@@ -829,6 +879,7 @@ def load_fixture_statistics(fixture_directory: Path) -> tuple[list[dict[str, Any
     for summary in summaries:
         figure_contexts[summary["id"]] = {
             "fixture_id": summary["id"], "fixture_file": summary["file"], "fixture_sha256": summary["sha256"],
+            "fixture_bytes": summary["bytes"],
             "title": summary["title"], "variable": summary["variable"], "unit": summary["unit"],
             "shape": summary["shape"], "dimension_order": summary["dimension_order"],
             "time": summary["time"], "coordinates": summary["coordinates"],
@@ -876,6 +927,7 @@ def render_report(evidence: dict[str, Any]) -> str:
     fixtures = {item["id"]: item for item in evidence["fixtures"]}
     paired = fixtures["paired-observation-model"]
     runtime = evidence["runtime_evidence"]
+    binding_verified = evidence["runtime_fixture_binding"]["status"] == "verified"
     lines = [
         "# MATLAB 海洋合成基准证据报告",
         "",
@@ -889,7 +941,9 @@ def render_report(evidence: dict[str, Any]) -> str:
         "- 水平坐标：经度与纬度均未提供，状态为 `not_provided`。",
         f"- 运行证据：{runtime['runtime']} {runtime['matlab_release']}；`figures.json` 记录执行已验证和产物校验通过。",
         "- 验证边界：未执行桌面人工验证，未执行人工视觉检查，不形成任何评分或生产验收结论。",
-        "- 输入绑定：运行记录没有 fixture 内容哈希或实际坐标值。图与本地 fixture 的 ID、标题、维度、单位和计数已核对，但运行时数值快照一致性未验证。",
+        ("- 输入绑定：已核对 `matlab-runtime.json.input_fixtures` 的三份记录、包内 `fixture-inputs/` 快照及本地统计输入，字节数与 SHA-256 全部一致，输入字节绑定已验证；引用使用包内快照。"
+         if binding_verified else
+         "- 输入绑定：运行记录没有 fixture 内容哈希或实际坐标值。图与本地 fixture 的 ID、标题、维度、单位和计数已核对，但运行时数值快照一致性未验证。"),
         "",
         "## 2. 数据来源与复算方法",
         "",
@@ -1012,7 +1066,9 @@ def render_report(evidence: dict[str, Any]) -> str:
             "3. 样本规模只服务于绘图和合同回归，不能外推季节变化、异常事件或动力机制。",
             "4. `figures.json` 明确记录人工视觉检查未运行；本报告不补写桌面、字形、PDF 字体嵌入或人工审阅结论。",
             "5. 本报告不读取评分结果，也不声明满分、生产就绪或业务验收通过。",
-            "6. fixture 哈希记录的是本次报告读取的本地字节；运行清单缺少输入哈希，无法排除运行后同形数据被替换。图上数值、QC 和不确定度呈现尚未独立核验。",
+            ("6. 输入字节绑定不等于图上数值、QC 或不确定度呈现已核验，未执行独立图像科学内容核验。"
+             if binding_verified else
+             "6. fixture 哈希记录的是本次报告读取的本地字节；运行清单缺少输入哈希，无法排除运行后同形数据被替换。图上数值、QC 和不确定度呈现尚未独立核验。"),
             "",
             "## 10. 引用与可复核入口",
             "",
@@ -1038,7 +1094,7 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
         "generated_at": generated_at,
         "status": "passed",
         "validation_scope": "local_fixture_statistics_and_manifest_artifact_consistency",
-        "runtime_fixture_binding": {"status": "unverified", "reason": FIXTURE_BINDING_LIMITATION},
+        "runtime_fixture_binding": runtime_bundle["runtime_fixture_binding"],
         "data_source": {
             "classification": "synthetic_benchmark",
             "label": SOURCE_CLASSIFICATION,
@@ -1079,6 +1135,7 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
             "interaction_assertions": runtime_bundle["runtime"]["interaction"],
             "manifest_file": runtime_bundle["manifest_file"],
             "runtime_file": runtime_bundle["runtime_file"],
+            "input_fixtures": runtime_bundle["input_fixtures"],
             "figures": runtime_bundle["figures"],
             "artifacts": runtime_bundle["artifacts"],
         },
@@ -1088,7 +1145,7 @@ def build_evidence(fixtures: list[dict[str, Any]], runtime_bundle: dict[str, Any
             "Fixture time windows are separate and do not form a continuous record.",
             "Desktop validation and trusted visual inspection were not performed.",
             "No evaluation score or production-readiness claim is made.",
-            FIXTURE_BINDING_LIMITATION,
+            *([FIXTURE_BINDING_LIMITATION] if runtime_bundle["runtime_fixture_binding"]["status"] != "verified" else []),
             "QC/uncertainty presence in a source contract does not verify filtering or visual presentation.",
         ],
         "references": [
@@ -1141,13 +1198,18 @@ def build_ocean_report(runtime_output: Path, fixture_directory: Path = DEFAULT_F
         raise ReportBuildError("runtime and fixture directories must not be symlinks")
     runtime_root = runtime_output.resolve()
     fixtures, figure_contexts = load_fixture_statistics(fixture_directory.resolve())
-    for fixture in fixtures:
-        fixture["reference_file"] = Path(os.path.relpath(fixture_directory.resolve() / fixture["file"], runtime_root)).as_posix()
     runtime_bundle = validate_runtime_bundle(runtime_root, figure_contexts)
+    bound_inputs = {item["id"]: item for item in runtime_bundle["input_fixtures"]}
+    for fixture in fixtures:
+        fixture["reference_file"] = (
+            bound_inputs[fixture["id"]]["file"] if fixture["id"] in bound_inputs else
+            Path(os.path.relpath(fixture_directory.resolve() / fixture["file"], runtime_root)).as_posix()
+        )
     generated_at = utc_now()
     evidence = build_evidence(fixtures, runtime_bundle, generated_at)
     report_text = render_report(evidence)
-    for item in [runtime_bundle["manifest_file"], runtime_bundle["runtime_file"], *runtime_bundle["artifacts"]]:
+    for item in [runtime_bundle["manifest_file"], runtime_bundle["runtime_file"],
+                 *runtime_bundle["artifacts"], *runtime_bundle["input_fixtures"]]:
         _, input_path = safe_artifact_path(runtime_root, item["file"], "input.file")
         verify_input_snapshot(input_path, item)
     for fixture in fixtures:

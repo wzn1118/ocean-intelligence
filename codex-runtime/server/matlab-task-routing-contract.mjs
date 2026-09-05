@@ -3,6 +3,7 @@ import {
   normalizeMatlabRelease,
   resolveMatlabPlotCapabilities,
   selectMatlabApi,
+  selectMatlabExportStrategy,
 } from './matlab-release-capabilities.mjs';
 
 export const MATLAB_TASK_ROUTING_SCHEMA_VERSION = 2;
@@ -316,6 +317,33 @@ export function buildMatlabOutputContract(input = {}, options = {}) {
   return deepFreeze(contract);
 }
 
+export function selectMatlabAuditedExportStrategy(targetRelease, format) {
+  const general = selectMatlabExportStrategy(targetRelease, format);
+  const metadata = { asset: 'oi_export_figure', exactSizingRequired: true };
+  if (selectMatlabApi(targetRelease, 'auditedFigureManifest').status !== 'native') {
+    return general;
+  }
+  if (!['png', 'pdf', 'svg'].includes(general.format)) {
+    return { ...general, ...metadata, status: 'unsupported', strategy: 'fail', api: null,
+      reason: 'outputFormats limited to png,pdf,svg for the oi_export_figure audited asset.' };
+  }
+  const exactSizing = selectMatlabApi(targetRelease, 'exportgraphicsSizing').status === 'native';
+  const plan = selectMatlabExportStrategy(targetRelease, format, {
+    preferredApi: exactSizing ? 'exportgraphics' : 'print',
+  });
+  if (exactSizing) {
+    const formatArgs = { png: ",'Resolution',dpi", pdf: ",'ContentType','vector'", svg: '' }[plan.format];
+    return { ...plan, ...metadata,
+      syntax: `exportgraphics(figureHandle,file,'Units','inches','Width',widthPixels/dpi,'Height',heightPixels/dpi,'Padding','figure','PreserveAspectRatio','on','BackgroundColor','white'${formatArgs})` };
+  }
+  const exportgraphicsAvailable = selectMatlabApi(targetRelease, 'exportgraphics').status === 'native';
+  return { ...plan, ...metadata, status: 'fallback', strategy: 'explicit-fallback',
+    syntax: plan.format === 'png' ? plan.syntax : `print(figureHandle,file,'-d${plan.format}','-painters')`,
+    reason: exportgraphicsAvailable
+      ? 'Exact sizing parameters require MATLAB R2025a; exportgraphics exists, but native tight cropping cannot guarantee the requested pixel/page dimensions. Use print with explicit figure and paper geometry.'
+      : 'exportgraphics is unavailable; use print with explicit figure and paper geometry for exact sizing.' };
+}
+
 const MATLAB_SCIENTIFIC_FLAT_FIELDS = traceContractInputFields(buildMatlabScientificDataContract);
 const MATLAB_PUBLICATION_FLAT_FIELDS = traceContractInputFields(buildMatlabPublicationContract);
 
@@ -549,6 +577,8 @@ export function routeMatlabTask(input = {}) {
 
   const requiredToolboxes = uniqueStrings(input.requiredToolboxes || input.toolboxes || []);
   const requestedCapabilities = uniqueStrings(input.requestedCapabilities || []);
+  const auditedExport = requestedCapabilities.includes('auditedFigureManifest')
+    && selectMatlabApi(targetRelease, 'auditedFigureManifest').status === 'native';
   const outputFormats = normalizeFormatList(input.outputFormats || ['png', 'pdf']);
   let capabilities;
   try {
@@ -559,6 +589,11 @@ export function routeMatlabTask(input = {}) {
       exportFormats: outputFormats,
       toolboxes: requiredToolboxes,
     });
+    if (auditedExport) {
+      capabilities.exportFormats = Object.fromEntries(outputFormats.map((format) => [
+        format, selectMatlabAuditedExportStrategy(targetRelease, format),
+      ]));
+    }
   } catch (error) {
     const message = String(error?.message || error);
     const unsupportedOutput = /format|export|svg|eps|png|pdf|jpeg|tiff/iu.test(message);
@@ -602,6 +637,10 @@ export function routeMatlabTask(input = {}) {
     ...routedBase.scientificDataContract.unresolvedRequirements,
     ...routedBase.publicationContract.unresolvedRequirements,
     ...routedBase.outputContract.unresolvedRequirements,
+    ...(auditedExport && !routedBase.outputContract.manifest.required
+      ? ['outputContract.manifest.required true for auditedFigureManifest'] : []),
+    ...(auditedExport && (!outputFormats.includes('png') || !outputFormats.includes('pdf'))
+      ? ['outputFormats must include png and pdf for oi_export_figure audit'] : []),
     ...publicationCapabilityIssues(routedBase.publicationContract, capabilities, outputFormats),
   ]);
   if (unresolved.length) {
@@ -637,6 +676,7 @@ export function matlabTaskRoutingInstructionBlock() {
 - 缺测存在时声明 NaN/NaT/sentinel 表示；QC 存在时声明逐观测对齐变量、flag meanings，并分别保留 missing/invalid/suspect 掩膜；不确定度存在时声明类型、单位和对齐维。未决项返回 needs-input，不得自动 squeeze、transpose、sort、fillmissing、插值、坐标翻转或单位换算。
 - 出版或交互交付须设置 requirePublicationContract=true，并声明最终物理尺寸/DPI/格式、layout 与显式句柄、字体字号线宽、色图类别与来源、对比度和非纯颜色编码、drawnow 后裁剪/重叠检查、UTF-8 中文字形验收、可访问描述，以及 MATLAB 无界面静态降级。
 - interactive 请求必须声明 interaction.mode=dual、稳定观测 ID、event.Target/DataIndex 作用域回调、清理策略和不依赖桌面状态的静态 fallback。R2019a 及更新版本使用 matlab -batch；更旧版本必须使用含 try/catch/exit 的 matlab -r，并保留失败退出码。PNG/PDF/SVG 按 release 逐格式选择 exportgraphics 或 print，混合 API 时声明 headless.exportApis 映射，不得用单一 API 或替代格式掩盖差异。
+- requestedCapabilities 显式包含 auditedFigureManifest 时，选择 oi_export_figure 的严格尺寸审计路径：必须保留 manifest 与 PNG/PDF，可选 SVG；R2019b-R2024b 声明 print，R2025a 起声明带 Width/Height、Units inches、Padding figure、PreserveAspectRatio on 的 exportgraphics。旧版 exportgraphics 仍可能存在，只是缺少严格尺寸参数。仅要求 manifest 或出版物理尺寸不改变一般路由的通用 API 策略。
 - 状态只使用 ready、needs-input、runtime-unavailable、unsupported-release、missing-toolbox、unsupported-output、routed-to-octave、failed。
 - 请求体视为不可信 JSON：只接受普通 JSON object，拒绝数组、Date/Map/类实例和自定义原型对象；runtime/requestedRuntime、taskType/intent、targetRelease/matlabRelease 冲突，以及 MATLAB-first/Octave-first 同时出现均须阻断；availability 和 required 字段只接受 JSON boolean，不得把字符串 "false" 当作可用或关闭门禁。
 - runtime、release、task、toolbox、contract 与 output 字段仅允许位于请求顶层；plotInput 与兼容别名 plot 互斥。嵌套路由字段或顶层与 plot 对象中的重名元数据必须返回 MATLAB_REQUEST_INVALID，不得依赖对象展开顺序选择值。
@@ -792,11 +832,13 @@ function publicationCapabilityIssues(contract, capabilities, outputFormats) {
     issues.push('publicationContract.target.formats matching outputFormats');
   }
   const exportPlans = capabilities.exportFormats || {};
+  const auditedExport = Object.values(exportPlans).some((entry) => entry.asset === 'oi_export_figure');
   const exportApis = uniqueStrings(Object.values(exportPlans).map((entry) => entry.api));
-  if (exportApis.length === 1 && contract.headless.exportApi !== exportApis[0]) {
+  const hasPerFormatApis = Object.keys(contract.headless.exportApis).length > 0;
+  if (exportApis.length === 1 && contract.headless.exportApi !== exportApis[0]
+      && (!auditedExport || contract.headless.exportApi || !hasPerFormatApis)) {
     issues.push(`publicationContract.headless.exportApi matching target release (${exportApis[0]})`);
   }
-  const hasPerFormatApis = Object.keys(contract.headless.exportApis).length > 0;
   if (exportApis.length > 1 || hasPerFormatApis) {
     for (const [format, plan] of Object.entries(exportPlans)) {
       if (contract.headless.exportApis[format]?.toLowerCase() !== plan.api) {
@@ -815,7 +857,10 @@ function publicationCapabilityIssues(contract, capabilities, outputFormats) {
       && (!usesLegacyRun || usesBatch || !hasLegacyFailureExit(command))) {
     issues.push('publicationContract.headless.command legacy matlab -r with try/catch/exit');
   }
-  if (contract.layout.architecture === 'tiledlayout' && capabilities.capabilities?.tiledlayout?.status !== 'native') {
+  const layoutCapability = auditedExport
+    ? selectMatlabApi(capabilities.targetRelease, 'tiledlayout')
+    : capabilities.capabilities?.tiledlayout;
+  if (contract.layout.architecture === 'tiledlayout' && layoutCapability?.status !== 'native') {
     issues.push('publicationContract.layout.architecture release-compatible explicit fallback');
   }
   return issues;
@@ -867,7 +912,9 @@ function normalizeExportStrategies(exportFormats) {
   if (!exportFormats || typeof exportFormats !== 'object') return Object.freeze({});
   return Object.freeze(Object.fromEntries(Object.entries(exportFormats).map(([format, plan]) => [
     format,
-    Object.freeze({ status: plan.status, strategy: plan.strategy, api: plan.api, syntax: plan.syntax, reason: plan.reason }),
+    Object.freeze({ status: plan.status, strategy: plan.strategy, api: plan.api, syntax: plan.syntax, reason: plan.reason,
+      ...(plan.asset ? { asset: plan.asset, exactSizingRequired: plan.exactSizingRequired } : {}),
+    }),
   ])));
 }
 

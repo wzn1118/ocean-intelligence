@@ -2,12 +2,13 @@ import {
   assertMatlabTaskRequestShape,
   buildMatlabPublicationContract,
   routeMatlabTask,
+  selectMatlabAuditedExportStrategy,
 } from './matlab-task-routing-contract.mjs';
 import {
+  MATLAB_RELEASE_CAPABILITY_MATRIX,
   compareMatlabReleases,
   normalizeMatlabRelease,
   selectMatlabApi,
-  selectMatlabExportStrategy,
   selectMatlabRuntimeValidationLane,
 } from './matlab-release-capabilities.mjs';
 
@@ -102,7 +103,7 @@ function buildMatlabPlotRoute(spec) {
   const colorLimitApi = selectMatlabApi(spec.targetRelease, 'clim');
   const exportFormats = Object.fromEntries(spec.publication.target.formats.map((format) => [
     format,
-    selectMatlabExportStrategy(spec.targetRelease, format),
+    selectMatlabAuditedExportStrategy(spec.targetRelease, format),
   ]));
   const runtimeValidation = selectMatlabRuntimeValidationLane(spec.targetRelease);
   const route = {
@@ -127,6 +128,7 @@ function buildMatlabPlotRoute(spec) {
     apiPlan: {
       layout: layoutApi,
       export: exportApi,
+      exportSizing: selectMatlabApi(spec.targetRelease, 'exportgraphicsSizing'),
       exportFormats,
       colorLimits: colorLimitApi,
       runtimeValidation,
@@ -313,7 +315,13 @@ function invalidPlotResolution(error, taskRoute) {
 }
 
 function buildTaskRoutingInput(input) {
+  assertMatlabTaskRequestShape(input);
   const taskInput = { ...input };
+  taskInput.requestedCapabilities = [...new Set([
+    ...(input.requestedCapabilities?.length
+      ? input.requestedCapabilities : Object.keys(MATLAB_RELEASE_CAPABILITY_MATRIX.capabilities)),
+    'auditedFigureManifest',
+  ])];
   delete taskInput.unresolvedRequirements;
   const nestedFields = ['dataContract', 'scientificDataContract', 'scientificData'];
   let hasNestedContract = false;
@@ -471,7 +479,8 @@ export function matlabPlotRoutingInstructionBlock() {
 - NaN 保留为线段或面域缺口，Inf 作为非法值拒绝；QC 必须明确 present/absent，存在时提供互斥且完整的 accepted/suspect/rejected 编码并按原样保留、分开统计。不得自动 fillmissing、smooth、sort、squeeze、transpose、插值或把缺测矢量分量置零。
 - 二维字段必须验证 Z 与坐标尺寸、规则/曲线/散点网格类型；只有规则等像素网格可直接 imagesc，断面优先 contourf，散点数据必须先获得明确插值方法和掩膜策略。
 - 生成脚本必须先通过任务层 MATLAB 可用性、目标 release、工具箱和输出格式预检，再消费 publicationContract 并复用路由给出的 helper/template；按声明的 cm/in 物理尺寸与 DPI 换算像素，使用显式 figure/layout/axes 句柄、声明字号线宽、带单位标签、drawnow、同一最终 figure 的 PNG/PDF 基线导出、可选 SVG 和可审计 manifest。单图生成器收到多面板契约时必须拒绝，不得只画第一个面板。
-- R2019b 的 PNG/PDF 使用经过声明的 print 回退，R2020a 起使用 exportgraphics；SVG 在 R2019b-R2024b 使用 print -dsvg、R2025a 起使用 exportgraphics。混合 API 必须逐格式声明 headless.exportApis，不得改换请求格式；脚本必须拒绝旧于 R2019b 的 arguments-based 资产，并在 MATLAB 内核验实际版本和所需工具箱许可证。
+- 本生成器固定调用 oi_export_figure 严格尺寸审计资产，并向任务预检声明 auditedFigureManifest：R2019b-R2024b 的 PNG/PDF/SVG 均使用明确声明的 print 回退（SVG 为 print -dsvg），因为旧版原生 tight 裁切不能保证指定像素和页尺寸；R2025a 起使用 exportgraphics 的 Width/Height、Units inches、Padding figure、PreserveAspectRatio on。R2020a-R2024b 仍有 exportgraphics，缺少的是严格尺寸参数；apiPlan.export 仅说明通用 API 可用性，实际目标策略见 apiPlan.exportFormats 与 headless.exportApis，不改写其他一般路由的通用能力。
+- headless.exportApi 与逐格式 headless.exportApis 必须匹配所选审计路径，不得静默改声明或换格式。exportgraphics 的 exist(file) 返回 2/3/6（含 P-code）或 exist(builtin) 返回 5 均可调用；实际调用路径由资产探测并写入 runtime.export_api，目标策略不能冒充运行证据。脚本必须拒绝旧于 R2019b 的 arguments-based 资产，并在 MATLAB 内核验实际版本和所需工具箱许可证。
 - 中文标题或标签必须通过 MATLAB listfonts 按声明候选链选择 CJK 字体，普通文本使用 Interpreter='none'；无字体时明确失败。运行时字体存在和最终 PNG/PDF 字形、PDF 嵌入是不同证据，未检查产物时必须记录 not-verified。
 - 字段必须显式声明 sequential/diverging 色彩语义和 colorLimits；发散色图还须声明 colorReference，并让色限关于该参考对称。禁止 jet/hsv/rainbow；等值线、标记、线型、误差棒或几何方向提供冗余编码，灰度和色觉模拟仍须以最终产物验证。
 - 导出前必须在最终尺寸 drawnow，再用 TightInset/Position 检查边界；该运行时检查不得冒充 PNG/PDF 裁剪、重叠、中文字形、灰度、色觉或字体嵌入验收。
@@ -921,13 +930,14 @@ function unresolvedRequirements(spec, plotType) {
         && normalizeToken(spec.publication.layout.colorbarPlacement) !== 'adjacent') {
       unresolved.push('publicationContract.layout.colorbarPlacement adjacent for the selected field generator');
     }
-    const expectedExportApi = selectMatlabExportStrategy(spec.targetRelease, 'png').api;
-    if (normalizeToken(spec.publication.headless.exportApi) !== expectedExportApi) {
+    const expectedExportApi = selectMatlabAuditedExportStrategy(spec.targetRelease, 'png').api;
+    if (normalizeToken(spec.publicationContract.headless.exportApi) !== expectedExportApi
+        && (spec.publicationContract.headless.exportApi || !Object.keys(spec.publicationContract.headless.exportApis).length)) {
       unresolved.push(`publicationContract.headless.exportApi ${expectedExportApi} for targetRelease ${spec.targetRelease}`);
     }
     const expectedFormatApis = Object.fromEntries(formats.map((format) => [
       format,
-      selectMatlabExportStrategy(spec.targetRelease, format).api,
+      selectMatlabAuditedExportStrategy(spec.targetRelease, format).api,
     ]));
     if (new Set(Object.values(expectedFormatApis)).size > 1 || Object.keys(spec.publication.headless.exportApis).length) {
       for (const [format, api] of Object.entries(expectedFormatApis)) {
@@ -1567,12 +1577,12 @@ function effectivePublicationPolicy(input, source, contract, targetRelease) {
       supported: contract.headless.supported ?? true,
       command: contract.headless.command || 'matlab -batch',
       figureVisible: contract.headless.figureVisible || 'off',
-      exportApi: contract.headless.exportApi || selectMatlabExportStrategy(targetRelease, 'png').api,
+      exportApi: contract.headless.exportApi || selectMatlabAuditedExportStrategy(targetRelease, 'png').api,
       exportApis: Object.keys(contract.headless.exportApis).length
         ? { ...contract.headless.exportApis }
         : Object.fromEntries((contract.target.formats.length ? contract.target.formats : ['png', 'pdf']).map((format) => [
           format,
-          selectMatlabExportStrategy(targetRelease, format).api,
+          selectMatlabAuditedExportStrategy(targetRelease, format).api,
         ])),
       desktopIndependent: contract.headless.desktopIndependent ?? true,
     },

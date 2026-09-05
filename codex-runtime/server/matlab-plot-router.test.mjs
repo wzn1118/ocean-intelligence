@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -7,6 +8,8 @@ import {
   resolveMatlabPlotRequest,
   routeMatlabPlot,
 } from './matlab-plot-router.mjs';
+import { MATLAB_RELEASE_CAPABILITY_MATRIX, selectMatlabExportStrategy } from './matlab-release-capabilities.mjs';
+import { routeMatlabRuntimeRequest } from './matlab-runtime-route-service.mjs';
 
 const ASSET_DIRECTORY = '/opt/ocean-intelligence/codex-runtime/matlab/assets';
 
@@ -201,6 +204,10 @@ test('legacy MATLAB release is routed to an explicit audited-generator limitatio
   const route = routeMatlabPlot(input);
   assert.ok(route.unresolvedRequirements.includes('targetRelease R2019b or newer for arguments-based audited assets'));
   assert.throws(() => generateMatlabPlotScript(input), /R2019b or newer/u);
+  const resolved = resolveMatlabPlotRequest(input);
+  assert.equal(resolved.status, 'needs-input');
+  assert.equal(resolved.plotRoute.apiPlan.exportFormats.png.api, 'print');
+  assert.equal(resolved.script, null);
 });
 
 test('routing instruction block documents deterministic priority and prohibited transforms', () => {
@@ -208,7 +215,11 @@ test('routing instruction block documents deterministic priority and prohibited 
   assert.match(block, /显式科学问题 > 坐标组合 > 数据类型\/维数/u);
   assert.match(block, /time\+depth 二维场→hovmoller/u);
   assert.match(block, /不得自动 fillmissing、smooth、sort、squeeze、transpose/u);
-  assert.match(block, /R2019b 的 PNG\/PDF.*print 回退/u);
+  assert.match(block, /R2019b-R2024b 的 PNG\/PDF\/SVG.*print 回退/u);
+  assert.match(block, /R2020a-R2024b 仍有 exportgraphics/u);
+  assert.match(block, /Width\/Height、Units inches、Padding figure、PreserveAspectRatio on/u);
+  assert.match(block, /2\/3\/6（含 P-code）/u);
+  assert.doesNotMatch(block, /R2020a 起使用 exportgraphics/u);
   assert.match(block, /工具箱许可证/u);
   assert.match(block, /中英文科学问题和坐标名称仅按内置白名单归一化/u);
   assert.match(block, /三坐标立方体必须拒绝/u);
@@ -920,7 +931,8 @@ test('release-aware SVG generation preserves format and records verified metadat
   const publicationContract = completePublicationContract();
   publicationContract.target.formats = ['png', 'pdf', 'svg'];
   publicationContract.localization.glyphFormats = ['png', 'pdf', 'svg'];
-  publicationContract.headless.exportApis = { png: 'exportgraphics', pdf: 'exportgraphics', svg: 'print' };
+  publicationContract.headless.exportApi = 'print';
+  publicationContract.headless.exportApis = { png: 'print', pdf: 'print', svg: 'print' };
   const input = deliverable({
     runtime: 'matlab', matlabAvailable: true, targetRelease: 'R2024b', outputFormats: ['png', 'pdf', 'svg'],
     publicationContract, question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
@@ -929,7 +941,7 @@ test('release-aware SVG generation preserves format and records verified metadat
   });
   const resolved = resolveMatlabPlotRequest(input);
   assert.equal(resolved.status, 'ready');
-  assert.equal(resolved.plotRoute.apiPlan.exportFormats.png.api, 'exportgraphics');
+  assert.equal(resolved.plotRoute.apiPlan.exportFormats.png.api, 'print');
   assert.equal(resolved.plotRoute.apiPlan.exportFormats.svg.api, 'print');
   assert.equal(resolved.plotRoute.publicationPolicy.headless.exportApis.svg, 'print');
   const script = resolved.script;
@@ -938,10 +950,115 @@ test('release-aware SVG generation preserves format and records verified metadat
   assert.doesNotMatch(script, /local_sha256_file|local_xml_escape|StaleSvgArtifact/u);
 
   const modernContract = structuredClone(publicationContract);
+  modernContract.headless.exportApi = 'exportgraphics';
   modernContract.headless.exportApis = { png: 'exportgraphics', pdf: 'exportgraphics', svg: 'exportgraphics' };
   const modern = generateMatlabPlotScript({ ...input, targetRelease: 'R2025a', publicationContract: modernContract });
   assert.match(modern, /'ExportSVG', true/u);
   assert.doesNotMatch(modern, /local_sha256_file|local_xml_escape/u);
+});
+
+for (const [targetRelease, expectedApi] of [
+  ['R2021a', 'print'], ['R2024b', 'print'], ['R2025a', 'exportgraphics'], ['R2026a', 'exportgraphics'],
+]) {
+  test(`${targetRelease} audited route, runtime spec and generated metadata agree on ${expectedApi}`, () => {
+    const capabilitiesBefore = structuredClone(MATLAB_RELEASE_CAPABILITY_MATRIX);
+    const publicationContract = completePublicationContract();
+    publicationContract.target.formats = ['png', 'pdf', 'svg'];
+    publicationContract.localization.glyphFormats = ['png', 'pdf', 'svg'];
+    publicationContract.headless.exportApi = expectedApi;
+    publicationContract.headless.exportApis = { png: expectedApi, pdf: expectedApi, svg: expectedApi };
+    const request = deliverable({
+      runtime: 'matlab', matlabAvailable: true, targetRelease, outputFormats: ['png', 'pdf', 'svg'],
+      publicationContract, question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
+      dataType: 'datetime', timeZone: 'UTC', missing: false,
+      units: { value: 'degC' }, quantities: { value: 'Temperature' },
+    });
+    const originalRequest = structuredClone(request);
+    const { question, ...runtimeInput } = request;
+    const resolved = routeMatlabRuntimeRequest({ ...runtimeInput, plotInput: { question } });
+    assert.equal(resolved.status, 'ready', resolved.error?.reason);
+    const route = resolved.plotRoute;
+    assert.equal(route.apiPlan.export.api, 'exportgraphics');
+    assert.equal(route.apiPlan.export.status, 'native');
+    assert.equal(route.apiPlan.exportSizing.status, expectedApi === 'print' ? 'fallback' : 'native');
+    assert.equal(resolved.taskRoute.capabilities.capabilities.exportgraphics.status, 'native');
+    const expectedApis = { png: expectedApi, pdf: expectedApi, svg: expectedApi };
+    assert.equal(resolved.publicationContract.headless.exportApi, expectedApi);
+    assert.deepEqual(resolved.publicationContract.headless.exportApis, expectedApis);
+    assert.deepEqual(route.publicationPolicy.headless.exportApis, expectedApis);
+    const scriptContract = decodedScriptContract(resolved.script, 'exportEntry.export_contract');
+    const scriptPublication = decodedScriptContract(resolved.script, 'publicationContract');
+    assert.deepEqual(scriptContract.strategies, route.apiPlan.exportFormats);
+    assert.deepEqual(scriptPublication.headless.exportApis, expectedApis);
+    for (const format of ['png', 'pdf', 'svg']) {
+      assert.equal(route.apiPlan.exportFormats[format].api, expectedApi);
+      assert.equal(resolved.outputContract.exportStrategies[format].api, expectedApi);
+      assert.equal(resolved.outputContract.exportStrategies[format].exactSizingRequired, true);
+    }
+    assert.match(resolved.script, new RegExp(`release-aware APIs: png=${expectedApi}, pdf=${expectedApi}, svg=${expectedApi}`, 'u'));
+    assert.match(resolved.script, /actual_png_pdf_api = exportEntry\.runtime\.export_api\.png/u);
+    assert.match(resolved.script, /actual_svg_api = exportEntry\.runtime\.export_api\.svg/u);
+    assert.doesNotMatch(resolved.script, /exportEntry\.runtime\.(?:export_api|exportgraphics_available|exact_exportgraphics_available)\s*=/u);
+    assert.deepEqual(request, originalRequest);
+    assert.deepEqual(MATLAB_RELEASE_CAPABILITY_MATRIX, capabilitiesBefore);
+    assert.equal(selectMatlabExportStrategy(targetRelease, 'png').api, 'exportgraphics');
+
+    const { publicationContract: omittedContract, ...withoutPublication } = request;
+    const defaults = resolveMatlabPlotRequest(withoutPublication);
+    assert.equal(defaults.status, 'ready', defaults.error?.reason);
+    assert.equal(defaults.plotRoute.publicationPolicy.headless.exportApi, expectedApi);
+    assert.deepEqual(defaults.plotRoute.publicationPolicy.headless.exportApis, expectedApis);
+    assert.equal(defaults.taskRoute.outputContract.exportStrategies.png.api, expectedApi);
+
+    const perFormatOnly = structuredClone(request);
+    delete perFormatOnly.publicationContract.headless.exportApi;
+    const mapped = resolveMatlabPlotRequest(perFormatOnly);
+    assert.equal(mapped.status, 'ready', mapped.error?.reason);
+    assert.equal(mapped.plotRoute.readyForGeneration, true);
+    assert.deepEqual(mapped.plotRoute.publicationPolicy.headless.exportApis, expectedApis);
+  });
+}
+
+function decodedScriptContract(script, variable) {
+  const expression = new RegExp(`${variable.replaceAll('.', '\\.')} = jsondecode\\('((?:[^']|'')*)'\\);`, 'u');
+  const match = script.match(expression);
+  assert.ok(match, `Missing generated ${variable}`);
+  return JSON.parse(match[1].replaceAll("''", "'"));
+}
+
+test('audited generator rejects old general API declarations without silently rewriting them', () => {
+  for (const targetRelease of ['R2021a', 'R2024b']) {
+    const publicationContract = completePublicationContract();
+    const request = deliverable({ runtime: 'matlab', matlabAvailable: true, targetRelease,
+      publicationContract, question: 'trend', coordinates: ['time'], dimensions: [12], dimensionOrder: ['time'],
+      dataType: 'datetime', timeZone: 'UTC', missing: false,
+      units: { value: 'degC' }, quantities: { value: 'Temperature' } });
+    const generic = routeMatlabRuntimeRequest(request);
+    assert.equal(generic.status, 'ready');
+    assert.equal(generic.outputContract.exportStrategies.png.api, 'exportgraphics');
+    const resolved = resolveMatlabPlotRequest(request);
+    assert.equal(resolved.status, 'needs-input');
+    assert.equal(resolved.script, null);
+    assert.match(resolved.error.reason, /headless.exportApi matching target release \(print\)/u);
+    assert.throws(() => generateMatlabPlotScript(request), /headless.exportApi matching target release \(print\)/u);
+    assert.equal(publicationContract.headless.exportApi, 'exportgraphics');
+    assert.equal(routeMatlabPlot(request).readyForGeneration, false);
+
+    publicationContract.headless.exportApi = '';
+    const missingDeclaration = resolveMatlabPlotRequest(request);
+    assert.equal(missingDeclaration.status, 'needs-input');
+    assert.equal(routeMatlabPlot(request).readyForGeneration, false);
+  }
+});
+
+test('audited export metadata matches asset exact geometry and callable P-code probe', () => {
+  const asset = readFileSync(new URL('../matlab/assets/oi_export_figure.m', import.meta.url), 'utf8');
+  assert.match(asset, /exportGraphicsAvailable && ~verLessThan\('matlab', '25\.1'\)/u);
+  assert.match(asset, /exist\('exportgraphics', 'file'\) == \[2 3 6\]/u);
+  assert.match(asset, /exist\('exportgraphics', 'builtin'\) == 5/u);
+  assert.match(asset, /"Units", "inches", "Width", widthInches, "Height", heightInches/u);
+  assert.match(asset, /"Padding", "figure", "PreserveAspectRatio", "on"/u);
+  assert.match(asset, /export_fallback_reason = "exact sizing parameters require MATLAB R2025a"/u);
 });
 
 test('generator preflight rejects unavailable runtimes and toolboxes before emitting code', () => {

@@ -7,7 +7,8 @@ pathCleanup = onCleanup(@() path(originalPath));
 addpath(assetDirectory);
 fontName = publication_font();
 
-test_courier_font_metrics();
+test_original_nested_geometry("Courier", "nested-courier");
+test_original_nested_geometry(fontName, "nested-publication-original");
 test_axes_text_and_rotation(fontName);
 test_colorbar_label(fontName);
 test_font_refresh(fontName);
@@ -22,13 +23,17 @@ function test_axes_text_and_rotation(fontName)
 [figureHandle, axesHandle, titleHandle, xlabelHandle, ylabelHandle, textHandle] ...
     = make_nested_figure(fontName);
 figureCleanup = onCleanup(@() close_if_valid(figureHandle));
+[~, beforeRender] = measure_bounds(xlabelHandle, figureHandle, "publication before renderer export");
+export_nested_evidence(figureHandle, axesHandle, "nested-publication-unfitted", beforeRender);
+fit_nested_bottom_margin(figureHandle, axesHandle, xlabelHandle);
+[~, beforeFittedRender] = measure_bounds(xlabelHandle, figureHandle, "fitted before renderer export");
+export_nested_evidence(figureHandle, axesHandle, "nested-publication-fitted", beforeFittedRender);
 
 originalUnits = string(textHandle.Units);
 [titleBounds, titleDetails] = measure_bounds(titleHandle, figureHandle, "axes title");
 [xlabelBounds, xlabelDetails] = measure_bounds(xlabelHandle, figureHandle, "x label");
 [ylabelBounds, ylabelDetails] = measure_bounds(ylabelHandle, figureHandle, "rotated y label");
 [horizontalBounds, horizontalDetails] = measure_bounds(textHandle, figureHandle, "axes text");
-export_nested_evidence(figureHandle, "nested-publication", xlabelDetails);
 assert(string(textHandle.Units) == originalUnits, ...
     "test_text_bounds:Units", "oi_text_bounds did not restore text Units");
 assert_inside(titleBounds, "axes title", titleDetails);
@@ -68,13 +73,16 @@ ylabelHandle = ylabel(axesHandle, "Sea temperature (degC)", ...
     "FontName", fontName, "Interpreter", "none");
 textHandle = text(axesHandle, 0.32, 0.55, "Rotated geometry probe", ...
     "Units", "normalized", "FontName", fontName, "FontSize", 12, ...
+    "Tag", "TextBoundsProbe", ...
     "HorizontalAlignment", "center", "VerticalAlignment", "middle", ...
     "Interpreter", "none");
 end
 
-function test_courier_font_metrics()
-[figureHandle, axesHandle, ~, xlabelHandle] = make_nested_figure("Courier");
+function test_original_nested_geometry(fontName, artifactName)
+[figureHandle, axesHandle, ~, xlabelHandle] = make_nested_figure(fontName);
 figureCleanup = onCleanup(@() close_if_valid(figureHandle));
+[~, beforeRender] = measure_bounds(xlabelHandle, figureHandle, fontName + " before renderer export");
+renderEvidence = export_nested_evidence(figureHandle, axesHandle, artifactName, beforeRender);
 drawnow;
 nativeExtent = double(xlabelHandle.Extent);
 nativeUnits = string(xlabelHandle.Units);
@@ -82,17 +90,17 @@ axesPixels = double(getpixelposition(axesHandle, true));
 figurePixels = double(getpixelposition(figureHandle));
 assert(nativeUnits == "data" && axesHandle.XScale == "linear" ...
     && axesHandle.YScale == "linear" && axesHandle.XDir == "normal" ...
-    && axesHandle.YDir == "normal", "test_text_bounds:CourierFixture", ...
-    "Courier fixture must retain its original linear data coordinates");
+    && axesHandle.YDir == "normal", "test_text_bounds:OriginalFixture", ...
+    "The original fixture must retain its linear data coordinates");
 dataScale = axesPixels(3:4) ./ [diff(axesHandle.XLim) diff(axesHandle.YLim)];
 nativeOrigin = axesPixels(1:2) - 1 ...
     + (nativeExtent(1:2) - [axesHandle.XLim(1) axesHandle.YLim(1)]) .* dataScale;
 nativeSize = nativeExtent(3:4) .* dataScale;
 nativeBounds = [nativeOrigin nativeSize] ./ figurePixels([3 4 3 4]);
 
-[bounds, details] = measure_bounds(xlabelHandle, figureHandle, "Courier x label");
+[bounds, details] = measure_bounds(xlabelHandle, figureHandle, fontName + " original x label");
 evidence = jsondecode(details);
-evidence.courier_listed = oi_font_available("Courier", string(listfonts));
+evidence.font_listed = oi_font_available(fontName, string(listfonts));
 evidence.native_bounds = nativeBounds;
 evidence.native_size_pixels = nativeSize;
 evidence.horizontal_metrics_anomalous = nativeSize(1) <= nativeSize(2);
@@ -101,24 +109,47 @@ nativeClipped = nativeBounds(1) < 0 || nativeBounds(2) < 0 ...
     || nativeBounds(2) + nativeBounds(4) > 1;
 evidence.native_clipped = nativeClipped;
 details = jsonencode(evidence);
-fprintf("MATLAB_COURIER_FONT_EVIDENCE=%s\n", details);
-export_nested_evidence(figureHandle, "nested-courier", details);
-assert(string(xlabelHandle.FontName) == "Courier" ...
+fprintf("MATLAB_ORIGINAL_NESTED_EVIDENCE=%s\n", details);
+renderEvidence.original_geometry_after_export = evidence;
+write_evidence_json(renderEvidence.json_path, renderEvidence);
+assert(string(xlabelHandle.FontName) == fontName ...
     && string(xlabelHandle.Units) == nativeUnits, ...
-    "test_text_bounds:CourierMutation", ...
-    "Measurement must preserve Courier and the original text units; geometry=%s", details);
+    "test_text_bounds:OriginalMutation", ...
+    "Measurement must preserve the selected font and original text units; geometry=%s", details);
 errorPixels = abs(bounds - nativeBounds) .* figurePixels([3 4 3 4]);
-assert(all(errorPixels <= 1e-6), "test_text_bounds:CourierNativeGeometry", ...
+assert(all(errorPixels <= 1e-6), "test_text_bounds:OriginalNativeGeometry", ...
     "Pixel bounds must match the independently measured native data extent; error_pixels=%s; geometry=%s", ...
     mat2str(errorPixels, 17), details);
 if nativeClipped
-    must_throw(@() assert_inside(bounds, "Courier x label", details), "UnexpectedClipping");
+    must_throw(@() assert_inside(bounds, "original x label", details), "UnexpectedClipping");
 else
-    assert_inside(bounds, "Courier x label", details);
+    assert_inside(bounds, "original x label", details);
 end
 
 clear figureCleanup;
 close_if_valid(figureHandle);
+end
+
+function fit_nested_bottom_margin(figureHandle, axesHandle, xlabelHandle)
+[bounds, details] = measure_bounds(xlabelHandle, figureHandle, "before bottom margin");
+figurePixels = double(getpixelposition(figureHandle));
+requiredMarginPixels = 12;
+addedPixels = ceil(max(0, requiredMarginPixels - bounds(2) * figurePixels(4)));
+panelHandle = axesHandle.Parent;
+layout = struct("original_figure_pixels", figurePixels, ...
+    "original_panel_position", double(panelHandle.Position), ...
+    "original_axes_position", double(axesHandle.Position), ...
+    "original_geometry", jsondecode(details), ...
+    "required_bottom_margin_pixels", requiredMarginPixels, ...
+    "added_bottom_pixels", addedPixels);
+figureHandle.Position = figureHandle.Position + [0 0 0 addedPixels];
+panelHandle.Position = panelHandle.Position + [0 0 0 addedPixels];
+axesHandle.Position = axesHandle.Position + [0 addedPixels 0 0];
+drawnow;
+layout.fitted_figure_pixels = double(getpixelposition(figureHandle));
+layout.fitted_axes_pixels = double(getpixelposition(axesHandle, true));
+setappdata(figureHandle, "TextBoundsLayoutEvidence", layout);
+fprintf("MATLAB_TEXT_BOUNDS_LAYOUT=%s\n", jsonencode(layout));
 end
 
 function test_colorbar_label(fontName)
@@ -226,36 +257,85 @@ assert(fontName ~= "Courier", "test_text_bounds:PublicationFont", ...
 fprintf("MATLAB_TEXT_BOUNDS_PUBLICATION_FONT=%s\n", fontName);
 end
 
-function export_nested_evidence(figureHandle, artifactName, details)
+function evidence = export_nested_evidence(figureHandle, axesHandle, artifactName, details)
 outputRoot = string(getenv("MATLAB_FULL100_OUTPUT"));
 if strlength(outputRoot) == 0
-    return;
+    outputRoot = string(tempname);
 end
+outputDirectory = fullfile(outputRoot, "text-bounds");
+if ~isfolder(outputDirectory)
+    mkdir(outputDirectory);
+end
+evidence = jsondecode(details);
+evidence.bounds_reference = "normalized to original figure drawable canvas, not exported crop";
+evidence.figure_pixels_before_export = double(getpixelposition(figureHandle));
+evidence.axes_pixels_before_export = double(getpixelposition(axesHandle, true));
+evidence.panel_pixels_before_export = double(getpixelposition(axesHandle.Parent, true));
+if isappdata(figureHandle, "TextBoundsLayoutEvidence")
+    evidence.layout = getappdata(figureHandle, "TextBoundsLayoutEvidence");
+end
+jsonPath = fullfile(outputDirectory, artifactName + ".json");
+evidence.json_path = jsonPath;
+evidence.text_before_export = nested_text_state(figureHandle, axesHandle);
+write_evidence_json(jsonPath, evidence);
+axesPath = fullfile(outputDirectory, artifactName + "-axes.png");
+panelPath = fullfile(outputDirectory, artifactName + "-panel.png");
+evidence.exports = export_diagnostic_crop(axesHandle, "axes", axesPath);
+drawnow;
+evidence.text_after_axes_export = nested_text_state(figureHandle, axesHandle);
+write_evidence_json(jsonPath, evidence);
+evidence.exports(2) = export_diagnostic_crop(axesHandle.Parent, "panel", panelPath);
+drawnow;
+evidence.text_after_panel_export = nested_text_state(figureHandle, axesHandle);
+[~, afterExport] = oi_text_bounds(axesHandle.XLabel, figureHandle);
+evidence.after_export = afterExport;
+write_evidence_json(jsonPath, evidence);
+assert(any([evidence.exports.succeeded]), "test_text_bounds:DiagnosticExport", ...
+    "Neither axes nor panel diagnostic PNG could be exported; exports=%s", ...
+    jsonencode(evidence.exports));
+end
+
+function state = nested_text_state(figureHandle, axesHandle)
+state = struct();
+[~, state.title] = oi_text_bounds(axesHandle.Title, figureHandle);
+[~, state.xlabel] = oi_text_bounds(axesHandle.XLabel, figureHandle);
+[~, state.ylabel] = oi_text_bounds(axesHandle.YLabel, figureHandle);
+probeHandle = findobj(axesHandle, "Type", "text", "Tag", "TextBoundsProbe");
+[~, state.axes_text] = oi_text_bounds(probeHandle, figureHandle);
+state.pixel_size_roles = ["title" "xlabel" "ylabel" "axes_text"];
+state.pixel_sizes = [state.title.pixel_extent(3:4); state.xlabel.pixel_extent(3:4); ...
+    state.ylabel.pixel_extent(3:4); state.axes_text.pixel_extent(3:4)];
+state.all_pixel_sizes_equal = all(abs(state.pixel_sizes - state.pixel_sizes(1, :)) <= 1e-9, "all");
+end
+
+function record = export_diagnostic_crop(targetHandle, targetName, pngPath)
+record = struct("target", targetName, "api", "exportgraphics", ...
+    "file", pngPath, "canvas_reference", ...
+    "content crop of named target; not a full figure canvas or figure-clipping verdict", ...
+    "target_pixels_in_figure", double(getpixelposition(targetHandle, true)), ...
+    "succeeded", false, "image_size_pixels", [], ...
+    "error_identifier", "", "error_message", "");
 try
-    outputDirectory = fullfile(outputRoot, "text-bounds");
-    if ~isfolder(outputDirectory)
-        mkdir(outputDirectory);
-    end
-    jsonPath = fullfile(outputDirectory, artifactName + ".json");
-    fileId = fopen(jsonPath, "w");
-    assert(fileId >= 0, "test_text_bounds:EvidenceFile", ...
-        "Cannot write nested figure evidence: %s", jsonPath);
-    fileCleanup = onCleanup(@() fclose(fileId));
-    fprintf(fileId, "%s\n", details);
-    clear fileCleanup;
-    figurePixels = double(getpixelposition(figureHandle));
-    pixelsPerInch = double(get(groot, "ScreenPixelsPerInch"));
-    figureHandle.PaperUnits = "inches";
-    figureHandle.PaperPosition = [0 0 figurePixels(3:4) / pixelsPerInch];
-    figureHandle.PaperSize = figurePixels(3:4) / pixelsPerInch;
-    figureHandle.PaperPositionMode = "manual";
-    pngPath = fullfile(outputDirectory, artifactName + ".png");
-    print(figureHandle, char(pngPath), '-dpng', '-r0');
-    fprintf("MATLAB_TEXT_BOUNDS_ARTIFACT=%s\n", pngPath);
+    exportgraphics(targetHandle, char(pngPath), 'Resolution', 150, 'BackgroundColor', 'white');
+    imageInfo = imfinfo(pngPath);
+    assert(imageInfo.Width > 0 && imageInfo.Height > 0, ...
+        "test_text_bounds:EmptyDiagnosticImage", "Diagnostic PNG has no pixels");
+    record.image_size_pixels = [imageInfo.Width imageInfo.Height];
+    record.succeeded = true;
 catch errorDetails
-    warning("test_text_bounds:DiagnosticExport", ...
-        "Nested figure diagnostic export failed: %s", errorDetails.message);
+    record.error_identifier = errorDetails.identifier;
+    record.error_message = errorDetails.message;
 end
+fprintf("MATLAB_TEXT_BOUNDS_EXPORT=%s\n", jsonencode(record));
+end
+
+function write_evidence_json(jsonPath, evidence)
+fileId = fopen(jsonPath, "w");
+assert(fileId >= 0, "test_text_bounds:EvidenceFile", ...
+    "Cannot write nested figure evidence: %s", jsonPath);
+fileCleanup = onCleanup(@() fclose(fileId));
+fprintf(fileId, "%s\n", jsonencode(evidence));
+clear fileCleanup;
 end
 
 function [bounds, details] = measure_bounds(textHandle, figureHandle, role)

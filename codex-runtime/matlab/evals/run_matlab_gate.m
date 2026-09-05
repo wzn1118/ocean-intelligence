@@ -24,8 +24,8 @@ set(0, "DefaultFigureVisible", "off");
 theme = oi_ocean_theme();
 entries = struct([]);
 
-temperature_fixture = read_fixture(fixture_directory, ...
-    "crossed_time_depth_temperature.json");
+[temperature_fixture, temperature_input] = read_fixture(fixture_directory, ...
+    "crossed_time_depth_temperature.json", output_directory);
 temperature_time = parse_utc_time(temperature_fixture.coordinates.time.values);
 temperature_depth = double(temperature_fixture.coordinates.depth.values(:));
 temperature_values = double(temperature_fixture.variables.temperature.values);
@@ -40,8 +40,8 @@ entries = append_entry(entries, export_plot(output_directory, ...
     science_contract([numel(temperature_depth) numel(temperature_time)], ...
         ["depth" "time"], "degC", "UTC", "present", "present")));
 
-profile_fixture = read_fixture(fixture_directory, ...
-    "repeat_cast_salinity_profiles.json");
+[profile_fixture, profile_input] = read_fixture(fixture_directory, ...
+    "repeat_cast_salinity_profiles.json", output_directory);
 profile_depth = double(profile_fixture.coordinates.depth.values(:));
 profile_values = double(profile_fixture.variables.salinity.values);
 profile_labels = string(profile_fixture.coordinates.time.values(:));
@@ -56,8 +56,8 @@ entries = append_entry(entries, export_plot(output_directory, ...
     science_contract([numel(profile_depth) numel(profile_labels)], ...
         ["depth" "time"], "g kg-1", "UTC", "present", "present")));
 
-paired_fixture = read_fixture(fixture_directory, ...
-    "paired_observation_model.json");
+[paired_fixture, paired_input] = read_fixture(fixture_directory, ...
+    "paired_observation_model.json", output_directory);
 records = paired_fixture.records;
 observations = numeric_record_field(records, "observation_degC");
 model_values = numeric_record_field(records, "model_degC");
@@ -116,6 +116,10 @@ close(interactive_output.Figure);
 figure_ids = string({entries.id});
 [~, order] = sort(figure_ids);
 entries = entries(order);
+input_fixtures = [temperature_input; profile_input; paired_input];
+for input_index = 1:numel(input_fixtures)
+    verify_input_snapshot(output_directory, input_fixtures(input_index));
+end
 manifest = oi_write_manifest(fullfile(output_directory, "figures.json"), entries);
 assert(manifest.execution_verified && manifest.runtime_status == "ready" ...
     && manifest.artifact_validation.status == "passed", ...
@@ -133,6 +137,7 @@ runtime_record = struct( ...
     "batch_startup_option_used", batch_mode(), ...
     "fixture_ids", ["crossed-time-depth-temperature"; ...
         "repeat-cast-salinity-profiles"; "paired-observation-model"], ...
+    "input_fixtures", input_fixtures, ...
     "interaction", struct("datatip_verified", true, ...
         "brush_stable_ids_verified", true, "headless_fallback_verified", true), ...
     "manifest", "figures.json");
@@ -142,11 +147,46 @@ fprintf("MATLAB_EVAL_GATE=passed\n");
 fprintf("MATLAB_EVAL_FIGURES=%d\n", numel(entries));
 end
 
-function payload = read_fixture(directory, name)
+function [payload, snapshot] = read_fixture(directory, name, output_directory)
 path = fullfile(directory, name);
 assert(isfile(path), "run_matlab_gate:FixtureMissing", ...
     "Fixture is missing: %s", path);
-payload = jsondecode(fileread(path));
+file_handle = fopen(path, "rb");
+assert(file_handle >= 0, "run_matlab_gate:FixtureRead", "Cannot read fixture: %s", path);
+read_cleanup = onCleanup(@() fclose(file_handle));
+content = fread(file_handle, Inf, "*uint8");
+clear read_cleanup;
+assert(~isempty(content), "run_matlab_gate:FixtureRead", "Fixture is empty: %s", path);
+input_directory = fullfile(output_directory, "fixture-inputs");
+if ~isfolder(input_directory)
+    [created, message] = mkdir(input_directory);
+    assert(created, "run_matlab_gate:FixtureDirectory", "%s", message);
+end
+snapshot_path = fullfile(input_directory, name);
+assert(~isfile(snapshot_path), "run_matlab_gate:StaleFixtureSnapshot", ...
+    "Refusing to overwrite an input snapshot: %s", snapshot_path);
+file_handle = fopen(snapshot_path, "wb");
+assert(file_handle >= 0, "run_matlab_gate:FixtureWrite", ...
+    "Cannot write input snapshot: %s", snapshot_path);
+write_cleanup = onCleanup(@() fclose(file_handle));
+written = fwrite(file_handle, content, "uint8");
+assert(written == numel(content), "run_matlab_gate:FixtureWrite", ...
+    "Input snapshot was not fully written: %s", snapshot_path);
+clear write_cleanup;
+payload = jsondecode(native2unicode(content', 'UTF-8'));
+snapshot = struct("id", string(payload.id), "file", "fixture-inputs/" + name, ...
+    "source_file", name, "bytes", numel(content), ...
+    "sha256", string(oi_sha256_file(snapshot_path)));
+verify_input_snapshot(output_directory, snapshot);
+end
+
+function verify_input_snapshot(output_directory, snapshot)
+snapshot_path = fullfile(output_directory, snapshot.file);
+file_info = dir(snapshot_path);
+assert(isscalar(file_info) && ~file_info.isdir && file_info.bytes == snapshot.bytes ...
+    && strcmpi(oi_sha256_file(snapshot_path), snapshot.sha256), ...
+    "run_matlab_gate:FixtureChanged", ...
+    "Consumed fixture snapshot changed during execution: %s", snapshot_path);
 end
 
 function values = parse_utc_time(raw_values)

@@ -6,6 +6,7 @@ addpath(fullfile(matlabDirectory, "assets"));
 theme = oi_ocean_theme();
 test_vector_rotation_and_zero_speed(theme);
 test_direction_conventions_bins_and_calm(theme);
+test_direction_outer_layout(theme);
 test_spectrum_evidence_confidence_and_toolbox(theme);
 disp("FULL100_FAMILY_C_CONTRACTS=ok");
 end
@@ -82,6 +83,32 @@ must_throw(@() oi_plot_direction_rose(axesHandle, [45; 90], speedOptions), ...
     "NoDirectionalSamples");
 clear cleanup;
 close_if_valid(figureHandle);
+end
+
+function test_direction_outer_layout(theme)
+figureHandle = oi_figure(2400, 1500, "off");
+cleanup = onCleanup(@() close_if_valid(figureHandle));
+figureHandle.Units = "inches";
+figureHandle.Position(3:4) = [8 5];
+axesHandle = axes("Parent", figureHandle, "Units", "pixels");
+outerPosition = axesHandle.OuterPosition;
+result = oi_plot_direction_rose(axesHandle, (0:45:315)', ...
+    struct("DirectionConvention", "from", "DirectionUnit", "degree", ...
+    "Normalization", "percent", "Theme", theme, "Title", "Directional rose"));
+drawnow;
+assert(string(result.Axes.Units) == "pixels", ...
+    "Replacing Cartesian axes must preserve the parent coordinate units");
+if isprop(result.Axes, "PositionConstraint") && isprop(result.Axes, "OuterPosition")
+    assert(string(result.Axes.PositionConstraint) == "outerposition" ...
+        && all(abs(result.Axes.OuterPosition - outerPosition) < 1e-6), ...
+        "Polar axes must preserve the allocated outer layout rectangle");
+end
+bounds = oi_text_bounds(result.Axes.Title, figureHandle);
+assert(all(bounds(1:2) >= 0) && all(bounds(1:2) + bounds(3:4) <= 1), ...
+    "Directional title must fit the publication canvas: %s", mat2str(bounds, 17));
+assert(sum(result.BinValues) == 100 && result.ValidCount == 8, ...
+    "Polar layout must not change directional counts or normalization");
+clear cleanup;
 end
 
 function test_spectrum_evidence_confidence_and_toolbox(theme)
