@@ -110,10 +110,16 @@ if useExactExportGraphics
     pdfDevice = "";
 else
     warning("oi_export_figure:LegacyPrintFallback", ...
-        "Exact exportgraphics sizing requires R2025a or newer; using print for this runtime");
+        "Exact PNG exportgraphics sizing requires R2025a or newer; using print for PNG");
     resolutionOption = char("-r" + string(dpi));
     print(figureHandle, char(pngPath), "-dpng", resolutionOption);
-    print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches);
+    if exportGraphicsAvailable
+        export_fixed_canvas_pdf(figureHandle, pdfPath, widthPoints, heightPoints);
+        pdfApi = "exportgraphics";
+        pdfDevice = "";
+    else
+        print_exact_pdf(figureHandle, pdfPath, widthInches, heightInches);
+    end
 end
 if options.ExportSVG
     if directSvgAvailable
@@ -264,6 +270,12 @@ entry.runtime = runtime_evidence(figureHandle, requiredToolboxes, installedToolb
     useExactExportGraphics, pdfApi, pdfDevice, options.ExportSVG, directSvgAvailable);
 entry.runtime.exportgraphics_available = exportGraphicsAvailable;
 entry.runtime.exact_exportgraphics_available = useExactExportGraphics;
+entry.runtime.pdf_canvas_strategy = "native_exact_geometry";
+if ~useExactExportGraphics && exportGraphicsAvailable
+    entry.runtime.pdf_canvas_strategy = "same_figure_background_axes";
+elseif ~exportGraphicsAvailable
+    entry.runtime.pdf_canvas_strategy = "legacy_print_paper_geometry";
+end
 entry.runtime.export_fallback_reason = "";
 if ~useExactExportGraphics
     entry.runtime.export_device.png = "-dpng -r" + string(dpi);
@@ -571,6 +583,41 @@ if cjkPresent
         catch
         end
     end
+end
+end
+
+function export_fixed_canvas_pdf(figureHandle, pdfPath, widthPoints, heightPoints)
+originalChildren = figureHandle.Children;
+originalCurrentAxes = figureHandle.CurrentAxes;
+backgroundAxes = axes("Parent", figureHandle, "Units", "normalized", ...
+    "PositionConstraint", "innerposition", "Position", [0 0 1 1], ...
+    "XLim", [0 widthPoints], "YLim", [0 heightPoints], "XTick", [], "YTick", [], ...
+    "XColor", "none", "YColor", "none", "Color", "none", "Box", "off", ...
+    "Visible", "on", "HitTest", "off", "PickableParts", "none", ...
+    "Tag", "OI_PdfCanvasBackground");
+canvasCleanup = onCleanup(@() remove_pdf_canvas( ...
+    figureHandle, backgroundAxes, originalCurrentAxes));
+rectangle(backgroundAxes, "Position", [0 0 widthPoints heightPoints], ...
+    "FaceColor", "white", "EdgeColor", "none", "LineStyle", "none", ...
+    "HitTest", "off", "PickableParts", "none");
+uistack(backgroundAxes, "bottom");
+figureHandle.CurrentAxes = originalCurrentAxes;
+drawnow;
+exportgraphics(figureHandle, pdfPath, "ContentType", "vector", "BackgroundColor", "white");
+clear canvasCleanup;
+assert(isequal(figureHandle.Children, originalChildren), ...
+    "oi_export_figure:PdfCanvasState", "PDF export must preserve original graphics ownership and order");
+end
+
+function remove_pdf_canvas(figureHandle, backgroundAxes, originalCurrentAxes)
+if isgraphics(backgroundAxes)
+    delete(backgroundAxes);
+end
+if isgraphics(figureHandle, "figure")
+    if isempty(originalCurrentAxes) || isgraphics(originalCurrentAxes)
+        figureHandle.CurrentAxes = originalCurrentAxes;
+    end
+    drawnow;
 end
 end
 

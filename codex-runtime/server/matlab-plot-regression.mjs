@@ -15,8 +15,12 @@ const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const REQUIRED_FORMATS = ['png', 'pdf'];
 const SUPPORTED_FORMATS = ['png', 'pdf', 'svg'];
 const MATLAB_PROBE_OUTPUT_LIMIT = 4_096;
+const MAXIMUM_AUDIT_DEPTH = 64;
+const VALIDATION_MODES = ['full-regression', 'runtime-artifacts'];
 
 export function inspectMatlabPlotRegression(options = {}) {
+  const validationMode = options.validationMode ?? 'full-regression';
+  if (!VALIDATION_MODES.includes(validationMode)) throw new Error('invalid validation mode');
   const manifestPath = resolveOptionalPath(options.manifestPath);
   const outputDirectory = resolveOptionalPath(options.outputDirectory)
     || (manifestPath ? path.dirname(manifestPath) : undefined);
@@ -86,9 +90,14 @@ export function inspectMatlabPlotRegression(options = {}) {
   const runtimeUnavailable = runtime.unavailable && runtime.ok && !matlab.available;
   const skipped = (runtimeRequired && !matlab.available) || runtimeUnavailable;
   const skipReason = runtimeUnavailable ? runtime.reason : matlab.reason;
+  const automated = validationMode === 'runtime-artifacts' ? inspectAutomatedRegression({
+    manifest: manifestRead.value, figureChecks, runtime, structureOk,
+    scienceSemanticsOk, interactionOk, skipped,
+  }) : undefined;
 
   return {
-    status: skipped ? 'skipped' : (checksOk ? 'passed' : 'failed'),
+    status: skipped ? 'skipped' : ((automated ? automated.ok : checksOk) ? 'passed' : 'failed'),
+    ...(automated ? { validationMode, automated } : {}),
     skipped,
     skipReason: skipped ? skipReason : undefined,
     matlabAvailable: matlab.available,
@@ -130,6 +139,145 @@ export function inspectMatlabPlotRegression(options = {}) {
     runtime,
     figures: figureChecks,
   };
+}
+
+function inspectAutomatedRegression({ manifest, figureChecks, runtime, structureOk,
+  scienceSemanticsOk, interactionOk, skipped }) {
+  const pending = [];
+  const violations = [];
+  const visual = firstObject(manifest?.runtime?.visual_inspection, manifest?.visual_inspection);
+  const visualPending = visual?.verified === false
+    && ['not_run', 'pending', 'not_verified', 'unverified'].includes(normalizeStatus(visual.status));
+  for (const violation of runtime.violations) {
+    if (violation === 'visual_inspection.required' && visualPending) pending.push(`runtime.${violation}`);
+    else violations.push(`runtime.${violation}`);
+  }
+  for (const [name, declaration] of [
+    ['manifest', manifest?.visual_inspection], ['runtime', manifest?.runtime?.visual_inspection],
+  ]) {
+    if (declaration && visualPending && (declaration.verified !== false
+        || !['not_run', 'pending', 'not_verified', 'unverified'].includes(normalizeStatus(declaration.status)))) {
+      violations.push(`${name}.visual_inspection.claim_mismatch`);
+    }
+  }
+  const figures = figureChecks.map((check) => {
+    const figure = objectList(manifest?.figures)[check.index];
+    const publication = inspectAutomatedPublication(figure, check.publicationQuality, visualPending);
+    const baselinePending = check.png?.baselinePending === true;
+    const artifactsOk = REQUIRED_FORMATS.every((format) => check[format])
+      && SUPPORTED_FORMATS.every((format) => !check[format]
+        || (format === 'png' ? check.png.runtimeArtifactOk : check[format].ok));
+    const baselineOk = check.pixelDiffOk || baselinePending;
+    const figureViolations = [...publication.violations];
+    if (!artifactsOk) figureViolations.push('artifacts');
+    if (!baselineOk) figureViolations.push('png.pixel_diff');
+    const figurePending = [...publication.pending];
+    if (baselinePending) figurePending.push('png.baseline_not_found');
+    pending.push(...figurePending.map((name) => `figures[${check.index}].${name}`));
+    violations.push(...figureViolations.map((name) => `figures[${check.index}].${name}`));
+    return { id: check.id, artifactsOk, baseline: baselinePending ? 'pending' : (check.pixelDiffOk ? 'passed' : 'failed'),
+      publication: publication.violations.length ? 'failed' : (publication.pending.length ? 'pending' : 'passed'),
+      pending: figurePending, violations: figureViolations };
+  });
+  if (!structureOk) violations.push('structure');
+  if (!scienceSemanticsOk) violations.push('science');
+  if (!interactionOk) violations.push('interaction');
+  const reviewState = (field) => figures.some((figure) => figure[field] === 'failed') ? 'failed'
+    : (figures.some((figure) => figure[field] === 'pending') ? 'pending' : 'passed');
+  return {
+    scope: 'automated_runtime_and_artifacts_only',
+    ok: !skipped && figures.length > 0 && violations.length === 0,
+    runtime: skipped ? 'not_verified' : (violations.length ? 'failed' : 'passed'),
+    visualInspection: violations.some((name) => name.includes('visual_inspection')) ? 'failed'
+      : (visualPending ? 'pending' : (runtime.visualInspectionVerified ? 'passed' : 'not_verified')),
+    baseline: figures.length ? reviewState('baseline') : 'not_verified',
+    publication: figures.length ? reviewState('publication') : 'not_verified',
+    pending, violations, figures,
+  };
+}
+
+function inspectAutomatedPublication(figure, strict, visualPending) {
+  const contract = figure.publication || figure.publication_quality || {};
+  const evidence = figure.rendering_evidence || {};
+  const typography = contract.typography || contract.fonts || {};
+  const color = contract.color || contract.colour || {};
+  const audit = color.audit || {};
+  const pending = [];
+  const violations = [];
+  const visualNotVerified = visualPending && evidence.visual_inspection_verified === false;
+  const paletteStatus = normalizeStatus(audit.palette_status);
+  const redundantEncoding = audit.redundant_encoding === true;
+  const paletteVerified = color.automated_palette_safe === true && audit.schema_version === 1
+    && normalizeStatus(audit.status) === 'pass' && audit.visual_inspection_verified === false
+    && ['colorblind_status', 'redundant_encoding_status'].every((name) => normalizeStatus(audit[name]) === 'pass')
+    && ['pass', 'not_applicable'].includes(normalizeStatus(audit.category_status))
+    && ['pass', 'not_applicable', 'fail', 'unknown'].includes(paletteStatus)
+    && audit.palette_distinct === ['pass', 'not_applicable'].includes(paletteStatus)
+    && audit.redundant_encoding === (normalizeStatus(audit.redundant_encoding_status) === 'pass')
+    && (redundantEncoding || audit.palette_distinct === true)
+    && ['pass', 'not_evaluated'].includes(normalizeStatus(audit.continuous_color_status))
+    && !auditHasFailure(audit, redundantEncoding);
+  for (const violation of strict.violations) {
+    const deferred = visualNotVerified && (
+      (violation === 'typography.glyphs_verified' && typography.glyphs_verified === false
+        && evidence.cjk_font_evidence?.glyph_rendering_verified === false)
+      || (violation === 'typography.cjk_verified' && typography.cjk_verified === false
+        && evidence.cjk_font_evidence?.glyph_rendering_verified === false
+        && evidence.cjk_font_candidate_verified === true)
+      || (violation === 'typography.pdf_fonts_embedded' && typography.pdf_fonts_embedded === false
+        && evidence.pdf_font_embedding_verified === false)
+      || (violation === 'color.colorblind_safe' && color.colorblind_safe === false && paletteVerified)
+      || (violation === 'layout.stable' && pendingNativeTitleBounds(figure, contract.layout, evidence))
+    );
+    (deferred ? pending : violations).push(`publication.${violation}`);
+  }
+  if ((Object.hasOwn(color, 'automated_palette_safe') || Object.keys(audit).length > 0) && !paletteVerified) {
+    violations.push('publication.color.automated_palette_evidence');
+  }
+  const layout = contract.layout || {};
+  if (Object.keys(evidence).length > 0 && (evidence.bounds_audit_complete !== layout.stable
+      || evidence.text_overlap_count !== layout.overlap_count || evidence.clipped_count !== layout.clipped_count
+      || !validMargins(evidence.normalized_margins) || !validMargins(layout.margins)
+      || !layout.margins.every((margin, index) => margin === evidence.normalized_margins[index]))) {
+    violations.push('publication.layout.rendering_evidence_mismatch');
+  }
+  if (visualPending && (evidence.visual_inspection_verified === true
+      || (figure.visual_inspection && (figure.visual_inspection.verified !== false
+        || !['not_run', 'pending', 'not_verified', 'unverified'].includes(normalizeStatus(figure.visual_inspection.status)))))) {
+    violations.push('visual_inspection.claim_mismatch');
+  }
+  return { pending, violations };
+}
+
+function auditHasFailure(value, redundantEncoding, depth = 0) {
+  if (!value || typeof value !== 'object') return false;
+  if (depth > MAXIMUM_AUDIT_DEPTH) return true;
+  return Object.entries(value).some(([name, entry]) => {
+    if (name === 'status' || name.endsWith('_status')) {
+      const allowed = name === 'palette_status' && redundantEncoding
+        ? ['pass', 'not_applicable', 'fail', 'unknown'] : ['pass', 'not_applicable', 'not_evaluated'];
+      if (!allowed.includes(normalizeStatus(entry))) return true;
+    }
+    return auditHasFailure(entry, redundantEncoding, depth + 1);
+  });
+}
+
+function pendingNativeTitleBounds(figure, layout, evidence) {
+  const unmeasured = objectList(figure.unmeasured_text_objects);
+  return layout?.stable === false && evidence.bounds_audit_complete === false
+    && evidence.drawnow_completed === true && evidence.bounds_audited === true
+    && evidence.bounds_units === 'normalized' && evidence.bounds_audit_scope === 'measured_objects_only'
+    && unmeasured.length > 0 && evidence.unmeasured_count === unmeasured.length
+    && (!Array.isArray(figure.unmeasured_text_objects) || figure.unmeasured_text_objects.length === unmeasured.length)
+    && evidence.text_overlap_count === 0 && layout.overlap_count === 0
+    && evidence.clipped_count === 0 && layout.clipped_count === 0
+    && validMargins(evidence.normalized_margins) && validMargins(layout.margins)
+    && layout.margins.every((margin, index) => margin === evidence.normalized_margins[index])
+    && unmeasured.every((text) => (
+      (text.role === 'legend.title' && text.class === 'matlab.graphics.illustration.legend.Text')
+      || (text.role === 'layout.title' && text.class === 'matlab.graphics.layout.Text'))
+      && text.geometry_status === 'unverified' && nonEmptyString(text.string)
+      && nonEmptyString(text.font_name) && positiveNumber(text.font_size));
 }
 
 export function runMatlabPlotRegressionCli(argumentsList = process.argv.slice(2)) {
@@ -570,8 +718,23 @@ function inspectPngArtifact(base, metadata, baselineDirectory, options) {
       && approximatelyEqual(candidate.embeddedDpiY, metadata.dpi));
   const dpiOk = declaredDpiOk && embeddedDpiMatches
     && (options.requireEmbeddedPngDpi !== true || embeddedDpiPresent);
+  let runtimeArtifact;
+  if (options.validationMode === 'runtime-artifacts') {
+    let decodeOk = false;
+    let decodeError = candidate.reason;
+    if (candidate.ok) {
+      try { decodePng(candidate); decodeOk = true; } catch (error) { decodeError = error.message; }
+    }
+    runtimeArtifact = {
+      decodeOk, decodeError,
+      runtimeArtifactOk: base.present && base.nonEmpty && base.sizeOk && base.bytesOk && base.checksumOk
+        && candidate.ok && dimensionsOk && dpiOk && embeddedDpiPresent && decodeOk,
+      baselinePending: pixelDiff.reason === 'baseline_not_found' && !baselineDirectory,
+    };
+  }
   return {
     ...base,
+    ...runtimeArtifact,
     width: candidate.width,
     height: candidate.height,
     dimensionsOk,
@@ -2022,6 +2185,7 @@ function parseCliArguments(argumentsList) {
     ['--manifest', ['manifestPath', String]],
     ['--output', ['outputDirectory', String]],
     ['--baseline', ['baselineDirectory', String]],
+    ['--validation-mode', ['validationMode', String]],
     ['--matlab-command', ['matlabCommand', String]],
     ['--matlab-command-mode', ['matlabCommandMode', String]],
     ['--target-matlab-release', ['targetMatlabRelease', String]],
@@ -2063,6 +2227,9 @@ function parseCliArguments(argumentsList) {
     } else throw new Error(`unknown argument: ${argument}`);
   }
   if (!nonEmptyString(options.manifestPath)) throw new Error('--manifest is required');
+  if (options.validationMode !== undefined && !VALIDATION_MODES.includes(options.validationMode)) {
+    throw new Error('invalid validation mode');
+  }
   return options;
 }
 

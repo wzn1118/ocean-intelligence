@@ -365,6 +365,338 @@ function inspect(fixture, additional = {}) {
   });
 }
 
+function automaticFixture(context) {
+  const fixture = createFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  addRuntimeContract(fixture);
+  fixture.manifest.visual_inspection = { status: 'not_run', verified: false };
+  const figure = fixture.manifest.figures[0];
+  figure.scientific_data_contract = scienceContract();
+  figure.publication = publicationContract();
+  Object.assign(figure.publication.typography, { glyphs_verified: false, pdf_fonts_embedded: false });
+  Object.assign(figure.publication.color, {
+    colorblind_safe: false, automated_palette_safe: true,
+    audit: { schema_version: 1, status: 'pass', visual_inspection_verified: false,
+      redundant_encoding: true, palette_distinct: true,
+      colorblind_status: 'pass', redundant_encoding_status: 'pass', category_status: 'not-applicable',
+      palette_status: 'not-applicable', continuous_color_status: 'not-evaluated' },
+  });
+  figure.rendering_evidence = {
+    visual_inspection_verified: false, pdf_font_embedding_verified: false,
+    cjk_font_candidate_verified: true, cjk_font_evidence: { glyph_rendering_verified: false },
+    drawnow_completed: true, bounds_audited: true, bounds_units: 'normalized',
+    bounds_audit_scope: 'measured_objects_only', bounds_audit_complete: true,
+    unmeasured_count: 0, text_overlap_count: 0, clipped_count: 0,
+    normalized_margins: [...figure.publication.layout.margins],
+  };
+  figure.unmeasured_text_objects = [];
+  writeManifest(fixture);
+  return fixture;
+}
+
+function inspectAutomatic(fixture, additional = {}) {
+  return inspect(fixture, {
+    validationMode: 'runtime-artifacts', baselineDirectory: '',
+    requireRuntimeContract: true, requireScienceContract: true, requirePublicationContract: true,
+    requireInteractionContract: true, expectHeadless: true,
+    minimumPublicationWidth: 2, minimumPublicationHeight: 2,
+    ...additional,
+  });
+}
+
+function unmeasuredTitleFixture(context) {
+  const fixture = automaticFixture(context);
+  const figure = fixture.manifest.figures[0];
+  figure.publication.layout.stable = false;
+  Object.assign(figure.rendering_evidence, { bounds_audit_complete: false, unmeasured_count: 1 });
+  figure.unmeasured_text_objects = [{ role: 'layout.title', string: 'Interactive time series',
+    font_name: 'WenQuanYi Zen Hei', font_size: 13,
+    class: 'matlab.graphics.layout.Text', geometry_status: 'unverified' }];
+  return fixture;
+}
+
+test('runtime-artifacts mode preserves the default full regression gate and pending claims', (context) => {
+  const fixture = automaticFixture(context);
+  const original = readFileSync(fixture.manifestPath);
+  const strict = inspectAutomatic(fixture, { validationMode: 'full-regression' });
+  const implicit = inspectAutomatic(fixture, { validationMode: undefined });
+  assert.deepEqual(implicit, strict);
+  assert.equal(strict.status, 'failed');
+  assert.equal(strict.regressionOk, false);
+  assert.ok(strict.runtime.violations.includes('visual_inspection.required'));
+  const automatic = inspectAutomatic(fixture);
+  assert.equal(automatic.status, 'passed');
+  assert.equal(automatic.automated.ok, true);
+  assert.equal(automatic.automated.runtime, 'passed');
+  assert.equal(automatic.automated.visualInspection, 'pending');
+  assert.equal(automatic.automated.baseline, 'pending');
+  assert.equal(automatic.automated.publication, 'pending');
+  for (const field of ['regressionOk', 'imageRegressionOk', 'visualInspectionVerified', 'publicationQualityOk']) {
+    assert.equal(automatic[field], false, field);
+  }
+  assert.equal(automatic.figures[0].png.decodeOk, true);
+  assert.equal(automatic.figures[0].png.pixelDiff.ok, false);
+  assert.equal(automatic.automated.pending.length, 5);
+  assert.deepEqual(readFileSync(fixture.manifestPath), original);
+});
+
+test('runtime-artifacts mode rejects byte, hash, dimensions and DPI failures without a baseline', async (context) => {
+  for (const format of ['png', 'pdf', 'svg']) {
+    for (const field of ['bytes', 'sha256', 'width', 'height']) {
+      await context.test(`${format}/${field}`, (subtest) => {
+        const fixture = automaticFixture(subtest);
+        const artifact = fixture.manifest.figures[0].exports[format];
+        artifact[field] = field === 'sha256' ? '0'.repeat(64) : artifact[field] + 1;
+        writeManifest(fixture);
+        assert.equal(inspectAutomatic(fixture).status, 'failed');
+      });
+    }
+  }
+  for (const dpi of [72, null]) {
+    await context.test(`embedded DPI ${dpi}`, (subtest) => {
+      const fixture = automaticFixture(subtest);
+      writePng(fixture.pngPath, Array(16).fill(0), { dpi });
+      refreshArtifact(fixture, 'png', fixture.pngPath);
+      const result = inspectAutomatic(fixture);
+      assert.equal(result.status, 'failed');
+      assert.equal(result.figures[0].png.runtimeArtifactOk, false);
+    });
+  }
+});
+
+test('runtime-artifacts mode decodes PNG IDAT even with valid hashes, CRCs and no baseline', async (context) => {
+  for (const kind of ['invalid-deflate', 'invalid-scanlines', 'invalid-filter', 'crc', 'size-limit']) {
+    await context.test(kind, (subtest) => {
+      const fixture = automaticFixture(subtest);
+      const original = readFileSync(fixture.pngPath);
+      if (kind === 'crc') {
+        original[original.length - 1] ^= 0xff;
+        writeFileSync(fixture.pngPath, original);
+      } else if (kind !== 'size-limit') {
+        let offset = PNG_SIGNATURE.length;
+        while (original.toString('ascii', offset + 4, offset + 8) !== 'IDAT') offset += original.readUInt32BE(offset) + 12;
+        const scanlines = Buffer.alloc(18);
+        scanlines[0] = 9;
+        const body = kind === 'invalid-deflate' ? Buffer.from('invalid deflate')
+          : deflateSync(kind === 'invalid-filter' ? scanlines : Buffer.from([0]));
+        writeFileSync(fixture.pngPath, Buffer.concat([
+          original.subarray(0, offset), pngChunk('IDAT', body),
+          original.subarray(offset + original.readUInt32BE(offset) + 12),
+        ]));
+      }
+      refreshArtifact(fixture, 'png', fixture.pngPath);
+      const result = inspectAutomatic(fixture, kind === 'size-limit' ? { maximumPngBytes: 1 } : {});
+      assert.equal(result.status, 'failed');
+      assert.equal(result.figures[0].png.decodeOk, false);
+      assert.equal(result.figures[0].png.runtimeArtifactOk, false);
+      if (kind.startsWith('invalid-')) assert.equal(result.figures[0].png.headerOk, true);
+    });
+  }
+});
+
+test('runtime-artifacts mode does not suppress provided baseline mismatches or corruption', (context) => {
+  const fixture = automaticFixture(context);
+  writePng(path.join(fixture.baseline, 'figure.png'), Array(16).fill(255));
+  const mismatch = inspectAutomatic(fixture, { baselineDirectory: fixture.baseline });
+  assert.equal(mismatch.status, 'failed');
+  assert.equal(mismatch.automated.baseline, 'failed');
+  writeFileSync(path.join(fixture.baseline, 'figure.png'), 'not a PNG');
+  assert.equal(inspectAutomatic(fixture, { baselineDirectory: fixture.baseline }).status, 'failed');
+  rmSync(path.join(fixture.baseline, 'figure.png'));
+  for (const baselineDirectory of [fixture.baseline, path.join(fixture.root, 'missing-baseline-directory')]) {
+    const missing = inspectAutomatic(fixture, { baselineDirectory });
+    assert.equal(missing.status, 'failed');
+    assert.equal(missing.automated.baseline, 'failed');
+    assert.equal(missing.figures[0].png.baselinePending, false);
+  }
+});
+
+test('runtime-artifacts mode keeps runtime, scientific and headless interaction failures fatal', async (context) => {
+  for (const [name, mutate] of [
+    ['runtime', (fixture) => { fixture.manifest.execution_verified = false; }],
+    ['release', (fixture) => { fixture.manifest.matlab_release = 'not MATLAB'; }],
+    ['errors', (fixture) => { fixture.manifest.errors = [{ code: 'EXPORT_FAILED' }]; }],
+    ['science', (fixture) => { delete fixture.manifest.figures[0].scientific_data_contract; }],
+    ['interaction', (fixture) => { fixture.manifest.figures[0].interaction.headless.verified = false; }],
+  ]) {
+    await context.test(name, (subtest) => {
+      const fixture = automaticFixture(subtest); mutate(fixture); writeManifest(fixture);
+      assert.equal(inspectAutomatic(fixture).status, 'failed');
+    });
+  }
+});
+
+test('runtime-artifacts mode rejects failed, malformed and contradictory visual claims', async (context) => {
+  for (const visual of [
+    { status: 'passed', verified: false }, { status: 'not_run', verified: true },
+    { status: 'failed', verified: false }, { status: 'pending' }, { status: 'pending', verified: 0 },
+  ]) {
+    await context.test(JSON.stringify(visual), (subtest) => {
+      const fixture = automaticFixture(subtest);
+      fixture.manifest.visual_inspection = visual; writeManifest(fixture);
+      assert.equal(inspectAutomatic(fixture).status, 'failed');
+    });
+  }
+  const fixture = automaticFixture(context);
+  fixture.manifest.runtime.visual_inspection = { status: 'not_run', verified: false };
+  fixture.manifest.visual_inspection = { status: 'passed', verified: true }; writeManifest(fixture);
+  assert.equal(inspectAutomatic(fixture).status, 'failed');
+});
+
+test('runtime-artifacts mode distinguishes pending publication from actual publication violations', async (context) => {
+  for (const [name, mutate] of [
+    ['overlap', (figure) => { figure.publication.layout.overlap_count = 1; }],
+    ['clipping', (figure) => { figure.publication.layout.clipped_count = 1; }],
+    ['margins', (figure) => { figure.publication.layout.margins = [-1, 0, 0, 0]; }],
+    ['unbound-stability', (figure) => { figure.publication.layout.stable = false; }],
+    ['verified-pdf-failure', (figure) => { figure.rendering_evidence.pdf_font_embedding_verified = true; }],
+    ['no-pending-evidence', (figure) => { delete figure.rendering_evidence; }],
+    ['actual-palette-failure', (figure) => { figure.publication.color.automated_palette_safe = false; }],
+    ['audit-failure', (figure) => { figure.publication.color.audit.status = 'failed'; }],
+    ['audit-leaf-failure', (figure) => { figure.publication.color.audit.colorblind_status = 'fail'; }],
+    ['nested-audit-failure', (figure) => { figure.publication.color.audit.axes = [{ status: 'failed' }]; }],
+    ['rendering-overlap', (figure) => { figure.rendering_evidence.text_overlap_count = 1; }],
+    ['rendering-clipping', (figure) => { figure.rendering_evidence.clipped_count = 1; }],
+    ['false-figure-visual', (figure) => { figure.visual_inspection = { status: 'passed', verified: false }; }],
+    ['redundant-encoding', (figure) => { figure.publication.color.redundant_encoding = false; }],
+  ]) {
+    await context.test(name, (subtest) => {
+      const fixture = automaticFixture(subtest); mutate(fixture.manifest.figures[0]); writeManifest(fixture);
+      const result = inspectAutomatic(fixture);
+      assert.equal(result.status, 'failed');
+      assert.equal(result.automated.publication, 'failed');
+    });
+  }
+});
+
+test('runtime-artifacts mode accepts native redundant encodings despite indistinct palette colors', (context) => {
+  const fixture = automaticFixture(context);
+  const audit = fixture.manifest.figures[0].publication.color.audit;
+  Object.assign(audit, {
+    palette_distinct: false, palette_status: 'fail', minimum_pair_distance: 0,
+    axes: [{ status: 'pass', palette_status: 'fail', groups: [
+      { non_color_signature: '-|o', color: [0, 0, 0] },
+      { non_color_signature: '--|s', color: [0, 0, 0] },
+    ] }],
+  });
+  writeManifest(fixture);
+  const result = inspectAutomatic(fixture);
+  assert.equal(result.status, 'passed');
+  assert.equal(result.automated.publication, 'pending');
+  assert.equal(result.visualInspectionVerified, false);
+  audit.status = 'fail';
+  writeManifest(fixture);
+  assert.equal(inspectAutomatic(fixture).status, 'failed');
+});
+
+test('runtime-artifacts mode defers only evidence-bound native title geometry without changing strict mode', async (context) => {
+  for (const [name, roles, singleton] of [
+    ['layout singleton', ['layout'], true], ['layout array', ['layout'], false],
+    ['legend singleton', ['legend'], true], ['legend array', ['legend'], false],
+    ['both native titles', ['layout', 'legend'], false],
+  ]) {
+    await context.test(name, (subtest) => {
+      const fixture = unmeasuredTitleFixture(subtest);
+      const figure = fixture.manifest.figures[0];
+      const records = roles.map((role) => ({ ...figure.unmeasured_text_objects[0], role: `${role}.title`,
+        class: role === 'layout' ? 'matlab.graphics.layout.Text' : 'matlab.graphics.illustration.legend.Text' }));
+      figure.unmeasured_text_objects = singleton ? records[0] : records;
+      figure.rendering_evidence.unmeasured_count = records.length;
+      writeManifest(fixture);
+      const result = inspectAutomatic(fixture);
+      assert.equal(result.status, 'passed');
+      assert.equal(result.automated.publication, 'pending');
+      assert.ok(result.automated.pending.includes('figures[0].publication.layout.stable'));
+      for (const field of ['publicationQualityOk', 'imageRegressionOk', 'visualInspectionVerified', 'regressionOk']) {
+        assert.equal(result[field], false, field);
+      }
+      const strict = inspectAutomatic(fixture, { validationMode: 'full-regression' });
+      assert.deepEqual(inspectAutomatic(fixture, { validationMode: undefined }), strict);
+      assert.equal(strict.status, 'failed');
+      assert.ok(strict.figures[0].publicationQuality.violations.includes('layout.stable'));
+    });
+  }
+});
+
+test('runtime-artifacts mode rejects unknown title roles, classes and unbound geometry', async (context) => {
+  for (const [name, mutate] of [
+    ['unknown-role', (figure) => { figure.unmeasured_text_objects[0].role = 'axes.title'; }],
+    ['layout-subtitle', (figure) => { figure.unmeasured_text_objects[0].role = 'layout.subtitle'; }],
+    ['layout-xlabel', (figure) => { figure.unmeasured_text_objects[0].role = 'layout.xlabel'; }],
+    ['layout-legend-class', (figure) => { figure.unmeasured_text_objects[0].class = 'matlab.graphics.illustration.legend.Text'; }],
+    ['legend-layout-class', (figure) => { figure.unmeasured_text_objects[0].role = 'legend.title'; }],
+    ['primitive-class', (figure) => { figure.unmeasured_text_objects[0].class = 'matlab.graphics.primitive.Text'; }],
+    ['missing-class', (figure) => { delete figure.unmeasured_text_objects[0].class; }],
+    ['claimed-geometry', (figure) => { figure.unmeasured_text_objects[0].geometry_status = 'verified'; }],
+    ['empty-text', (figure) => { figure.unmeasured_text_objects[0].string = ''; }],
+    ['missing-font', (figure) => { delete figure.unmeasured_text_objects[0].font_name; }],
+    ['invalid-font-size', (figure) => { figure.unmeasured_text_objects[0].font_size = 0; }],
+    ['count-mismatch', (figure) => { figure.rendering_evidence.unmeasured_count = 2; }],
+    ['missing-record', (figure) => { figure.unmeasured_text_objects = []; }],
+    ['malformed-record', (figure) => { figure.unmeasured_text_objects.push(null); }],
+    ['mixed-unknown-role', (figure) => {
+      figure.unmeasured_text_objects.push({ ...figure.unmeasured_text_objects[0], role: 'unknown.title' });
+      figure.rendering_evidence.unmeasured_count = 2;
+    }],
+    ['no-drawnow', (figure) => { figure.rendering_evidence.drawnow_completed = false; }],
+    ['no-bounds-audit', (figure) => { figure.rendering_evidence.bounds_audited = false; }],
+    ['complete-bounds-audit', (figure) => { figure.rendering_evidence.bounds_audit_complete = true; }],
+    ['wrong-bounds-units', (figure) => { figure.rendering_evidence.bounds_units = 'pixels'; }],
+    ['wrong-bounds-scope', (figure) => { figure.rendering_evidence.bounds_audit_scope = 'all_objects'; }],
+    ['margin-mismatch', (figure) => { figure.rendering_evidence.normalized_margins[0] += 0.01; }],
+    ['negative-margins', (figure) => {
+      figure.rendering_evidence.normalized_margins[0] = -0.01; figure.publication.layout.margins[0] = -0.01;
+    }],
+    ['overlap', (figure) => { figure.rendering_evidence.text_overlap_count = 1; figure.publication.layout.overlap_count = 1; }],
+    ['clipping', (figure) => { figure.rendering_evidence.clipped_count = 1; figure.publication.layout.clipped_count = 1; }],
+    ['missing-visual-evidence', (figure) => { delete figure.rendering_evidence.visual_inspection_verified; }],
+  ]) {
+    await context.test(name, (subtest) => {
+      const fixture = unmeasuredTitleFixture(subtest);
+      mutate(fixture.manifest.figures[0]); writeManifest(fixture);
+      const result = inspectAutomatic(fixture);
+      assert.equal(result.status, 'failed');
+      assert.equal(result.automated.publication, 'failed');
+      assert.ok(result.automated.violations.includes('figures[0].publication.layout.stable'));
+      assert.ok(!result.automated.pending.includes('figures[0].publication.layout.stable'));
+    });
+  }
+});
+
+test('runtime-artifacts mode bounds nested color audit depth and rejects excessive nesting', async (context) => {
+  for (const depth of [64, 65, 1024]) {
+    await context.test(`depth ${depth}`, (subtest) => {
+      const fixture = automaticFixture(subtest);
+      let nested = fixture.manifest.figures[0].publication.color.audit;
+      for (let level = 1; level <= depth; level += 1) {
+        const child = level % 2 === 0 ? [] : {};
+        if (Array.isArray(nested)) nested.push(child);
+        else nested.child = child;
+        nested = child;
+      }
+      writeManifest(fixture);
+      const result = inspectAutomatic(fixture);
+      assert.equal(result.status, depth <= 64 ? 'passed' : 'failed');
+      assert.equal(result.automated.publication, depth <= 64 ? 'pending' : 'failed');
+      assert.equal(result.automated.violations.includes('figures[0].publication.color.automated_palette_evidence'), depth > 64);
+    });
+  }
+});
+
+test('runtime-artifacts mode is explicit in the CLI and invalid modes are rejected', (context) => {
+  const fixture = automaticFixture(context);
+  const argumentsList = ['--manifest', fixture.manifestPath, '--output', fixture.root,
+    '--no-require-matlab', '--minimum-png-bytes', '1', '--minimum-pdf-bytes', '1', '--minimum-svg-bytes', '1',
+    '--minimum-publication-width', '2', '--minimum-publication-height', '2'];
+  assert.equal(runMatlabPlotRegressionCli(argumentsList).exitCode, 1);
+  const automatic = runMatlabPlotRegressionCli([...argumentsList, '--validation-mode', 'runtime-artifacts']);
+  assert.equal(automatic.exitCode, 0);
+  assert.equal(automatic.output.visualInspectionVerified, false);
+  assert.equal(automatic.output.imageRegressionOk, false);
+  assert.equal(runMatlabPlotRegressionCli([...argumentsList, '--validation-mode', 'ignore-errors']).exitCode, 2);
+  assert.throws(() => inspectAutomatic(fixture, { validationMode: true }), /invalid validation mode/u);
+});
+
 function withUnitProbeProcesses(context, results, callback) {
   const pending = [...results];
   const simulated = context.mock.method(childProcess, 'spawnSync', () => {

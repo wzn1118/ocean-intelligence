@@ -307,7 +307,8 @@ test('sets final inches before plot construction without weakening clipping gate
 
 test('distinguishes general API availability from the repository exact export policy', () => {
   const expectedTable = [
-    ['R2019b-R2024b', 'print -dpng', 'print -dpdf', 'print -dsvg'],
+    ['R2019b', 'print -dpng', 'print -dpdf', 'print -dsvg'],
+    ['R2020a-R2024b', 'print -dpng', 'exportgraphics with same-figure canvas', 'print -dsvg'],
     ['R2025a+', 'exact exportgraphics', 'exact exportgraphics', 'exact exportgraphics'],
   ];
   assert.deepEqual(repositoryExportTable(repositorySkill), expectedTable);
@@ -323,6 +324,9 @@ test('distinguishes general API availability from the repository exact export po
     assert.match(instructions, /oi_export_figure \+ oi_write_manifest 的严格固定尺寸路径/u);
     assert.match(instructions, /失败必须保留错误并停止，不得静默 print 重试/u);
     assert.match(instructions, /逐图、逐格式记录实际 export_api，并与 runtime 一致/u);
+    assert.match(instructions, /same_figure_background_axes/u);
+    assert.match(instructions, /不移动或复制原绘图对象/u);
+    assert.match(instructions, /R2020a 尚未实跑/u);
   }
   assert.match(repositorySkill, /General `exportgraphics` is available from R2020a/u);
   assert.match(repositorySkill, /never silently retry with `print`/u);
@@ -743,8 +747,8 @@ test('scopes the WenQuanYi preference to the tested native vector font evidence'
   assert.match(repositorySkill, /without an explicit user `FontName`, prefer `WenQuanYi Zen Hei` after exact installation checks/u);
   assert.match(repositorySkill, /Font probe 33985570222/u);
   assert.match(repositorySkill, /content-cropped, not exact-page exports/u);
-  assert.match(repositorySkill, /R2021a\/R2024b `print` PDFs still lacked embedded fonts/u);
-  assert.match(repositorySkill, /does not authorize changing the strict export strategy/u);
+  assert.match(repositorySkill, /Historical R2021a\/R2024b `print` PDFs still lack embedded fonts/u);
+  assert.match(repositorySkill, /same-figure-canvas strategy above has separate native evidence and does not alter those originals/u);
   assert.match(repositorySkill, /Validate whole-figure layout, final size, bold text, rotated Chinese labels, and PNG\/SVG independently/u);
 });
 

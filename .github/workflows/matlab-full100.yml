@@ -152,7 +152,7 @@ jobs:
         with:
           startup-options: ${{ matrix.release == 'R2026a' && '-display :97' || '' }}
           command: addpath('codex-runtime/matlab/tests'); run_github_full100('${{ matrix.release }}', getenv('MATLAB_FULL100_OUTPUT'), getenv('MATLAB_EVAL_NONCE'))
-      - name: Validate MATLAB evidence and compute runtime score
+      - name: Validate automated MATLAB contracts and collect score evidence
         id: runtime-score
         if: always()
         continue-on-error: true
@@ -192,7 +192,7 @@ jobs:
         if: always() && env.MATLAB_PRIMARY_XVFB_PID != ''
         shell: bash
         run: kill "$MATLAB_PRIMARY_XVFB_PID" || true
-      - name: Enforce MATLAB runtime and score gate
+      - name: Enforce MATLAB runtime and artifact gates
         if: always()
         shell: bash
         env:
@@ -221,5 +221,6 @@ jobs:
       - name: Report next gate
         run: |
           echo "Runtime artifacts are available from the three MATLAB jobs."
+          echo "Passing runtime jobs does not certify a score of 100 or visual approval."
           echo "Download them, perform the hash-bound visual/CJK/interaction audit,"
           echo "then rerun evaluate.py with --runtime require --visual-audit <trusted JSON>."

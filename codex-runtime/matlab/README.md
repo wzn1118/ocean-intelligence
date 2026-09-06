@@ -10,7 +10,9 @@
 
 `tests/run_plot_regression.m` 生成固定尺寸的 PNG/PDF 与 `figures.json`。manifest 同时记录导出尺寸、字节数、SHA-256、PDF 页数，以及文字/轴对象清单。
 
-`oi_export_figure` 的严格尺寸路径在 R2019b-R2024b 仍明确使用 `print`，不是导出失败后的重试。R2025a+ 原生 PNG 使用 `Units="inches"`、`Width=widthPixels/dpi`、`Height=heightPixels/dpi`、`Resolution=dpi`、`PreserveAspectRatio="off"`；PDF/SVG 保持相同物理尺寸的 inches 与 `PreserveAspectRatio="on"`，均使用 `Padding="figure"`。绘图前先设置最终物理画布，不能把屏幕像素当输出像素。逐格式 `runtime.export_size_units` 记录实际路径的 inches；目标策略不能冒充执行证据。
+`oi_export_figure` 在 R2019b-R2024b 使用 `print` 保持 PNG/SVG 的严格尺寸；R2020a-R2024b 的 PDF 改用原 figure 底层临时白色画布与原生矢量 `exportgraphics`，修复旧 `print` 将字体替换为未嵌入 Courier 的问题。不会移动或复制原绘图对象，也不改写导出文件，清理后保留原 children 顺序和 current axes，记录 `pdf_canvas_strategy="same_figure_background_axes"`。R2021a/R2024b 四 fixture 对照的八份 PDF 尺寸和字体嵌入通过、八组导出前后 PNG 像素相同；不是完整视觉批准，R2020a 尚未实跑。R2019b PDF 保留显式 `print` 路径。
+
+R2025a+ 原生 PNG 使用 `Units="inches"`、`Width=widthPixels/dpi`、`Height=heightPixels/dpi`、`Resolution=dpi`、`PreserveAspectRatio="off"`；PDF/SVG 保持相同物理尺寸的 inches 与 `PreserveAspectRatio="on"`，均使用 `Padding="figure"`。绘图前先设置最终物理画布，不能把屏幕像素当输出像素。逐格式 `runtime.export_size_units` 记录实际路径的 inches；目标策略不能冒充执行证据。导出错误直接失败，不静默重试或修改尺寸门禁。
 
 第11轮有限探针中，保持宽高比 on 为 2/6 尺寸准确，off 为 6/6；但 pixels/off 实图出现字体缩小和刻度变多，拒绝作为生产方案。inches/off 保留近似原物理字号且所测 3/3 尺寸准确，但轴位置和留白有变化。第12、13轮各通过 57/60 个 CI 阶段，R2021a/R2024b/R2026a 各为 19/20；三版全量原生回归的尺寸检查已通过，包含 R2026a PNG inches/off 路径，不再仅有早期探针证据。三幅 unit-circle 图的局部像素包围框宽高差不超过 2 个边缘像素，但这不是全图视觉保证。仍须逐图核验字体、刻度、裁切与各格式产物，不做导出后 resize、重采样、裁切或填边，不放宽既有门禁。
 
@@ -37,6 +39,8 @@
 - 基线 PNG 使用与输出 manifest 相同的相对文件名；像素阈值可通过 `inspectMatlabPlotRegression` 的 `pixelChannelThreshold` 与 `pixelDiffRatioThreshold` 配置。
 
 `taskType="interactive"` 的 MATLAB 路由会实际调用原生交互模板；其生成脚本额外接收 `ObservationID`、`Station` 和 `QCFlag`，并在生成前校验逐点对齐。对应 Node 契约测试与 MATLAB 回归均在上述回归入口中覆盖。
+
+CI 的 `inspectMatlabPlotRegression` 显式选择 `validationMode="runtime-artifacts"`，只验自动运行和产物合同，并对回归十图的三十件产物单独执行严格外检。未配置图像基线、未进行视觉审阅、明确列出的原生未测标题保持 pending；显式基线缺失、文件损坏、字体嵌入失败、实际布局或科学合同错误仍失败。默认 `full-regression` 模式不变，自动模式不把 `regressionOk`、`imageRegressionOk` 或 `visualInspectionVerified` 改成 true，也不授予 100 分。
 
 `oi_plot_comparison` 的显式 `UncertaintySides="observation"` 支持只有观测侧的 `standard-uncertainty`。模型不确定度必须省略，不能补零或复制；缺观测不确定度不删除有限且 QC 接受的散点或改变统计，只是不画该点的水平区间。`result.Uncertainty` 保留对齐原值、提供状态及实际 `GraphicsMask`，原生图例标题说明模型侧未提供。默认双侧契约保持不变。仅在 helper 实际创建的不确定度 Line 上设置既有 appdata `OI_ColorAccessibilityRole="uncertainty"`；第18轮独立 `test_comparison_uncertainty` 已三版完成 PNG/PDF/SVG 导出及 manifest。不改 audit 算法、数据、尺寸或视觉门禁，不能把角色或隐藏 handle 当作任意数据线的免审依据。
 

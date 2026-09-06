@@ -132,16 +132,18 @@ MATLAB 审计导出：codex-runtime/matlab/SKILL.md、codex-runtime/matlab/READM
 
 | Release | PNG | PDF | SVG |
 | --- | --- | --- | --- |
-| R2019b-R2024b | print -dpng | print -dpdf | print -dsvg |
+| R2019b | print -dpng | print -dpdf | print -dsvg |
+| R2020a-R2024b | print -dpng | exportgraphics with same-figure canvas | print -dsvg |
 | R2025a+ | exact exportgraphics | exact exportgraphics | exact exportgraphics |
 
-- 旧版 print 是明确的预选策略，不是失败后的重试。R2025a+ 的 exact exportgraphics 按格式指定尺寸：PNG 使用 Units="inches"、Width=widthPixels/dpi、Height=heightPixels/dpi、Resolution=dpi 和 PreserveAspectRatio="off"；PDF/SVG 使用相同物理尺寸的 Units="inches"、Width=widthPixels/dpi、Height=heightPixels/dpi 和 PreserveAspectRatio="on"；两类均保留 Padding="figure"。绘图前的 figure/layout 仍保持最终 inches，不能把原生 PNG 的尺寸参数误作屏幕画布单位。失败必须保留错误并停止，不得静默 print 重试。逐图、逐格式记录实际 export_api，并与 runtime 一致，不得把预选 API 当成实跑证据。
+- 旧版 print 是明确的预选策略，不是失败后的重试。R2020a-R2024b PDF 使用 oi_export_figure 的 same_figure_background_axes 路径：只添加最底层临时白色画布，用 exportgraphics(figure) 原生矢量导出，不移动或复制原绘图对象，清理后恢复原 children 顺序及 current axes。R2021a/R2024b 四 fixture 共八份 PDF 已验证精确页尺寸和字体嵌入、八组导出前后 PNG 像素相同；不是整体视觉批准，R2020a 尚未实跑。不能使用曾导致空白图的 reparent 包装方案，也不做导出后 PDF 改写。
+- R2025a+ 的 exact exportgraphics 按格式指定尺寸：PNG 使用 Units="inches"、Width=widthPixels/dpi、Height=heightPixels/dpi、Resolution=dpi 和 PreserveAspectRatio="off"；PDF/SVG 使用相同物理尺寸的 Units="inches"、Width=widthPixels/dpi、Height=heightPixels/dpi 和 PreserveAspectRatio="on"；两类均保留 Padding="figure"。绘图前的 figure/layout 仍保持最终 inches，不能把原生 PNG 的尺寸参数误作屏幕画布单位。失败必须保留错误并停止，不得静默 print 重试。逐图、逐格式记录实际 export_api，并与 runtime 一致，不得把预选 API 当成实跑证据。
 - runtime.export_size_units 按实际路径记录：原生 PNG、print PNG、PDF 及请求的 SVG 均为 inches。已有包含 R2026a PNG inches/off 的三版全量原生尺寸回归，三幅 unit-circle 的局部像素宽高差不超过 2 个边缘像素，不是全图视觉保证；pixels/off 实图字体缩小、刻度变多，不采用该路径。不做导出后 resize，不通过重采样、裁切或填边掩盖尺寸错误；每次新图必须重新检查真实 PNG 像素/DPI、字体、刻度、裁切、PDF 页尺寸及 SVG 几何，未验证项保持 unverified。
 - oi_annotate_svg 只对受支持的 SVG 子集做受限嵌套 viewport 规范化，保留内部原生 viewBox 和绘图坐标；这是原生导出后的 XML 后处理，不是未经处理的纯原生 SVG。有限的三版 MATLAB Java DOM 验证不授权未知或不支持的 SVG，必须拒绝，不得泛化覆盖或降低尺寸门禁。
 
 ### 字体与测量
 - MATLAB 字体可用性使用 oi_font_available(theme.FontName)，沿用仓库策略，不额外断言 listfonts 必须枚举所选字体。该 API 精确匹配 listfonts 或 Unix fontconfig 返回的字体族（可忽略大小写），不接受任意 fc-match 替代字体；枚举缺项不等于系统字体缺失。字体存在性不等于 PDF 字体嵌入或实际 glyph/CJK 渲染通过；PNG/PDF/SVG 必须分别核验实际产物，未核验项保持 unverified。
-- MATLAB 的 CJK+Latin 输出在用户未指定 FontName 且精确安装检查通过时，默认优先 WenQuanYi Zen Hei，保持主题、导出器和交互字体一致；不覆盖用户显式字体选择。有限的原生 vector PDF 字体探针是内容裁剪而非精确页，不能声称已解决旧版嵌入或精确页合同，也不能据此更换严格导出策略。整图布局、最终尺寸、粗体、中文旋转轴及 PNG/SVG 仍须分别验证；Noto/Droid 不是等效已验证回退，后端字形失败不等于字体未安装。
+- MATLAB 的 CJK+Latin 输出在用户未指定 FontName 且精确安装检查通过时，默认优先 WenQuanYi Zen Hei，保持主题、导出器和交互字体一致；不覆盖用户显式字体选择。历史上有限的原生 vector PDF 字体探针是内容裁剪而非精确页，不能声称已解决旧版嵌入或精确页合同，也不能据此更换严格导出策略；上表的新同图画布路径有独立的后续实跑证据，不升级旧产物。整图布局、最终尺寸、粗体、中文旋转轴及 PNG/SVG 仍须分别验证；Noto/Droid 不是等效已验证回退，后端字形失败不等于字体未安装。
 - tiledlayout 标题也必须在每个请求格式中核验文本、字形、占位和裁切；已测 layout.Text 无公开 Units/Extent/Position，必须记录未测覆盖，不能用零矩形当成完整几何，也不得仅凭现有 bounds 门禁通过认定标题完整。缺少对应产物证据时保留未验证状态。
 - Legend.Title 的实际类型是 matlab.graphics.illustration.legend.Text，FontSize 固定使用 points，不得设置不支持的 FontUnits。可见且非空的标题若无公开 Extent/Position，必须加入 unmeasured_text_objects，记录 role="legend.title"、class="matlab.graphics.illustration.legend.Text"，并令 bounds_audit_complete=false；不能补零矩形或忽略对象。这是未测量覆盖声明，不是视觉或裁切修复，旧版所测 PDF 图例标题仍有字体和越框问题。
 - 所测 headless 版本中仅 drawnow 可能保留占位文字 Extent；先实际原生渲染对应状态。测量探针放在独立隐藏图中，保留相同字体、字号、旋转与 interpreter，避免干扰源 axes 的自动布局；间距使用源图最终实测几何。PNG 正常、重复导出或 PNG 预热不能证明 PDF/SVG 文字对齐。

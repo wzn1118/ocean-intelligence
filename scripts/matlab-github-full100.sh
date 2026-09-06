@@ -95,22 +95,37 @@ PY
 fi
 
 if require_file regression-manifest "$output_root/regression/run/figures.json"; then
-  run_check regression-contract node --input-type=module - "$output_root/regression/run/figures.json" "$output_root/regression/run" <<'NODE'
+  run_check regression-contract node --input-type=module - "$output_root/regression/run/figures.json" "$output_root/regression/run" \
+    "$expected_release" "$output_root/regression-contract-summary.json" <<'NODE'
+import { writeFileSync } from 'node:fs';
 import { inspectMatlabPlotRegression } from './codex-runtime/server/matlab-plot-regression.mjs';
-const [manifestPath, outputDirectory] = process.argv.slice(2);
+const [manifestPath, outputDirectory, targetMatlabRelease, summaryPath] = process.argv.slice(2);
 const actionLauncher = process.env.MATLAB_ACTIONS_RUN_COMMAND;
 const result = inspectMatlabPlotRegression({
   manifestPath, outputDirectory, baselineDirectory: '',
+  validationMode: 'runtime-artifacts', targetMatlabRelease,
   matlabCommand: actionLauncher || 'matlab',
   matlabCommandMode: actionLauncher ? 'matlab-actions' : 'standard',
   requireMatlab: true, requireSvg: true, requireRuntimeContract: true,
   requireScienceContract: true, requirePublicationContract: true,
-  requireInteractionContract: true, expectHeadless: true,
+  requireInteractionContract: true, expectHeadless: true, requireEmbeddedPngDpi: true,
 });
+writeFileSync(summaryPath, JSON.stringify({
+  validationMode: result.validationMode, status: result.status,
+  ...result.automated,
+  imageRegressionOk: result.imageRegressionOk,
+  visualInspectionVerified: result.visualInspectionVerified,
+  regressionOk: result.regressionOk,
+}, null, 2) + '\n');
 console.log(JSON.stringify(result, null, 2));
 if (result.status !== 'passed') process.exitCode = 1;
 NODE
 fi
+
+run_check regression-rendered-artifacts python3 "$repository_root/codex-runtime/matlab/evals/inspect_rendered_artifacts.py" \
+  --manifest "$output_root/regression/run/figures.json" \
+  --artifact-root "$output_root/regression/run" \
+  --output "$output_root/regression-rendered-artifact-evidence.json"
 
 if require_file interaction-evidence "$output_root/interaction-headless/headless-interaction-evidence.json"; then
   run_check interaction-contract node \
@@ -179,6 +194,24 @@ def records(name):
 
 checks = records("CHECK_RECORDS")
 failures = [line for line in os.environ.get("FAILURE_RECORDS", "").splitlines() if line]
+regression_summary = Path(sys.argv[1]).with_name("regression-contract-summary.json")
+regression = {"status": "not_verified", "runtime": "not_verified",
+              "visualInspection": "not_verified", "baseline": "not_verified", "publication": "not_verified"}
+if regression_summary.is_file():
+    try:
+        regression = json.loads(regression_summary.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        regression["status"] = "failed"
+regression["contractStatus"] = regression.get("status", "not_verified")
+regression["externalArtifacts"] = next(
+    (check["status"] for check in checks if check.get("id") == "regression-rendered-artifacts"),
+    "not_verified",
+)
+regression_states = {regression["contractStatus"], regression["externalArtifacts"]}
+regression["runtime"] = ("failed" if "failed" in regression_states else
+                         "passed" if regression_states == {"passed"} else "not_verified")
+regression["status"] = regression["runtime"]
+regression["ok"] = regression["runtime"] == "passed"
 payload = {
     "schema_version": 1,
     "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -186,6 +219,7 @@ payload = {
     "status": "passed" if not failures else "failed",
     "checks": checks,
     "failures": failures,
+    "regression": regression,
 }
 Path(sys.argv[1]).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 PY
@@ -232,6 +266,20 @@ if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
         printf -- '- %s\n' "$failure"
       done
     fi
+    python3 - "$summary_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+summary = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+regression = summary["regression"]
+print("- Regression scope: `automated_runtime_and_artifacts_only`")
+for label, key in (("Regression runtime/artifacts", "runtime"), ("Visual inspection", "visualInspection"),
+                   ("Image baseline", "baseline"), ("Publication review", "publication"),
+                   ("Regression external artifact checks", "externalArtifacts")):
+    print(f"- {label}: `{regression.get(key, 'not_verified')}`")
+print("- Full regression / visual approval is not granted by the automatic mode.")
+PY
     printf -- '- Evidence: `%s`\n' "$output_root"
   } >> "$GITHUB_STEP_SUMMARY"
 fi

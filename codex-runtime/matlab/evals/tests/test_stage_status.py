@@ -357,13 +357,42 @@ if Path(command).name not in {'evaluate.py', 'inspect_rendered_artifacts.py', 'b
     raise RuntimeError('unexpected stubbed command')
 if Path(command).name == 'evaluate.py':
     Path(sys.argv[sys.argv.index('--result') + 1]).write_text(json.dumps({'synthetic_stub': True}))
+if Path(command).name == 'inspect_rendered_artifacts.py':
+    manifest = Path(sys.argv[sys.argv.index('--manifest') + 1])
+    artifact_root = Path(sys.argv[sys.argv.index('--artifact-root') + 1])
+    if artifact_root.parts[-2:] == ('regression', 'run'):
+        assert manifest == artifact_root / 'figures.json'
+        status = os.environ.get('SYNTHETIC_REGRESSION_EXTERNAL_STATUS', 'passed')
+        output = Path(sys.argv[sys.argv.index('--output') + 1])
+        output.write_text(json.dumps({'synthetic_stub': True, 'status': status,
+                                     'manifest': str(manifest), 'artifact_root': str(artifact_root)}))
+        print(json.dumps({'synthetic_stub': True, 'status': status}))
+        sys.exit({'passed': 0, 'failed': 1, 'not_verified': 2}[status])
 print(json.dumps({'synthetic_stub': True}))
 """, encoding="utf-8")
         python_wrapper.chmod(0o755)
         node_wrapper = self.bin_directory / "node"
-        node_wrapper.write_text(f"#!{sys.executable}\n" +
-                                "import json, sys\nsys.stdin.read()\nprint(json.dumps({'synthetic_stub': True}))\n",
-                                encoding="utf-8")
+        node_wrapper.write_text(f"#!{sys.executable}\n" + """import json
+import os
+import sys
+from pathlib import Path
+
+source = sys.stdin.read()
+if '--input-type=module' in sys.argv:
+    assert "validationMode: 'runtime-artifacts'" in source
+    for option in ('requireMatlab', 'requireSvg', 'requireRuntimeContract', 'requireScienceContract',
+                   'requirePublicationContract', 'requireInteractionContract', 'requireEmbeddedPngDpi'):
+        assert option + ': true' in source
+    status = os.environ.get('SYNTHETIC_REGRESSION_STATUS', 'passed')
+    payload = {'synthetic_stub': True, 'validationMode': 'runtime-artifacts',
+               'scope': 'automated_runtime_and_artifacts_only', 'status': status, 'runtime': status,
+               'visualInspection': 'pending', 'baseline': 'pending', 'publication': 'pending',
+               'imageRegressionOk': False, 'visualInspectionVerified': False, 'regressionOk': False}
+    Path(sys.argv[-1]).write_text(json.dumps(payload))
+    print(json.dumps(payload))
+    sys.exit(0 if status == 'passed' else 1)
+print(json.dumps({'synthetic_stub': True}))
+""", encoding="utf-8")
         node_wrapper.chmod(0o755)
 
     def write_json(self, name: str, payload: dict) -> Path:
@@ -372,10 +401,11 @@ print(json.dumps({'synthetic_stub': True}))
         path.write_text(json.dumps(payload), encoding="utf-8")
         return path
 
-    def run_shell(self) -> subprocess.CompletedProcess:
+    def run_shell(self, **overrides) -> subprocess.CompletedProcess:
         environment = os.environ.copy()
         environment["PATH"] = str(self.bin_directory) + os.pathsep + environment.get("PATH", "")
         environment["GITHUB_STEP_SUMMARY"] = str(self.output / "step-summary.md")
+        environment.update(overrides)
         return subprocess.run(
             ["bash", str(self.script), "R2021a", str(self.output), self.nonce,
              str(self.output / "runtime-start.marker")], cwd=self.repository, env=environment,
@@ -433,6 +463,59 @@ print(json.dumps({'synthetic_stub': True}))
                 self.assertEqual(checks["stage-status-content"], "failed")
                 self.assertEqual(checks["ocean-report"], "passed")
                 self.assertTrue((self.output / "artifact-inventory.json").is_file())
+
+    def test_runtime_mode_summary_keeps_visual_and_baseline_pending(self) -> None:
+        self.write_json("ci-stage-status.json", synthetic_ledger())
+        completed = self.run_shell()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        summary = json.loads((self.output / "ci-validation-summary.json").read_text())
+        self.assertEqual(summary["regression"]["runtime"], "passed")
+        for key in ("visualInspection", "baseline", "publication"):
+            self.assertEqual(summary["regression"][key], "pending")
+        for key in ("imageRegressionOk", "visualInspectionVerified", "regressionOk"):
+            self.assertIs(summary["regression"][key], False)
+        markdown = (self.output / "step-summary.md").read_text()
+        self.assertIn("Regression runtime/artifacts: `passed`", markdown)
+        self.assertIn("Visual inspection: `pending`", markdown)
+        self.assertIn("Image baseline: `pending`", markdown)
+        checks = {check["id"]: check["status"] for check in summary["checks"]}
+        self.assertEqual(checks["regression-rendered-artifacts"], "passed")
+        external = json.loads((self.output / "regression-rendered-artifact-evidence.json").read_text())
+        self.assertEqual(external["artifact_root"], str(self.output / "regression/run"))
+
+    def test_regression_failure_still_collects_full_external_and_evaluator_evidence(self) -> None:
+        self.write_json("ci-stage-status.json", synthetic_ledger())
+        completed = self.run_shell(SYNTHETIC_REGRESSION_STATUS="failed")
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        summary = json.loads((self.output / "ci-validation-summary.json").read_text())
+        checks = {check["id"]: check["status"] for check in summary["checks"]}
+        self.assertEqual(checks["regression-contract"], "failed")
+        for name in ("regression-rendered-artifacts", "evaluator-runtime", "rendered-artifacts", "ocean-report"):
+            self.assertEqual(checks[name], "passed")
+        self.assertEqual(summary["regression"]["runtime"], "failed")
+        self.assertNotIn("MATLAB_FULL100_STATUS=runtime_passed", completed.stdout)
+
+    def test_regression_external_failure_or_missing_tool_cannot_become_visual_pending_success(self) -> None:
+        self.write_json("ci-stage-status.json", synthetic_ledger())
+        for status in ("failed", "not_verified"):
+            with self.subTest(status=status):
+                completed = self.run_shell(SYNTHETIC_REGRESSION_EXTERNAL_STATUS=status)
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                summary = json.loads((self.output / "ci-validation-summary.json").read_text())
+                checks = {check["id"]: check["status"] for check in summary["checks"]}
+                self.assertEqual(summary["status"], "failed")
+                self.assertEqual(checks["regression-contract"], "passed")
+                self.assertEqual(checks["regression-rendered-artifacts"], "failed")
+                self.assertEqual(summary["regression"]["contractStatus"], "passed")
+                self.assertEqual(summary["regression"]["runtime"], "failed")
+                self.assertEqual(summary["regression"]["externalArtifacts"], "failed")
+                self.assertEqual(checks["ocean-report"], "passed")
+                self.assertEqual(len(summary["failures"]), 1)
+                self.assertIn("regression-rendered-artifacts", summary["failures"][0])
+                inventory = json.loads((self.output / "artifact-inventory.json").read_text())
+                files = {entry["path"] for entry in inventory["files"]}
+                self.assertIn("regression-rendered-artifact-evidence.json", files)
+                self.assertIn("evaluator-result.json", files)
 
 
 if __name__ == "__main__":
