@@ -9,10 +9,10 @@ import { createCodexBrowserService } from './codex-browser-service.mjs';
 import { createCodexHostCommandService } from './codex-host-command-service.mjs';
 import { createCodexRuntimeCompatibility } from './codex-runtime-compatibility.mjs';
 import { createIllustratedReportContract, illustratedReportInstructions } from './illustrated-report-contract.mjs';
-import { inspectMatlabPlotQuality } from './matlab-plot-quality.mjs';
+import { createReportEvidencePolicyStore, MATLAB_ILLUSTRATED_PROFILE } from './report-evidence-policy.mjs';
+import { inspectReportStatusEvidence } from './report-status-evidence.mjs';
 import { matlabPlottingInstructions } from './matlab-plotting-instructions.mjs';
 import { routeMatlabRuntimeRequest } from './matlab-runtime-route-service.mjs';
-import { inspectPointInteractionQuality } from './point-interaction-quality.mjs';
 import { pointTemperatureInteractionInstructions } from './point-temperature-interaction-spec.mjs';
 import { OCEAN_REPORT_SPEC } from './ocean-report-spec.mjs';
 import { inspectReportQuality } from './report-quality.mjs';
@@ -36,6 +36,9 @@ const port = Number(process.env.OCEAN_CODEX_PORT || 8011);
 const workspaceRoot = path.resolve(process.env.OCEAN_CODEX_WORKSPACE || projectRoot);
 const tenantSecret = String(process.env.OCEAN_CODEX_TENANT_SECRET || '').trim();
 const threadOwnersPath = path.join(workspaceRoot, '.runtime', 'codex-thread-owners.json');
+const reportEvidencePolicies = createReportEvidencePolicyStore({
+  filePath: path.join(workspaceRoot, '.runtime', 'codex-report-policies.json'),
+});
 const activeTenantOwners = new Map();
 let threadOwners = null;
 let threadOwnersLoad = null;
@@ -176,6 +179,28 @@ const server = http.createServer(async (request, response) => {
       if (!reportId || report.id !== reportId) {
         return errorJson(response, 400, 'CODEX_REPORT_ID_INVALID', 'A valid report id is required.');
       }
+      const policy = await reportEvidencePolicies.get({ tenantKey: tenant.key, threadId, reportId });
+      const reportEvidenceQuality = inspectReportStatusEvidence({ report, policy, generatedRoot: tenant.generatedRoot });
+      const { matlabPlotQuality, illustratedReportEvidence, pointInteractionQualities } = reportEvidenceQuality;
+      const evidenceFailures = reportEvidenceQuality.ok ? [] : (
+        reportEvidenceQuality.violations.length ? reportEvidenceQuality.violations : ['report-evidence-failed']
+      ).map((code) => `报告证据未通过: ${code}`);
+      if (!policy || illustratedReportEvidence?.pathsOk !== true) {
+        return json(response, 200, {
+          complete: false,
+          artifacts: [],
+          missingPaths: [...report.relativePaths, ...evidenceFailures],
+          visualCount: null,
+          minimumVisuals: report.minimumVisuals,
+          minimumChartTypes: report.minimumChartTypes,
+          quality: null,
+          qualityInspected: false,
+          reportEvidenceQuality,
+          matlabPlotQuality,
+          illustratedReportEvidence,
+          pointInteractionQualities,
+        });
+      }
       const coreArtifacts = report.absolutePaths.flatMap((absolutePath) => {
         try {
           const artifact = tenantFileMetadata(tenant, absolutePath);
@@ -198,46 +223,12 @@ const server = http.createServer(async (request, response) => {
         : [];
       const artifacts = [...coreArtifacts, ...visualArtifacts].sort((left, right) => left.path.localeCompare(right.path));
       const available = new Set(coreArtifacts.map((artifact) => artifact.path));
-      const missingPaths = report.relativePaths.filter((candidate) => !available.has(candidate));
+      const missingPaths = [...report.relativePaths.filter((candidate) => !available.has(candidate)), ...evidenceFailures];
       const visualDeficit = Math.max(0, report.minimumVisuals - visualArtifacts.length);
       for (let index = 0; index < visualDeficit; index += 1) {
         missingPaths.push(`${report.visualPrefix}${String(visualArtifacts.length + index + 1).padStart(2, '0')}.(svg|png|jpg|webp)`);
       }
       const quality = inspectReportQuality(report.absolutePaths[0], report.absolutePaths[1], report.minimumHeadings, report.minimumMarkdownBytes, report.minimumHtmlBytes, report.minimumHtmlFigures, report.minimumAnalyticalClaims, report.minimumComparisons, report.minimumEvidenceMarkers, report.requiredZoneCount, report.minimumChartTypes);
-      const matlabManifestPath = path.join(tenant.generatedRoot, 'figures.json');
-      const matlabSourcePaths = existsSync(tenant.generatedRoot)
-        ? walkFiles(tenant.generatedRoot, 2).filter((candidate) => /\.(?:m)$/iu.test(candidate))
-        : [];
-      const hasMatlabPlotBundle = existsSync(matlabManifestPath) || matlabSourcePaths.length > 0;
-      const matlabPlotQuality = hasMatlabPlotBundle
-        ? inspectMatlabPlotQuality({
-            sourcePaths: matlabSourcePaths,
-            manifestPath: matlabManifestPath,
-            outputDirectory: tenant.generatedRoot,
-          })
-        : null;
-      if (matlabPlotQuality && !matlabPlotQuality.matlabPlotQualityOk) {
-        missingPaths.push('Octave/MATLAB图件必须通过统一主题、PNG/PDF双格式、尺寸、字体、manifest和跨格式溯源检查');
-      }
-      const reportHtmlPath = report.absolutePaths[0];
-      const pointInteractionHtmlPaths = existsSync(tenant.generatedRoot)
-        ? walkFiles(tenant.generatedRoot, 2).filter((candidate) => {
-            if (!/\.html$/iu.test(candidate)) return false;
-            const fileName = path.basename(candidate);
-            if (candidate === reportHtmlPath) {
-              try {
-                return /data-point-index|data-temperature-point|temperature-point/u.test(readFileSync(candidate, 'utf8'));
-              } catch {
-                return false;
-              }
-            }
-            return fileName.startsWith(`${report.id}-`) && /interactive|temperature|point/iu.test(fileName);
-          })
-        : [];
-      const pointInteractionQualities = pointInteractionHtmlPaths.map((htmlPath) => inspectPointInteractionQuality({ htmlPath }));
-      if (pointInteractionQualities.some((candidate) => !candidate.pointInteractionQualityOk)) {
-        missingPaths.push('温度点交互HTML必须让每个点均可hover/focus查看点位、温度与单位、时间、经纬度和QC，并提供完整图例且完全离线可用');
-      }
       if (!quality.markdownBytesOk) missingPaths.push(`Markdown 至少 ${report.minimumMarkdownBytes} bytes（当前 ${quality.markdownBytes}）`);
       if (!quality.htmlBytesOk) missingPaths.push(`HTML 至少 ${report.minimumHtmlBytes} bytes（当前 ${quality.htmlBytes}）`);
       if (!quality.headingCountOk) missingPaths.push(`至少 ${report.minimumHeadings} 个正文标题（当前 ${quality.headingCount}）`);
@@ -294,14 +285,17 @@ const server = http.createServer(async (request, response) => {
       if (!quality.physicalUncertaintyOk) missingPaths.push('物理机制诊断必须包含敏感性分析、不确定度/误差传播和可证伪条件');
       if (!quality.textbookReferenceOk) missingPaths.push('物理机制诊断必须至少引用3条 Stewart 2008 章/节/教材页码，并区分教材理论依据与当前数据证据');
       return json(response, 200, {
-        complete: missingPaths.length === 0,
+        complete: missingPaths.length === 0 && reportEvidenceQuality.ok,
         artifacts,
         missingPaths,
         visualCount: visualArtifacts.length,
         minimumVisuals: report.minimumVisuals,
         minimumChartTypes: report.minimumChartTypes,
         quality,
+        qualityInspected: true,
+        reportEvidenceQuality,
         matlabPlotQuality,
+        illustratedReportEvidence,
         pointInteractionQualities,
       });
     }
@@ -400,10 +394,29 @@ const server = http.createServer(async (request, response) => {
       if (!['conversation', 'illustrated_report'].includes(outputMode)) {
         return errorJson(response, 400, 'CODEX_OUTPUT_MODE_INVALID', 'Unsupported Codex output mode.');
       }
+      if (outputMode === 'illustrated_report' && body.reportRuntime !== undefined && body.reportRuntime !== 'matlab') {
+        return errorJson(response, 400, 'CODEX_REPORT_PROFILE_UNSUPPORTED', 'Illustrated report evidence currently requires MATLAB; Octave conversation tasks remain available.');
+      }
       const report = outputMode === 'illustrated_report'
         ? createIllustratedReportContract(tenant.generatedRoot, cleanText(body.reportId, '', 80))
         : null;
-      const turnText = report ? `${text}${illustratedReportInstructions(report)}` : text;
+      if (report && body.reportId !== undefined && String(body.reportId).trim() && report.id !== String(body.reportId).trim()) {
+        return errorJson(response, 400, 'CODEX_REPORT_ID_INVALID', 'A valid report id is required.');
+      }
+      const reportPolicy = report ? await reportEvidencePolicies.bind({
+        tenantKey: tenant.key, threadId, reportId: report.id, profile: MATLAB_ILLUSTRATED_PROFILE,
+      }) : null;
+      const reportManifestPath = report ? path.join(tenant.generatedRoot, `${report.id}-figures.json`) : null;
+      const turnText = report ? [
+        text,
+        illustratedReportInstructions(report),
+        'SERVER-BOUND REPORT EVIDENCE SCOPE:',
+        `This report is bound to ${reportPolicy.profile}. Its only manifest path is ${reportManifestPath}; this replaces the generic tenant-root figures.json location for this report.`,
+        `Keep this report\'s MATLAB source files directly under ${tenant.generatedRoot}, with every source filename beginning ${report.id}-. Do not borrow another report\'s scripts or manifest.`,
+        `Every declared export basename must begin ${report.id}- or be the main ${report.id}.html. Keep every declared export within the authorized generated directory, without symlinks.`,
+        'This report profile accepts PNG/PDF and self-contained interactive HTML evidence. Set ExportSVG=false for these report figures; do not discard an existing declared export to hide a validation failure.',
+        'The status endpoint requires a report-owned manifest and at least one checked interactive HTML export even when no .m or point-named file is found. Missing, failed or pending evidence must remain explicit; never invent MATLAB, CI or visual approval.',
+      ].join('\n') : text;
       const params = {
         threadId,
         input: [{ type: 'text', text: turnText }, ...localImageInputs(tenant, body.attachments)],
@@ -421,6 +434,8 @@ const server = http.createServer(async (request, response) => {
         ...result,
         report: {
           id: report.id,
+          evidenceProfile: reportPolicy.profile,
+          manifestPath: `generated/${report.id}-figures.json`,
           requiredPaths: report.relativePaths,
           minimumVisuals: report.minimumVisuals,
           minimumChartTypes: report.minimumChartTypes,

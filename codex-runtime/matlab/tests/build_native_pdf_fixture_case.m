@@ -1,7 +1,8 @@
-function [figureHandle, details] = build_native_pdf_fixture_case(caseId, fixtureDirectory)
+function [figureHandle, details, plotResult] = build_native_pdf_fixture_case(caseId, fixtureDirectory, options)
 arguments
     caseId (1,1) string
     fixtureDirectory (1,1) string
+    options.ComparisonLegendLayout (1,1) string = "outer-tile"
 end
 caseIds = ["crossed-time-depth-temperature" "repeat-cast-salinity-profiles" ...
     "paired-observation-model" "paired-interactive"];
@@ -9,6 +10,12 @@ sourceFiles = ["crossed_time_depth_temperature.json" "repeat_cast_salinity_profi
     "paired_observation_model.json" "crossed_time_depth_temperature.json"];
 assert(~ismissing(caseId) && any(caseId == caseIds), ...
     "build_native_pdf_fixture_case:CaseID", "Unsupported native fixture case: %s", caseId);
+assert(~ismissing(options.ComparisonLegendLayout) ...
+    && any(options.ComparisonLegendLayout == ["outer-tile" "axes-outside"]), ...
+    "build_native_pdf_fixture_case:LegendLayout", "Unsupported comparison legend layout");
+assert(options.ComparisonLegendLayout == "outer-tile" || caseId == "paired-observation-model", ...
+    "build_native_pdf_fixture_case:LegendLayoutScope", ...
+    "Only paired-observation-model supports the axes-outside diagnostic");
 assert(~ismissing(fixtureDirectory) && isfolder(fixtureDirectory), ...
     "build_native_pdf_fixture_case:FixtureDirectory", "Fixture directory must exist");
 assetDirectory = fullfile(fileparts(mfilename("fullpath")), "..", "assets");
@@ -35,6 +42,7 @@ end
 details = struct("case_id", caseId, "source_file", sourceFile, ...
     "input_sha256", inputHash, "title", titleText, "data_source", "synthetic");
 existingFigures = findall(groot, "Type", "figure");
+plotResult = struct();
 try
     if caseId == "paired-interactive"
         outputs = build_interactive(fixture, titleText);
@@ -102,13 +110,15 @@ try
         oi_apply_axes(axesHandle, theme);
         if isfield(result, "Legend") && isscalar(result.Legend) && isgraphics(result.Legend)
             location = string(result.Legend.Location);
-            if any(location == ["northoutside" "southoutside" "eastoutside" "westoutside"])
+            if any(location == ["northoutside" "southoutside" "eastoutside" "westoutside"]) ...
+                    && options.ComparisonLegendLayout == "outer-tile"
                 result.Legend.Layout.Tile = erase(location, "outside");
             end
         end
         if isfield(result, "Colorbar") && isscalar(result.Colorbar) && isgraphics(result.Colorbar)
             result.Colorbar.Layout.Tile = "east";
         end
+        plotResult = result;
     end
     drawnow;
     assert(isscalar(figureHandle) && isgraphics(figureHandle, "figure"), ...

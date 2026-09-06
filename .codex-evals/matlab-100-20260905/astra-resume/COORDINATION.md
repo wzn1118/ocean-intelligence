@@ -281,3 +281,18 @@
 - 十个原代理本轮已分批续派：Huygens负责无JVM构建和布局方案；Laplace负责模型原函数原生driver及标签profile；Confucius负责真实报告路径梳理与生成统计独立复核；Aristotle负责逐点DOM修复；Euler负责提示/技能同步；Faraday负责复杂canvas原件审阅；Hume负责真实stage门禁审阅；Boole负责独立canvas校验器；Heisenberg负责运行服务刷新边界；Dirac负责报告status接线审计和路径边界加固。峰值并发六，部分线程续派第二任务，不声称十个侧边栏会话同时运行。主线程负责原生probe修复、真实内置生成、CI及跨模块整合。
 - 报告校验器路径加固已完成：要求显式outputDirectory，入口和exports先做目录归属/逐级链接检查，再以O_NOFOLLOW和dev/ino绑定读取；点检查复用同一HTML字节，不重读路径。42项新增反例/兼容用例及相关五模块471项通过，合法nested bundle保留。这不等于生产status已接通；任意并发目录替换的TOCTOU仍未完全消除，使用受控稳定文件树。
 - 推送前346项Python、全部已跟踪服务器Node、8项router smoke、资产/技能/Family B/导出静态检查通过；65个MATLAB文件通过UTF-8/R2021a语法检查。冻结33文件复核通过，静态评分70/100、runtime_pending。实际生成函数、文本profile正负例和复杂canvas修复仍待首次本轮licensed CI；保留旧PDF/视觉失败及用户无关的Astra、CLI、部署、Copernicus改动。
+
+## 第二十三批接续
+
+- 第二十二批本地提交 `5f3b7e41e9a378844e4b949db4f0fd9e892d576b`，远端 `0f6779785896bf3b2a7257ac72287d83cffec8ff`，运行 [34002693563](https://github.com/wzn1118/ocean-intelligence/actions/runs/34002693563) 已 completed/failure。实际主阶段58/60：R2021a/R2024b各19/20，R2026a为20/20；三版原始评分90、runtime_pending，不能冒充100分。原件 `/tmp/matlab-run-34002693563`，汇总 `/tmp/matlab-ci-summary-34002693563/summary.md`。独立stage审计确认旧两版内容门禁exit 1及其后证据仍被收集，主线程另用GitHub API核实最终失败。
+- 首版真实Astra源码在旧两版因额外listfonts枚举断言失败，未返回图窗；R26首次完成同图导出前后完整v3、PNG/PDF/SVG及manifest，独立外检3/3通过，不混入evaluator的12/12。三格式实物审阅仍发现统计与顶刻度粘连、矢量字号差异等问题；不是完整视觉通过。`astra-native-failure-round23.md`与`astra-rendered-review-round23.md`分别记录原生及视觉边界，原件hash不变。
+- 主线程真实续跑原Astra线程两轮，使用原164文件不变的587c382归档服务，实际上下文均gpt-6-astra/high/never/danger-full-access，8012完成后停止，生产8011未刷新。模型自己在独立revision23中增加oi_font_available依赖并替换枚举断言，保留原版；9405字节修订与中文说明原样归档，driver固定round22/round23各自hash，family-B选择修订，未降低原生v3/负例/导出门槛。详见`runtime-generation-result-round23.md`；修订尚待本轮MATLAB执行。
+- 复杂canvas声明成功后，独立实际像素复核发现12张恢复PNG纯白：R21主环境4张及DISPLAY4张，R24主环境4张；R24 DISPLAY非全白也不证明恢复等价。补充检查复用既有Pillow完整解码、白底alpha合成、非均匀前景门槛，读取同一O_NOFOLLOW/hash快照；缺Pillow仍not_verified。R26不适用不是通过，不替换生产exporter，不加分。
+- 新比较图图例布局A/B原生探针保留默认outer-tile，候选axes-outside仅独立构图对照，绑定同一fixture、完整科学/样式数据及原件hash，输出原生PNG/PDF和几何缺项。固定子报告路径接到既有native-pdf诊断，不改变原三候选阶段计数；没有本地MATLAB或生产布局替换，待CI实跑。
+- 海区报告status候选已接通持久化MATLAB证据策略与完整illustrated检查。tenant/thread验证在前，reportId绑定不可降级或跨线程复用，同tenant层级前缀冲突拒绝；独立reportId manifest、前缀.m及export归属先预检，缺policy直接不读generated根。有效路径下物理检查不再被科学字段失败遮蔽，全部正文/数量门槛保留；complete必须包含强证据通过。源文件重开路径仍有稳定文件树假设，policy只保证单进程单store串行，不冒充任意竞争环境安全。
+- status路径预检失败返回quality=null、qualityInspected=false、visualCount=null，前端类型和提示同步；隔离真实HTTP测试使用fake Codex，无生产/MCP/真实模型调用。历史无policy、缺manifest/.m/point、跨线程/降级、重启持久化等拒绝与读取边界已有合成测试，不证明真实海区完整报告通过。report profile目前仅MATLAB，普通Octave对话仍可用；报告内PNG/PDF/交互HTML明确，SVG不被悄悄过滤成通过。
+- 点交互绑定从字符串特征改为锁定acorn解析和css-select真实DOM选择，有限静态作用域/控制流下核验point接收者，空选择器、错误接收者、动态不确定绑定不得算通过。保留合法forEach、inline和可解析delegation，明确不是浏览器实际触发或视觉认证；新依赖沿用server独立package/lock与NODE_PATH模式。
+- 本轮十个原代理均已分批接续：Dirac策略持久化及归属冲突；Confucius聚合器/路径预检与修订科学审阅；Heisenberg隔离HTTP；Aristotle静态交互绑定；Huygens图例原生A/B；Laplace真实原生失败审计；Boole复杂canvas像素检查；Faraday实图三格式审阅；Hume真实stage内容/后续收集审计；Euler提示技能文档同步。峰值并发六，不声称十个桌面侧边栏会话同时活跃或已创建定时任务。主线程负责真实Astra续轮、生产入口候选、原生driver接入、前端类型、CI及整合。
+- 追加交互破坏反例已覆盖先绑定后解绑、移除/替换点、清空父节点及不确定分支，仍保留无关tooltip/style更新；依赖隔离测试确认acorn/css-select/parse5从指定NODE_PATH解析。相关524项及全部已跟踪服务器加新三测试文件1067项通过，未运行用户另有的未跟踪browser-service测试。独立修订科学审查57项声明与原fixture重算一致，没有借用首版R26给新版补签。
+- 推送前351项Python、8项router smoke、资产/技能/Family B/导出静态检查、shell语法和workflow YAML/报告触发范围复核通过；67个MATLAB文件通过UTF-8/R2021a语法检查，前端TypeScript/Vite构建通过。冻结33文件重新生成并核对，只有本轮检查器/测试/评测说明三份内容hash改变。复杂canvas旧包独立回放确实拒绝12张白图，R24 DISPLAY仅声明及有限像素一致，R26仍不适用。
+- 标准server npm ci完成；完整静态评测再次通过351项框架测试，结果 `/tmp/matlab-twentythird-static-evaluation.json` 为70/100、runtime_pending，不混同上一轮原生90分。实际修订图、新图例A/B及报告入口候选均仍待各自原生/产品实跑，不把本地测试、既有模型生成或源码挂载说成生产热更新。用户原有README、Astra/CLI部署、browser-service、Copernicus及Octave改动不随本批提交。

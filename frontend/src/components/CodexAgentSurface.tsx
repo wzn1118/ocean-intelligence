@@ -789,7 +789,7 @@ export function CodexAgentSurface({ region, selectedEventId, onClose, onUseScien
       } catch {
         // Retry briefly because file-change notifications can arrive before disk metadata is visible.
       }
-      if (latestStatus?.complete) {
+      if (latestStatus?.complete && latestStatus.quality && latestStatus.visualCount !== null) {
         pendingReportTurnsRef.current.delete(turnId);
         setActiveReport((current) => current?.turnId === turnId ? null : current);
         setArtifacts((current) => [

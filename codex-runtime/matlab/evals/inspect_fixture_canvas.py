@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from inspect_rendered_artifacts import (
-    finite_json_float, reject_json_constant, require, safe_artifact_path, unique_json_object,
+    finite_json_float, inspect_png, reject_json_constant, require, safe_artifact_path, unique_json_object,
 )
 
 
@@ -49,8 +49,10 @@ ERROR_FIELDS = ("error_identifier", "error_message")
 NOTICE = (
     "Independent local declaration consistency and file bytes/SHA-256 checks only. "
     "Input bytes are measured from the explicitly supplied fixture root; the producer declares "
-    "an input hash, not an input byte count or archived input snapshot. PNG dimensions use IHDR/CRC, "
-    "not pixel decoding. Geometry captured and restoration booleans are declarations, not independent "
+    "an input hash, not an input byte count or archived input snapshot. PNG dimensions use IHDR/CRC; "
+    "hash-bound snapshot bytes undergo full Pillow decoding and a limited nonuniform foreground check "
+    "on white, not visual completeness or restoration equivalence. Missing Pillow leaves pixels "
+    "not_verified. Geometry captured and restoration booleans are declarations, not independent "
     "proof of unchanged geometry, parent identity, callbacks or native data. DirectChildCount is reported "
     "metadata, not an independent allchild/annotation-emptiness check. No PDF page/font or visual "
     "certification, MATLAB re-execution, freshness claim, stage credit or score."
@@ -233,7 +235,8 @@ class Inspection:
         else:
             self.check(name + ".native_failure", False, "producer declared export failure")
         try:
-            measured, header = self.snapshot(directory, relative, MAX_ARTIFACT_BYTES)
+            measured, content = self.snapshot(directory, relative, MAX_ARTIFACT_BYTES, retain=filename.endswith(".png"))
+            header = content[:33]
             result["measured"] = measured
             self.check(name + ".unexpected_file", status != "not_attempted", "unattempted export must not have an output file")
             bound = record.get("sha256") not in (None, "") or record.get("bytes") not in (None, 0)
@@ -249,7 +252,10 @@ class Inspection:
                 declared = record.get("png_pixels")
                 self.check(name + ".png_dimensions", isinstance(declared, list)
                            and all(type(value) is int for value in declared) and declared == pixels == [2400, 1500],
-                           "PNG IHDR dimensions must match declaration and native 2400x1500 contract; no pixel decoding")
+                           "PNG IHDR dimensions must match declaration and native 2400x1500 contract")
+                pixel_checks: list = []
+                inspect_png(content, None, pixel_checks)
+                self.checks.extend({**check, "name": name + "." + check["name"]} for check in pixel_checks)
             else:
                 self.check(name + ".pdf_header", header.startswith(b"%PDF-") and record.get("png_pixels") == [],
                            "PDF signature only; no page, font, text or visual certification")
@@ -311,8 +317,9 @@ class Inspection:
                        "root report pending candidates must retain the unattempted template")
         else:
             self.check(identifier + ".native_failure", False, "producer declared candidate failure")
-        result["status"] = "failed" if any(item["status"] == "failed" for item in self.checks[before:]) else (
-            "declaration_consistent" if status == "completed_diagnostic" else "not_verified")
+        statuses = {item["status"] for item in self.checks[before:]}
+        result["status"] = "failed" if "failed" in statuses else (
+            "declaration_consistent" if status == "completed_diagnostic" and "not_verified" not in statuses else "not_verified")
         return result
 
 
@@ -396,6 +403,8 @@ def inspect_fixture_canvas(artifact_root: Path, fixture_root: Path, release: str
             audit.check("snapshot_unchanged:" + relative, False, str(error))
     if any(item["status"] == "failed" for item in audit.checks):
         result["status"] = "failed"
+    elif result["status"] == "declaration_consistent" and any(item["status"] == "not_verified" for item in audit.checks):
+        result["status"] = "not_verified"
     return result
 
 

@@ -122,7 +122,7 @@ ${guidance.headless}
 const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 【MATLAB 仓库实跑约束】
 
-本段仅适用于 MATLAB 仓库审计导出，与前述 MATLAB helper、字体和布局建议共同生效。通用 release 能力矩阵说明 API 是否可用，不代表固定尺寸与 manifest 验证已通过。项目入口与详细合同见 codex-runtime/matlab/SKILL.md、codex-runtime/matlab/README.md；历次 CI、probe 与原件边界按需读取 codex-runtime/matlab/evals/README.md，不把历史流水账注入每次任务。以下记录不代表本次会话已执行、已部署或既有会话热更新。
+MATLAB 审计导出：codex-runtime/matlab/SKILL.md、codex-runtime/matlab/README.md；历史：codex-runtime/matlab/evals/README.md。不代表本次会话已执行、已部署或既有会话热更新。
 
 ### 导出策略
 
@@ -140,7 +140,7 @@ const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 - oi_annotate_svg 只对受支持的 SVG 子集做受限嵌套 viewport 规范化，保留内部原生 viewBox 和绘图坐标；这是原生导出后的 XML 后处理，不是未经处理的纯原生 SVG。有限的三版 MATLAB Java DOM 验证不授权未知或不支持的 SVG，必须拒绝，不得泛化覆盖或降低尺寸门禁。
 
 ### 字体与测量
-- MATLAB 字体安装证据必须来自 listfonts 或 fc-list 枚举结果的精确字体族名匹配（可忽略大小写），不得用 fc-match fallback 返回了替代字体就认定请求字体已安装。字体候选匹配不等于 PDF 字体嵌入，也不等于 CJK 字形可读；PNG/PDF/SVG 必须分别核验实际产物，未核验项保持 unverified。
+- MATLAB 字体可用性使用 oi_font_available(theme.FontName)，沿用仓库策略，不额外断言 listfonts 必须枚举所选字体。该 API 精确匹配 listfonts 或 Unix fontconfig 返回的字体族（可忽略大小写），不接受任意 fc-match 替代字体；枚举缺项不等于系统字体缺失。字体存在性不等于 PDF 字体嵌入或实际 glyph/CJK 渲染通过；PNG/PDF/SVG 必须分别核验实际产物，未核验项保持 unverified。
 - MATLAB 的 CJK+Latin 输出在用户未指定 FontName 且精确安装检查通过时，默认优先 WenQuanYi Zen Hei，保持主题、导出器和交互字体一致；不覆盖用户显式字体选择。有限的原生 vector PDF 字体探针是内容裁剪而非精确页，不能声称已解决旧版嵌入或精确页合同，也不能据此更换严格导出策略。整图布局、最终尺寸、粗体、中文旋转轴及 PNG/SVG 仍须分别验证；Noto/Droid 不是等效已验证回退，后端字形失败不等于字体未安装。
 - tiledlayout 标题也必须在每个请求格式中核验文本、字形、占位和裁切；已测 layout.Text 无公开 Units/Extent/Position，必须记录未测覆盖，不能用零矩形当成完整几何，也不得仅凭现有 bounds 门禁通过认定标题完整。缺少对应产物证据时保留未验证状态。
 - Legend.Title 的实际类型是 matlab.graphics.illustration.legend.Text，FontSize 固定使用 points，不得设置不支持的 FontUnits。可见且非空的标题若无公开 Extent/Position，必须加入 unmeasured_text_objects，记录 role="legend.title"、class="matlab.graphics.illustration.legend.Text"，并令 bounds_audit_complete=false；不能补零矩形或忽略对象。这是未测量覆盖声明，不是视觉或裁切修复，旧版所测 PDF 图例标题仍有字体和越框问题。
@@ -158,10 +158,10 @@ const MATLAB_REPOSITORY_EXPORT_INSTRUCTIONS = String.raw`
 - 合成 fixture 必须明确标注 synthetic_benchmark/合成数据；即使 MATLAB 实跑和哈希绑定通过，也不能将其描述为真实海况、实测趋势或海区机制证据。
 
 ### 当前结果
-- 最近完整 CI 34001173593（远端 7d51e714）：R2021a/R2024b/R2026a 主阶段各 20/20，合计 60/60，evaluator-runtime 三版 passed；各自 evaluator-result.json 原始评分为 90、状态仍为 runtime_pending，整体 CI 为 completed/failure，视觉未验证。oi_apply_axes 对 Subtitle 显式应用 theme.FontSize，comparison-statistics-layout 的字幕扰动/restyle 字号断言已原生通过，断言不放宽。
-- 当前三版 report-evidence.json 的 runtime_evidence.figures 四图的 plot_data_evidence.status 均为 runtime_declaration_verified，即 4/4 合成输入绑定；原生 reader 套件的 4 正例/36 负例边界仍成立。R2026a 外部产物检查 12/12 通过，R2021a/R2024b 各 4 件 PDF 的 pdf_font_embedding=failed（含未嵌入 Courier）必须显示；外检通过不等于整体 CI 通过或可信视觉审查。
-- 四 fixture test_native_pdf_fixture_canvas 仅为独立诊断：R2021a 四 case 为 build_native_pdf_fixture_case:JVMRequired；R2024b 四 case 为 test_native_pdf_fixture_canvas:RootObjects（scribeOverlay 的空 AnnotationPane），geometry 还记录 MATLAB:class:GetProhibited，不能当作完整测量。两版 canvas_pdf.api_invoked=false；R2026a 的 not_applicable 不是 pass。旧 simple canvas 的 captured 快照也不证明几何不变或恢复成功；这些诊断不计入原三 candidate stage、评分或正式报告产物。
-- 待验 canvas 候选使用不依赖 JVM 的 snapshot SHA，并只排除严格空 AnnotationPane，非空仍拒绝；尚未 native 执行，不能声称已修复 GetProhibited、canvas PDF、恢复或视觉问题。
+- 最近完整 CI 34002693563（远端 0f677978）：R2021a/R2024b 各 19/20，R2026a 为 20/20，合计 58/60，evaluator-runtime 三版 passed；各自 evaluator-result.json 原始评分为 90、状态仍为 runtime_pending，整体 CI 为 completed/failure，视觉未验证。两旧版 family-b-runtime 因模型原函数第118行 astra_comparison_trial:FontUnavailable 失败；该 listfonts 枚举断言不证明系统字体缺失。
+- 当前三版 report-evidence.json 的 runtime_evidence.figures 四图的 plot_data_evidence.status 均为 runtime_declaration_verified，即 4/4 合成输入绑定。R2026a 外部产物检查 12/12 通过，R2021a/R2024b 各 4 件 PDF 的 pdf_font_embedding=failed（含未嵌入 Courier）必须显示；外检通过不等于整体 CI 通过或可信视觉审查。
+- 首版模型 .m 在 R2026a 完成调用、同图导出前后完整 v3、PNG/PDF/SVG 原生导出及 manifest；模型外检 3/3 passed，不混计 evaluator 12/12。三格式实看标题/标签/图例完整、PDF 嵌字；PNG 统计粘顶刻度，矢量间距紧/字号较小、参考线穿点，不签全量视觉通过。原源与两旧失败保留；model-generated-round23 仅以 oi_font_available 替换枚举断言并新增依赖，尚未 MATLAB 执行。
+- 复杂 canvas 的 completed_diagnostics_only 仍有 12 张恢复 PNG 全白；头部/哈希或 captured/属性相等不证恢复，非公开 geometry unavailable。新增解码像素门禁不提升生产策略；R2026a not_applicable 不是 pass，诊断不计原三 candidate stage、评分或正式产物。报告 status/policy/AST 未部署：无绑定 policy 不读 generatedRoot，完整路径预检通过才做物理检查，不因科学字段失败跳过；合成测试不证明真实海区报告通过。
 `;
 
 export const MATLAB_PLOTTING_INSTRUCTIONS = [

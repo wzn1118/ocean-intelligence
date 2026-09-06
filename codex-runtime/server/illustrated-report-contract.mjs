@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { OCEAN_REPORT_SPEC } from './ocean-report-spec.mjs';
 import { UNIVERSAL_OCEAN_REPORT_SPEC } from './beibu-gulf-report-spec.mjs';
 import { WIND_REPORT_SPEC } from './wind-report-spec.mjs';
@@ -124,18 +124,35 @@ export function illustratedReportInstructions(contract) {
 
 export function inspectIllustratedReportEvidence(options = {}) {
   const outputDirectory = inspectOutputDirectory(options.outputDirectory);
+  const scoped = options.expectedReportId !== undefined;
+  const expectedNames = {
+    htmlPath: `${options.expectedReportId}.html`,
+    markdownPath: `${options.expectedReportId}.md`,
+    manifestPath: `${options.expectedReportId}-figures.json`,
+  };
   const inputPaths = Object.fromEntries(['htmlPath', 'markdownPath', 'manifestPath'].map((name) => [
-    name, inspectEvidencePath(options[name], outputDirectory),
+    name, scoped && (!validReportId(options.expectedReportId)
+      || !outputDirectory.ok || resolvePath(options[name]) !== path.join(outputDirectory.directory, expectedNames[name]))
+      ? rejectedEvidencePath('report_id_mismatch') : inspectEvidencePath(options[name], outputDirectory),
   ]));
-  const pathsOk = outputDirectory.ok && Object.values(inputPaths).every((location) => location.ok);
+  const inputPathsOk = outputDirectory.ok && Object.values(inputPaths).every((location) => location.ok);
   const pathViolations = [
     ...outputDirectory.violations.map((violation) => `outputDirectory.${violation}`),
     ...Object.entries(inputPaths).flatMap(([name, location]) => location.violations.map((violation) => `${name}.${violation}`)),
   ];
   const toleranceMs = positiveInteger(options.freshnessToleranceMs, 2_000);
-  const html = readEvidence(inputPaths.htmlPath)?.toString('utf8') || '';
-  const markdown = readEvidence(inputPaths.markdownPath)?.toString('utf8') || '';
+  const htmlContents = readEvidence(inputPaths.htmlPath);
+  const markdownContents = readEvidence(inputPaths.markdownPath);
+  const html = htmlContents?.toString('utf8') || '';
+  const markdown = markdownContents?.toString('utf8') || '';
   const manifestRead = readJson(inputPaths.manifestPath);
+  const inputReads = { htmlPath: htmlContents !== undefined, markdownPath: markdownContents !== undefined, manifestPath: manifestRead.readOk };
+  const pathsOk = inputPathsOk && (!scoped || Object.values(inputReads).every(Boolean));
+  if (scoped) {
+    for (const [name, readOk] of Object.entries(inputReads)) {
+      if (inputPaths[name].ok && !readOk) pathViolations.push(`${name}.unreadable`);
+    }
+  }
   const manifest = manifestRead.value;
   const htmlEvidence = parseOceanReportHtml(html);
   const { figures, claims } = htmlEvidence;
@@ -188,13 +205,27 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const figureEvidenceViolations = figureEvidence.flatMap((entry) => entry.violations);
   const nonemptyManifestFigureIds = manifestFigures.map((figure) => stringValue(figure?.id)).filter(Boolean);
   if (manifestFigureIds.size !== nonemptyManifestFigureIds.length) figureEvidenceViolations.push('manifest.figures.id.duplicate');
-  const artifactChecks = manifestFigures.flatMap((figure, figureIndex) => normalizeReportExports(figure?.exports)
-    .map((artifact, artifactIndex) => inspectReportArtifact({
+  const declaredArtifacts = manifestFigures.flatMap((figure, figureIndex) => normalizeReportExports(figure?.exports)
+    .map((artifact, artifactIndex) => ({
       artifact,
       figure,
-      outputDirectory,
       id: `figures[${figureIndex}].exports[${artifactIndex}]`,
     })));
+  const artifactPaths = scoped
+    ? inspectScopedArtifactPaths(manifestFigures, declaredArtifacts, outputDirectory, options.expectedReportId, pathsOk)
+    : undefined;
+  const artifactChecks = declaredArtifacts.map((entry, index) => inspectReportArtifact({
+    ...entry,
+    outputDirectory,
+    location: artifactPaths?.locations[index],
+    allowRead: !scoped || (pathsOk && artifactPaths.ok),
+  }));
+  if (scoped && pathsOk && artifactPaths.ok) {
+    for (const artifact of artifactChecks) {
+      if (!artifact.readOk) artifactPaths.violations.push(`${artifact.id}.unreadable`);
+    }
+    artifactPaths.ok = artifactPaths.violations.length === 0;
+  }
   const interactiveChecks = artifactChecks.filter((artifact) => artifact.format === 'html');
   const reportFiles = [inputPaths.htmlPath, inputPaths.markdownPath].map((location) => ({
     file: location.file, ...location.info,
@@ -213,7 +244,7 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const claimsOk = claims.length > 0 && claimViolations.length === 0;
   const figureLinksOk = figures.length > 0 && figureViolations.length === 0;
   const figureEvidenceOk = manifestFigures.length > 0 && figureEvidenceViolations.length === 0;
-  const artifactsOk = artifactChecks.length > 0 && artifactChecks.every((artifact) => artifact.ok)
+  const artifactsOk = (!scoped || artifactPaths.ok) && artifactChecks.length > 0 && artifactChecks.every((artifact) => artifact.ok)
     && interactiveChecks.length >= MINIMUM_INTERACTIVE_FIGURES;
   return {
     ok: pathsOk && contentOk && htmlEvidence.ok && manifestRead.ok && claimsOk && figureLinksOk && figureEvidenceOk
@@ -235,6 +266,7 @@ export function inspectIllustratedReportEvidence(options = {}) {
     figureEvidenceViolations,
     artifactsOk,
     artifactChecks,
+    ...(scoped ? { artifactPathsOk: artifactPaths.ok, artifactPathViolations: artifactPaths.violations } : {}),
     interactiveFigureCount: interactiveChecks.length,
     oceanReportOk: oceanReportAudit.ok,
     oceanReport: oceanReportAudit,
@@ -245,6 +277,81 @@ export function inspectIllustratedReportEvidence(options = {}) {
   };
 }
 
+export function inspectReportMatlabSources({ outputDirectory: directory, expectedReportId } = {}) {
+  const outputDirectory = inspectOutputDirectory(directory);
+  const violations = [...outputDirectory.violations];
+  const sourcePaths = [];
+  if (!validReportId(expectedReportId)) violations.push('report_id_invalid');
+  if (violations.length === 0) {
+    try {
+      const entries = readdirSync(outputDirectory.directory, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.name.startsWith(`${expectedReportId}-`) || !/\.m$/iu.test(entry.name)) continue;
+        const location = inspectEvidencePath(entry.name, outputDirectory, true);
+        if (!location.ok || readEvidence(location) === undefined) {
+          violations.push(`${entry.name}.${location.violations.join('.') || 'unreadable'}`);
+        } else sourcePaths.push(location.file);
+      }
+    } catch {
+      violations.push('unavailable');
+    }
+  }
+  if (sourcePaths.length === 0) violations.push('missing');
+  return { ok: violations.length === 0, sourcePaths: sourcePaths.sort(), violations };
+}
+
+function validReportId(value) {
+  return typeof value === 'string' && REPORT_ID_PATTERN.test(value);
+}
+
+function rejectedEvidencePath(violation) {
+  return { ok: false, violations: [violation], info: { present: false, bytes: 0, mtimeMs: 0 } };
+}
+
+function inspectScopedReference(value, outputDirectory, reportId) {
+  if (!validReportId(reportId)) return rejectedEvidencePath('report_id_invalid');
+  if (typeof value !== 'string' || !value || value !== value.trim()) return rejectedEvidencePath('invalid_reference');
+  if (path.isAbsolute(value) || path.win32.isAbsolute(value)) return rejectedEvidencePath('absolute');
+  if (value.split(/[\\/]/u).includes('..')) return rejectedEvidencePath('traversal');
+  const basename = path.basename(value);
+  if (value.includes('\\') || (!basename.startsWith(`${reportId}-`) && basename !== `${reportId}.html`)) {
+    return rejectedEvidencePath('report_id_mismatch');
+  }
+  return inspectEvidencePath(value, outputDirectory, true);
+}
+
+function inspectScopedArtifactPaths(figures, declarations, outputDirectory, reportId, readAuxiliary) {
+  const violations = [];
+  const auxiliaryLocations = [];
+  const inspectAuxiliary = (value, id) => {
+    const location = inspectScopedReference(value, outputDirectory, reportId);
+    violations.push(...location.violations.map((violation) => `${id}.${violation}`));
+    auxiliaryLocations.push({ location, id });
+  };
+  figures.forEach((figure, index) => {
+    const exports = figure?.exports;
+    const entries = Array.isArray(exports) ? exports : exports && typeof exports === 'object' ? Object.values(exports) : [];
+    if (entries.length !== normalizeReportExports(exports).length) violations.push(`figures[${index}].exports.invalid`);
+    for (const field of ['file', 'text_file']) {
+      if (figure && Object.hasOwn(figure, field)) inspectAuxiliary(figure[field], `figures[${index}].${field}`);
+    }
+  });
+  const locations = declarations.map(({ artifact, id }) => {
+    const location = inspectScopedReference(artifact.file, outputDirectory, reportId);
+    violations.push(...location.violations.map((violation) => `${id}.${violation}`));
+    if (Object.hasOwn(artifact, 'text_file')) {
+      inspectAuxiliary(artifact.text_file, `${id}.text_file`);
+    }
+    return location;
+  });
+  if (readAuxiliary && violations.length === 0) {
+    for (const { location, id } of auxiliaryLocations) {
+      if (readEvidence(location) === undefined) violations.push(`${id}.unreadable`);
+    }
+  }
+  return { ok: violations.length === 0, violations, locations };
+}
+
 function normalizeReportExports(exportsValue) {
   if (Array.isArray(exportsValue)) return exportsValue.filter((entry) => entry && typeof entry === 'object')
     .map((entry) => ({ ...entry, format: stringValue(entry.format) || extensionFormat(entry.file) }));
@@ -253,11 +360,11 @@ function normalizeReportExports(exportsValue) {
     .map(([format, entry]) => ({ ...entry, format: stringValue(entry.format) || format.toLowerCase() }));
 }
 
-function inspectReportArtifact({ artifact, figure, outputDirectory, id }) {
+function inspectReportArtifact({ artifact, figure, outputDirectory, id, location: checkedLocation, allowRead = true }) {
   const relative = stringValue(artifact?.file);
-  const location = inspectEvidencePath(relative, outputDirectory, true);
+  const location = checkedLocation || inspectEvidencePath(relative, outputDirectory, true);
   const { file, info } = location;
-  const contents = readEvidence(location);
+  const contents = allowRead ? readEvidence(location) : undefined;
   const format = (stringValue(artifact?.format) || extensionFormat(relative)).toLowerCase();
   const bytesOk = info.present && Number.isInteger(artifact?.bytes) && artifact.bytes === info.bytes;
   const hashOk = info.present && /^[a-f\d]{64}$/iu.test(String(artifact?.sha256 || ''))
@@ -286,6 +393,7 @@ function inspectReportArtifact({ artifact, figure, outputDirectory, id }) {
   const interactionOk = format !== 'html' || interactionQuality?.pointInteractionQualityOk === true;
   return {
     id, file, format, ...info, pathOk: location.ok, pathViolations: location.violations, bytesOk, hashOk,
+    readOk: contents !== undefined,
     metadataOk: metadataViolations.length === 0, metadataViolations,
     interactionOk, interactionQuality,
     ok: location.ok && bytesOk && hashOk && metadataViolations.length === 0 && interactionOk,
@@ -597,7 +705,8 @@ function inspectReportFreshness({ generatedAt, manifest, files, toleranceMs }) {
 
 function readJson(location) {
   const contents = readEvidence(location);
-  try { return { ok: true, value: JSON.parse(contents?.toString('utf8')) }; } catch { return { ok: false }; }
+  const readOk = contents !== undefined;
+  try { return { ok: true, readOk, value: JSON.parse(contents?.toString('utf8')) }; } catch { return { ok: false, readOk }; }
 }
 
 function readEvidence(location) {

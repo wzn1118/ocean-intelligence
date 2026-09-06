@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "acorn": "8.15.0",
+    "css-select": "6.0.0",
     "parse5": "7.3.0"
   }
 }

@@ -7,48 +7,103 @@ depth therefore form a crossed design instead of a one-to-one confounded axis.
 
 ## Current Evidence
 
-Round-21 run 34001173593 (remote commit `7d51e714`) is `completed/failure`.
-R2021a/R2024b/R2026a each passed 20/20 primary stages, 60/60 in total, including
-`evaluator-runtime`. Each original evaluator result remains score 90 with
-`runtime_pending`; visual inspection is unverified. `oi_apply_axes` now applies
-`theme.FontSize` explicitly to Subtitle, and the `comparison-statistics-layout`
-subtitle perturbation/restyle assertion passed natively without weakening its
-font-size check. All three reports retain 4/4 input-bound declarations; this is
-separate from the four-positive, 36/36 synthetic native reader suite described
-below, not independent re-execution, real-sea analysis, or visual approval.
+Round-22 run 34002693563 (remote commit `0f677978`) is `completed/failure`.
+R2021a/R2024b each passed 19/20 primary stages and R2026a passed 20/20, 58/60 in
+total. `evaluator-runtime` passed on all three. Each original evaluator result
+remains score 90 with `runtime_pending`; full visual approval is absent.
+The two older `family-b-runtime` failures are `astra_comparison_trial:FontUnavailable`
+at original model-source line 118, an extra listfonts enumeration assertion,
+not evidence of a missing system font. All three evaluator reports still retain
+4/4 input-bound declarations, separate from the model trial and four-positive,
+36/36 synthetic native reader suite. These layers do not certify real-sea analysis.
 R2026a passed 12/12 external evaluator artifact checks; R2021a/R2024b each retain
 four `pdf_font_embedding` failures, including unembedded Courier. Primary-stage
 success and report construction do not clear these failures or grant a CI pass.
 
-The four-fixture `test_native_pdf_fixture_canvas` diagnostic reached these
-outcomes in both primary and DISPLAY contexts:
+### Model-Generated Trial
 
-| Release | Actual Diagnostic Outcome | Canvas PDF |
+The unchanged first model-generated `.m` in `../tests/model-generated-round22/`
+was executed for the first time in this run. On R2026a, the trial records
+`matlab_call_completed=true`, `native_proof_status=passed_before_and_after_export`,
+`export_status=completed` and `manifest_status=passed`: full v3 is read from the
+same figure before/after native PNG/PDF/SVG export. The original model-selected
+10x8.5-inch page and descriptive labels were not rewritten. All three output
+hashes and the manifest match the retained trial evidence. The independent
+`/tmp/astra-round22-R2026a-rendered-audit.json` reports 3/3 passed, not the
+evaluator's separate 12/12. Faraday has now viewed all three formats, without
+granting full visual approval;
+`visual_verified=false`, `desktop_interaction_verified=false` and synthetic
+input limits remain. R2021a/R2024b stopped at construction: native proof,
+exports and manifest were `not_run`. Retain both older failures and the R2026a
+success; neither the pending revision nor evaluator success overwrites them.
+
+Faraday viewed the original PNG and independently rendered PDF/SVG, including
+title/statistics, legend and data-region details. Titles, axis labels and legends
+are complete in all three; the PDF embeds WenQuanYi Zen Hei without Courier.
+The PNG's last statistics line touches the top ticks. PDF/SVG also have tight
+spacing, smaller statistical text and reference-line segments crossing points.
+Text extraction and page bounds do not clear these visible defects. SVG uses a
+local font, not embedded glyphs; other machines may substitute it. This one
+synthetic figure does not certify CJK, other figures, releases or interaction,
+and its unmeasured `legend.title` geometry remains unmeasured. The scoped review
+and unchanged-artifact hashes are recorded in
+[the three-format review](../../../.codex-evals/matlab-100-20260905/astra-resume/astra-rendered-review-round23.md).
+
+The same original Astra thread completed two revision turns with recorded
+`gpt-6-astra`, high effort, never approval and danger-full-access. The new
+`../tests/model-generated-round23/astra_comparison_trial.m` is 9405 bytes,
+SHA-256 `3faec2ab0fd5d7a2e5fcf43a211f3848f399e6a28eae2618566ba3ec6f4021f0`.
+It only adds the existing `oi_font_available` dependency and replaces the extra
+enumeration assertion with that repository API. The revised source has not run
+in MATLAB. The original 9303-byte source remains unchanged, SHA-256
+`508a8c8430c6d0d28797df1bc4256c1eca24eafe7fb816c8b77f686aa121e665`.
+Font enumeration, exact family availability and actual glyph rendering are
+different evidence. `oi_font_available` accepts an exact family match from
+listfonts or Unix fontconfig, not an arbitrary substitute; callers must not
+add a mandatory listfonts enumeration gate or infer readable/embedded glyphs.
+
+Production port 8011 has not restarted. Both isolated port 8012 service
+instances have stopped; the 164 archived project files retain their hashes.
+Report status/policy/AST changes remain source candidates: HTTP 12, policy 109
+and AST-related 498 checks are synthetic tests only, not production deployment
+or validation of a real ocean-region report. The aggregator does not read
+`generatedRoot` without a valid report-bound policy. With that policy, complete
+entry, manifest, artifact-reference and MATLAB-source path preflight must pass
+before physical checks; scientific-field failures do not skip physical checks
+or become passes. These changes and the new pixel gate are not deployed to
+production.
+
+### Fixture Canvas
+
+The four-fixture `test_native_pdf_fixture_canvas` reports declare
+`completed_diagnostics_only` on both older releases in primary and DISPLAY
+contexts, and all 16 candidates invoked canvas PDF export. Boole's independent
+offline byte/pixel review found these narrower results:
+
+| Release / Context | Restored PNG Evidence | Limit |
 | --- | --- | --- |
-| R2021a | Four `build_native_pdf_fixture_case:JVMRequired` failures | `canvas_pdf.api_invoked=false` |
-| R2024b | Four `test_native_pdf_fixture_canvas:RootObjects` failures, involving the empty `scribeOverlay` `AnnotationPane` | `canvas_pdf.api_invoked=false` |
-| R2026a | `not_applicable`, not passed | No candidate export |
+| R2021a primary and DISPLAY | All eight restored PNGs are completely white | Reference PNGs are nonuniform |
+| R2024b primary | All four restored PNGs are completely white | Restoration is not verified |
+| R2024b DISPLAY | Four reference/restored pairs have identical decoded RGB | Not PDF or visual approval |
+| R2026a primary and DISPLAY | `not_applicable`, not passed | No candidate export |
 
-Some R2024b geometry records also contain `MATLAB:class:GetProhibited`; they are
-not complete measurements. The round-22 candidate removes the JVM dependency
-from snapshot SHA and excludes only strictly empty AnnotationPane objects,
-rejecting nonempty ones. It has not run natively and does not prove repaired
-geometry, canvas PDF export, restoration, or appearance. Diagnostic outcomes
-remain separate from the original three-candidate native PDF probe stage,
-score, and promoted report artifacts.
-
-Production port 8011 has not reloaded. The Astra generation trial from git
-archive `587c382` on isolated port 8012 completed two turns using separate
-workspace/SQLite/tenant and CLI 0.153.4. Both actual turn contexts record
-`gpt-6-astra`, high effort, never approval and danger-full-access. The original
-source/report and generation provenance are retained in
-`../tests/model-generated-round22/`; independent review matched all 57 numeric
-claims, with one minor source-label wording issue recorded separately. The
-generated source passed R2021a syntax checks but has not run in MATLAB yet.
-The family-B trial now executes those pinned bytes without rewriting the
-model-selected 10x8.5-inch page or descriptive labels; its explicit reader text
-profile preserves all scientific checks. Generation completion does not prove
-native exports, visual quality, real-ocean analysis or production refresh.
+Thus 12 restored PNGs are blank despite completion flags and matching serialized
+geometry. `legend.Text.Position` is explicitly unavailable/nonpublic, not fully
+measured. The reports passed the historical inspector's declaration checks,
+which did not decode PNG pixels; `declaration_consistent` is not restored-image
+approval. The candidate inspector now fully decodes the hash-bound PNG bytes
+with Pillow and checks limited nonuniform foreground on white; missing Pillow
+leaves pixels `not_verified`. This pixel gate is not restoration equivalence,
+visual completeness or authorization for a production canvas strategy. It does
+not repair the 12 blank originals. The per-context review and original hashes
+are in [the canvas review](../../../.codex-evals/matlab-100-20260905/astra-resume/fixture-canvas-consistency-round23.md).
+Snapshot/JVM and RootObjects no longer caused an early stop, but that
+does not prove a specific hash backend or full geometry recovery. Only strictly
+empty AnnotationPane objects may be excluded; nonempty ones must be rejected,
+and this run did not exercise that negative case. These diagnostics remain
+separate from the original three-candidate native PDF probe stage, score, or
+promoted report artifacts. No PDF page, font or manual visual approval follows
+from this pixel review.
 
 ## Layers
 
@@ -115,7 +170,7 @@ dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
 Round 13 passed this v2 path on R2021a/R2024b/R2026a. Those earlier archived
 reports retain 3/4 native-proof coverage, with comparison `not_verified`.
-Rounds 18/19/20 and current round 21 have 4/4 bound declarations on all three releases: every entry under
+Since round 18, including current round 22, reports have 4/4 bound declarations on all three releases: every entry under
 `report-evidence.json`'s `runtime_evidence.figures` has
 `plot_data_evidence.status="runtime_declaration_verified"`. Do not upgrade old
 packages with evidence from this later run.
@@ -184,7 +239,7 @@ Round 20's two simple canvas diagnostics (0pt/3pt inset) captured
 `geometry_before_pdf`, `geometry_after_pdf`, and `geometry_after_png` on
 R2021a/R2024b in both primary and DISPLAY runs. `captured` means a snapshot exists,
 not unchanged geometry, successful restoration, or visual approval. The separate
-four-fixture diagnostic's first native failures are listed in Current Evidence.
+four-fixture diagnostic's later results are listed in Current Evidence.
 Neither it nor the supplementary simple-canvas cases counts toward the original
 three-candidate native PDF probe stage, score, or promoted report artifacts.
 
@@ -196,6 +251,25 @@ Virtual display availability and callback completion do not prove desktop
 interaction, font embedding, text alignment, or a successful visual review.
 
 ## Evidence History
+
+Round-21 run 34001173593 (`7d51e714`) passed 60/60 primary stages but failed
+overall. `oi_apply_axes` explicitly applied `theme.FontSize` to Subtitle and
+passed the `comparison-statistics-layout` perturbation/restyle assertion
+without weakening it. Its four-fixture canvas diagnostics stopped with four
+`build_native_pdf_fixture_case:JVMRequired` cases on R2021a and four
+`test_native_pdf_fixture_canvas:RootObjects` cases on R2024b, with
+`canvas_pdf.api_invoked=false`; some geometry recorded `MATLAB:class:GetProhibited`.
+Those are historical failures, not the later completed-but-blank canvas results.
+
+The initial Astra generation used git archive `587c382` on isolated port 8012,
+separate workspace/SQLite/tenant and CLI 0.153.4. Two completed turns produced
+the original source/report and generation provenance now archived under
+`../tests/model-generated-round22/`. Independent static review matched all 57
+numeric claims, with a minor source-label wording issue recorded separately.
+At that generation-time checkpoint the source had passed R2021a syntax checks
+but had not run in MATLAB; that statement and provenance's `not_run` describe
+the generation snapshot only. The later R2026a native success and two older
+runtime failures are recorded in Current Evidence, without rewriting provenance.
 
 These historical controls explain the current policy; they are not extra
 default-injection requirements or claims about every new figure. The repository

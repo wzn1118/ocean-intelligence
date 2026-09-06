@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import struct
@@ -27,12 +28,20 @@ finally:
     sys.path.pop(0)
 
 
-def png_bytes(width: int = 2400, height: int = 1500) -> bytes:
+def png_bytes(width: int = 2400, height: int = 1500, *, color: tuple[int, ...] | None = None,
+              foreground_pixels: int | None = None) -> bytes:
     def chunk(kind: bytes, content: bytes) -> bytes:
         return struct.pack(">I", len(content)) + kind + content + struct.pack(">I", zlib.crc32(kind + content))
 
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(b"\x00" * ((width + 1) * height))) + chunk(b"IEND", b""))
+    background = bytes(color if color is not None else (255, 255, 255, 255))
+    if foreground_pixels is None:
+        foreground_pixels = width * height // 2 if color is None else 0
+    rows = []
+    for row_index in range(height):
+        painted = min(width, max(0, foreground_pixels - row_index * width))
+        rows.append(b"\x00" + bytes((20, 80, 120, 255)) * painted + background * (width - painted))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
 def geometry() -> dict:
@@ -104,6 +113,12 @@ class FixtureCanvasInspectionTests(unittest.TestCase):
     def write_report(self) -> None:
         self.report_path.write_text(json.dumps(self.payload, ensure_ascii=False), encoding="utf-8")
 
+    def replace_png(self, content: bytes, kind: str = "restored_png") -> None:
+        record = self.payload["candidates"][0][kind]
+        (self.directory / record["file"]).write_bytes(content)
+        record.update(bytes=len(content), sha256=hashlib.sha256(content).hexdigest())
+        self.write_report()
+
     def inspect(self, release: str = "R2021a", context: str = "primary") -> dict:
         return inspector.inspect_fixture_canvas(self.artifacts, self.fixtures, release, context)
 
@@ -149,8 +164,104 @@ class FixtureCanvasInspectionTests(unittest.TestCase):
         for key in ("pdf_pages", "pdf_fonts", "visual", "matlab_execution"):
             self.assertEqual(result[key], "not_verified")
         self.assertNotIn("score", result)
-        self.assertIn("not pixel decoding", result["notice"])
+        pixel_checks = [check for check in result["checks"] if check["name"].endswith(".png_pixels")]
+        self.assertEqual(len(pixel_checks), 8)
+        for check in pixel_checks:
+            self.assertEqual(check["status"], "passed")
+            self.assertIs(check["nonuniform"], True)
+            self.assertEqual(check["foreground_fraction"], 0.5)
+        self.assertIn("full Pillow decoding", result["notice"])
+        self.assertIn("not visual completeness or restoration equivalence", result["notice"])
         self.assertEqual(before, self.fingerprint())
+
+    def test_png_content_policy_rejects_blank_transparent_solid_and_noise(self) -> None:
+        cases = [{"color": color} for color in ((255, 255, 255, 255), (20, 80, 120, 0),
+                                                (0, 0, 0, 255), (20, 80, 120, 255))]
+        cases += [{"foreground_pixels": count} for count in (1, 3599)]
+        for options in cases:
+            with self.subTest(options=options):
+                self.replace_png(png_bytes(**options))
+                before = self.fingerprint()
+                result = self.inspect()
+                self.assert_failed(result)
+                candidate = result["candidates"][0]
+                self.assertEqual(candidate["reported_status"], "completed_diagnostic")
+                self.assertEqual(candidate["status"], "failed")
+                artifact = candidate["artifacts"]["restored_png"]
+                self.assertEqual(artifact["measured"]["sha256"], artifact["declared"]["sha256"])
+                self.assertEqual([check["name"] for check in result["checks"] if check["status"] == "failed"],
+                                 [candidate["id"] + ".restored_png.png_pixels"])
+                self.assertEqual(before, self.fingerprint())
+        self.replace_png(png_bytes(foreground_pixels=3600))
+        self.assertEqual(self.inspect()["status"], "declaration_consistent")
+
+    def test_header_only_and_bad_idat_fail_even_with_matching_hashes(self) -> None:
+        invalid = b"not a zlib stream"
+        bad_idat = (struct.pack(">I", len(invalid)) + b"IDAT" + invalid
+                    + struct.pack(">I", zlib.crc32(b"IDAT" + invalid)))
+        for content in (self.png[:33], self.png[:33] + bad_idat + self.png[-12:]):
+            with self.subTest(bytes=len(content)):
+                self.replace_png(content, "reference_png")
+                result = self.inspect()
+                self.assert_failed(result)
+                artifact = result["candidates"][0]["artifacts"]["reference_png"]
+                self.assertEqual(artifact["measured"]["sha256"], hashlib.sha256(content).hexdigest())
+                self.assertEqual(artifact["measured"]["png_pixels"], [2400, 1500])
+                self.assertTrue(any(check["status"] == "failed" and check["name"].endswith(".reference_png.png_pixels")
+                                    and "decoding failed" in check["reason"] for check in result["checks"]))
+
+    def test_missing_pillow_propagates_not_verified_and_cli_exit_two(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch("inspect_rendered_artifacts.Image", None), mock.patch("sys.stdout", stdout):
+            code = inspector.main(["--artifact-root", str(self.artifacts), "--fixture-root", str(self.fixtures),
+                                   "--release", "R2021a", "--context", "primary"])
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(result["status"], "not_verified")
+        self.assertTrue(all(candidate["status"] == "not_verified" for candidate in result["candidates"]))
+        pixel_checks = [check for check in result["checks"] if check["name"].endswith(".png_pixels")]
+        self.assertEqual(len(pixel_checks), 8)
+        self.assertTrue(all(check["status"] == "not_verified" and "Pillow is not installed" in check["reason"]
+                            for check in pixel_checks))
+        self.assertFalse(any(check["status"] == "failed" for check in result["checks"]))
+        self.payload["counts_toward_stage"] = True
+        self.write_report()
+        with mock.patch("inspect_rendered_artifacts.Image", None):
+            self.assert_failed(self.inspect())
+
+    def test_png_decoder_uses_bound_bytes_and_recheck_rejects_symlink_replacement(self) -> None:
+        path = self.directory / self.payload["candidates"][0]["reference_png"]["file"]
+        outside = self.workspace / "outside.png"
+        outside.write_bytes(png_bytes(color=(255, 255, 255, 255)))
+        original_decode = inspector.inspect_png
+        calls = []
+
+        def replace_after_snapshot(content: bytes, record: dict | None, checks: list) -> None:
+            self.assertIsInstance(content, bytes)
+            self.assertEqual(content, self.png)
+            if not calls:
+                path.unlink()
+                path.symlink_to(outside)
+            calls.append(hashlib.sha256(content).hexdigest())
+            original_decode(content, record, checks)
+
+        with mock.patch.object(inspector, "inspect_png", replace_after_snapshot):
+            result = self.inspect()
+        self.assert_failed(result)
+        self.assertEqual(len(calls), 8)
+        self.assertTrue(all(check["status"] == "passed" for check in result["checks"]
+                            if check["name"].endswith(".png_pixels")))
+        self.assertTrue(any(check["status"] == "failed" and check["name"].startswith("snapshot_unchanged:")
+                            and check["name"].endswith("/reference.png") for check in result["checks"]))
+
+    def test_png_byte_limit_is_enforced_before_decoding(self) -> None:
+        with mock.patch.object(inspector, "MAX_ARTIFACT_BYTES", len(self.png) - 1), \
+                mock.patch.object(inspector, "inspect_png") as decode:
+            result = self.inspect()
+        self.assert_failed(result)
+        decode.assert_not_called()
+        self.assertTrue(any(check["status"] == "failed" and check["name"].endswith(".restored_png.file_read")
+                            and "bounded file" in check["reason"] for check in result["checks"]))
 
     def test_missing_and_partial_running_never_pass(self) -> None:
         self.report_path.unlink()

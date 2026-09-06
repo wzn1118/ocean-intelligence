@@ -126,6 +126,78 @@ test('audits conclusion evidence, limitations, figure links, hashes, and manifes
   assert.equal(result.interactiveFigureCount, 1);
 });
 
+test('optional report ownership preserves the existing unscoped public contract', (context) => {
+  const fixture = createReportEvidenceFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  assert.equal(inspectIllustratedReportEvidence(fixture).ok, true);
+  fixture.expectedReportId = 'synthetic-report-23';
+  assert.equal(inspectIllustratedReportEvidence(fixture).pathsOk, false);
+  scopeReportFixture(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.artifactPathsOk, true);
+});
+
+for (const format of ['png', 'pdf', 'html']) {
+  test(`scoped ${format} ownership is checked before reading any exports`, (context) => {
+    const fixture = createReportEvidenceFixture();
+    context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+    fixture.expectedReportId = 'synthetic-report-23';
+    scopeReportFixture(fixture);
+    const artifactFiles = [fixture.artifactPath, fixture.pdfPath, fixture.interactionPath];
+    const foreign = path.join(fixture.root, `different-report-figure.${format}`);
+    copyFileSync(path.join(fixture.root, fixture.manifest.figures[0].exports[format].file), foreign);
+    fixture.manifest.figures[0].exports[format].file = path.basename(foreign);
+    writeFixtureManifest(fixture);
+    const { result, accesses } = traceEvidenceFilesystem(context, fixture);
+    assert.equal(result.pathsOk, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.artifactPathsOk, false);
+    assert.ok(result.artifactPathViolations.some((code) => code.endsWith('.report_id_mismatch')));
+    assert.deepEqual(accesses.filter((access) => access.file === foreign), []);
+    assert.deepEqual(accesses.filter((access) => ['openSync', 'readFileSync'].includes(access.method)
+      && artifactFiles.includes(access.file)), []);
+  });
+}
+
+function scopeReportFixture(fixture) {
+  for (const [field, suffix] of [['htmlPath', '.html'], ['markdownPath', '.md'], ['manifestPath', '-figures.json']]) {
+    const destination = path.join(fixture.root, `${fixture.expectedReportId}${suffix}`);
+    renameSync(fixture[field], destination);
+    fixture[field] = destination;
+  }
+  for (const [format, field] of [['png', 'artifactPath'], ['pdf', 'pdfPath'], ['html', 'interactionPath']]) {
+    const destination = path.join(fixture.root, `${fixture.expectedReportId}-figure.${format}`);
+    renameSync(fixture[field], destination);
+    fixture[field] = destination;
+    fixture.manifest.figures[0].exports[format].file = path.basename(destination);
+  }
+  writeFixtureManifest(fixture);
+}
+
+for (const field of ['htmlPath', 'markdownPath', 'manifestPath']) {
+  test(`scoped ${field} replacement at open fails pathsOk for downstream reader protection`, (context) => {
+    const fixture = createReportEvidenceFixture();
+    context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+    fixture.expectedReportId = 'synthetic-report-23';
+    scopeReportFixture(fixture);
+    let replaced = false;
+    const { result, accesses } = traceEvidenceFilesystem(context, fixture, (method, args) => {
+      if (!replaced && method === 'openSync' && args[0] === fixture[field]) {
+        replaced = true;
+        renameSync(fixture[field], `${fixture[field]}.original`);
+        symlinkSync(`${fixture[field]}.original`, fixture[field]);
+      }
+    });
+    assert.equal(replaced, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.pathsOk, false);
+    assert.ok(result.pathViolations.includes(`${field}.unreadable`));
+    assert.deepEqual(accesses.filter((entry) => entry.method === 'readFileSync'
+      && [fixture[field], `${fixture[field]}.original`].includes(entry.file)), []);
+  });
+}
+
 for (const field of ['htmlPath', 'markdownPath', 'manifestPath', 'png', 'pdf', 'html']) {
   for (const kind of ['absolute', 'traversal', 'symlink', 'intermediate-symlink', 'internal-symlink']) {
     test(`authorized paths reject ${field} ${kind} before external filesystem access`, (context) => {

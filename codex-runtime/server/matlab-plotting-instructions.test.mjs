@@ -281,9 +281,9 @@ test('routes an explicit Octave context to Octave templates without changing MAT
       'ObservationUncertaintyVariable', 'SourceRowOrigin', 'paired-interactive',
       'paired-observation-model', 'plot_data_evidence', 'runtime_declaration_verified',
       'legend.title', 'matlab.graphics.illustration.legend.Text', 'unmeasured_text_objects',
-      '--rendered-audit', 'pdf_font_embedding', '3/4', '4/4', '34001173593',
+      '--rendered-audit', 'pdf_font_embedding', '3/4', '4/4', '34002693563',
       'test_comparison_record_metadata', 'test_comparison_native_evidence',
-      '36/36', 'JVMRequired', 'RootObjects', 'test_native_pdf_fixture_canvas',
+      '36/36', 'FontUnavailable', 'model-generated-round23', 'completed_diagnostics_only',
       'parseOceanEvidenceTime', 'Astra']) {
       assert.ok(!instructions.includes(matlabOnlyTerm), `MATLAB-only evidence leaked into Octave: ${matlabOnlyTerm}`);
     }
@@ -354,7 +354,7 @@ test('injects verified native sizing without treating it as full visual or CI ap
   assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }), /runtime\.export_size_units|本次 PNG inches\/off 策略/u);
 });
 
-test('scopes SVG processing and distinguishes passing stages from failed CI and canvas diagnostics', () => {
+test('scopes SVG processing and separates model execution, pending revision, canvas defects and failed CI', () => {
   for (const repositoryBlock of repositoryInstructionBlocks()) {
     assert.match(repositoryBlock, /oi_annotate_svg 只对受支持的 SVG 子集/u);
     assert.match(repositoryBlock, /保留内部原生 viewBox 和绘图坐标/u);
@@ -365,29 +365,40 @@ test('scopes SVG processing and distinguishes passing stages from failed CI and 
     assert.match(repositoryBlock, /不代表本次会话已执行、已部署或既有会话热更新/u);
     const current = repositoryBlock.split('### 当前结果\n')[1];
     assert.ok(current);
-    assert.match(current, /CI 34001173593（远端 7d51e714）/u);
-    assert.match(current, /R2021a\/R2024b\/R2026a 主阶段各 20\/20，合计 60\/60/u);
+    assert.match(current, /CI 34002693563（远端 0f677978）/u);
+    assert.match(current, /R2021a\/R2024b 各 19\/20，R2026a 为 20\/20，合计 58\/60/u);
     assert.match(current, /evaluator-runtime 三版 passed/u);
     assert.match(current, /evaluator-result\.json 原始评分为 90、状态仍为 runtime_pending/u);
     assert.match(current, /整体 CI 为 completed\/failure，视觉未验证/u);
-    assert.match(current, /oi_apply_axes 对 Subtitle 显式应用 theme\.FontSize/u);
-    assert.match(current, /comparison-statistics-layout 的字幕扰动\/restyle 字号断言已原生通过，断言不放宽/u);
-    assert.match(current, /R2021a 四 case 为 build_native_pdf_fixture_case:JVMRequired/u);
-    assert.match(current, /R2024b 四 case 为 test_native_pdf_fixture_canvas:RootObjects/u);
-    assert.match(current, /scribeOverlay 的空 AnnotationPane/u);
-    assert.match(current, /MATLAB:class:GetProhibited，不能当作完整测量/u);
-    assert.match(current, /两版 canvas_pdf\.api_invoked=false/u);
-    assert.match(current, /R2026a 的 not_applicable 不是 pass/u);
-    assert.match(current, /captured 快照也不证明几何不变或恢复成功/u);
-    assert.match(current, /不计入原三 candidate stage、评分或正式报告产物/u);
-    assert.match(current, /不依赖 JVM 的 snapshot SHA/u);
-    assert.match(current, /只排除严格空 AnnotationPane，非空仍拒绝/u);
-    assert.match(current, /尚未 native 执行，不能声称已修复 GetProhibited、canvas PDF、恢复或视觉问题/u);
+    assert.match(current, /两旧版 family-b-runtime 因模型原函数第118行 astra_comparison_trial:FontUnavailable 失败/u);
+    assert.match(current, /listfonts 枚举断言不证明系统字体缺失/u);
+    assert.match(current, /首版模型 \.m 在 R2026a 完成调用、同图导出前后完整 v3、PNG\/PDF\/SVG 原生导出及 manifest/u);
+    assert.match(current, /模型外检 3\/3 passed，不混计 evaluator 12\/12/u);
+    assert.match(current, /三格式实看标题\/标签\/图例完整、PDF 嵌字/u);
+    assert.match(current, /PNG 统计粘顶刻度/u);
+    assert.match(current, /矢量间距紧\/字号较小、参考线穿点/u);
+    assert.match(current, /不签全量视觉通过/u);
+    assert.match(current, /原源与两旧失败保留/u);
+    assert.match(current, /model-generated-round23 仅以 oi_font_available 替换枚举断言并新增依赖/u);
+    assert.match(current, /尚未 MATLAB 执行/u);
+    assert.match(current, /completed_diagnostics_only 仍有 12 张恢复 PNG 全白/u);
+    assert.match(current, /头部\/哈希或 captured\/属性相等不证恢复/u);
+    assert.match(current, /非公开 geometry unavailable/u);
+    assert.match(current, /新增解码像素门禁不提升生产策略/u);
+    assert.match(current, /R2026a not_applicable 不是 pass/u);
+    assert.match(current, /不计原三 candidate stage、评分或正式产物/u);
+    assert.match(current, /报告 status\/policy\/AST 未部署/u);
+    assert.match(current, /无绑定 policy 不读 generatedRoot/u);
+    assert.match(current, /完整路径预检通过才做物理检查/u);
+    assert.match(current, /不因科学字段失败跳过/u);
+    assert.match(current, /合成测试不证明真实海区报告通过/u);
     assert.match(repositoryBlock, /OI_ColorAccessibilityRole="uncertainty"/u);
     assert.match(repositoryBlock, /不改变数据、掩码或审计算法/u);
     assert.match(repositoryBlock, /不能用角色标记豁免任意数据线/u);
-    assert.doesNotMatch(current, /唯一主阶段失败|诊断尚未 MATLAB 执行|原始评分均为 (?:0|100)/u);
+    assert.doesNotMatch(current, /唯一主阶段失败|诊断尚未 MATLAB 执行|原始评分均为 (?:0|100)|视觉审阅尚未签署/u);
   }
+  assert.doesNotMatch(matlabPlottingInstructions({ runtime: 'octave' }),
+    /model-generated-round23|completed_diagnostics_only|generatedRoot|36\/36|全量视觉通过/u);
 });
 
 test('documents observation-only uncertainty as an explicit native API without inventing model inputs', () => {
@@ -502,10 +513,10 @@ test('binds explicit rendered audit declarations and never hides known older PDF
   }
 });
 
-test('repository documents distinguish current primary-stage success from incomplete canvas and visual evidence', () => {
+test('repository documents preserve original model outcomes and separate unexecuted revision and canvas defects', () => {
   for (const [name, document] of [['SKILL', repositorySkill], ['README', repositoryReadme],
     ['evals README', evaluationReadme]]) {
-    for (const term of ['34001173593', '7d51e714', '20/20', '60/60', '90', 'runtime_pending',
+    for (const term of ['34002693563', '0f677978', '19/20', '20/20', '58/60', '90', 'runtime_pending',
       'completed/failure', 'SampleLabels', 'cellstr',
       'test_comparison_native_evidence', 'test_comparison_uncertainty', '3/4', '4/4',
       'schema_version=3', 'runtime_evidence.figures', 'runtime_declaration_verified',
@@ -515,15 +526,14 @@ test('repository documents distinguish current primary-stage success from incomp
     assert.doesNotMatch(document, /still awaits round-18 licensed CI|仍待第18轮 CI|successful end-to-end evidence is still absent/u);
   }
   for (const document of [repositorySkill, repositoryReadme, evaluationReadme]) {
-    for (const term of ['comparison-statistics-layout', 'oi_apply_axes', 'theme.FontSize',
+    for (const term of ['astra_comparison_trial:FontUnavailable', 'oi_font_available',
+      'model-generated-round23', '3/3', 'listfonts', 'glyph',
       '36/36', 'native-reader-test-results.json', 'COMPARISON_NATIVE_READER_TEST_NEGATIVES=36',
       'COMPARISON_NATIVE_READER_TEST=passed_synthetic_native_mutations_only',
       'scatter-nan-size', 'run_matlab_gate:ComparisonProofHandles', 'original_artifacts_unchanged=true',
       'visual_verified=false', 'desktop_interaction_verified=false', '5/36',
-      'test_native_pdf_fixture_canvas', 'build_native_pdf_fixture_case:JVMRequired',
-      'test_native_pdf_fixture_canvas:RootObjects', 'MATLAB:class:GetProhibited',
-      'canvas_pdf.api_invoked=false', 'not_applicable', 'scribeOverlay', 'AnnotationPane',
-      'geometry_before_pdf', 'geometry_after_pdf', 'geometry_after_png', 'captured', '0pt/3pt']) {
+      'test_native_pdf_fixture_canvas', 'completed_diagnostics_only',
+      'not_applicable', 'AnnotationPane', 'legend.Text.Position']) {
       assert.ok(document.includes(term), `Missing native or candidate boundary: ${term}`);
     }
     assert.doesNotMatch(document, /native mutation test was not reached|原生篡改测试尚未进入/u);
@@ -531,19 +541,56 @@ test('repository documents distinguish current primary-stage success from incomp
   assert.match(repositorySkill, /earlier archived reports retain 3\/4 native-proof coverage/u);
   for (const document of [repositorySkill, evaluationReadme]) {
     assert.match(document, /four positive cases and 36\/36 reader-negative cases per release/u);
-    assert.match(document, /(?:assertion now passed natively, without relaxing|assertion passed natively without weakening)/u);
-    assert.match(document, /has not run natively/u);
-    assert.match(document, /strictly empty AnnotationPane objects,\s+rejecting nonempty ones/u);
+    assert.match(document, /has not run\s+in MATLAB/u);
+    assert.match(document, /nonempty ones (?:still require rejection|must be rejected)/u);
     assert.match(document, /original\s+three-candidate native PDF probe stage, score, or promoted report artifacts/u);
     assert.match(document, /not (?:a trusted visual audit or )?overall CI (?:pass|or visual approval)/u);
+    assert.match(document, /PNG.*(?:statistics|statistics line) (?:touch|touches) the top ticks/u);
+    assert.match(document, /(?:reference line|reference-line segments) cross(?:es|ing) points/u);
+    assert.match(document, /(?:not full visual approval|without\s+granting full visual approval)/u);
+    assert.match(document, /(?:Missing|missing) Pillow\s+leaves pixels `not_verified`/u);
+    assert.match(document, /(?:authorize|authorization for) a production canvas strategy/u);
+    assert.match(document, /does not read\s+`generatedRoot` without a valid report-bound policy/u);
+    assert.match(document, /(?:complete entry|complete\s+entry), manifest, artifact-reference and MATLAB-source path preflight/u);
+    assert.match(document, /scientific-field failures do not skip/u);
+    assert.match(document, /not deployed to\s+production/u);
+    assert.match(document, /PDF embeds (?:its font|WenQuanYi Zen Hei without Courier)/u);
+    assert.match(document, /(?:vector spacing is tight with smaller text|PDF\/SVG also have tight\s+spacing, smaller statistical text)/u);
   }
   assert.match(repositoryReadme, /每版完成 4 个正例及 36\/36 个 reader 负例/u);
-  assert.match(repositoryReadme, /字幕扰动\/restyle 字号断言已原生通过，断言未放宽/u);
-  assert.match(repositoryReadme, /候选尚未 native 执行/u);
+  assert.match(repositoryReadme, /修订源尚未 MATLAB 执行/u);
   assert.match(repositoryReadme, /严格空 AnnotationPane（非空拒绝）/u);
   assert.match(repositoryReadme, /`not_applicable`，不是 pass/u);
   assert.match(repositoryReadme, /均不计入原三 candidate 的 native PDF probe stage、评分或正式报告产物/u);
   assert.match(repositoryReadme, /整体 CI 失败，视觉未验证/u);
+  assert.match(repositoryReadme, /共 12 张恢复 PNG 全白/u);
+  assert.match(repositoryReadme, /Faraday 已实际查看三格式/u);
+  assert.match(repositoryReadme, /标题、轴标签与图例完整，PDF 字体嵌入/u);
+  assert.match(repositoryReadme, /PNG 统计与顶刻度粘连/u);
+  assert.match(repositoryReadme, /矢量间距紧、字号较小，参考线穿点/u);
+  assert.match(repositoryReadme, /不签全量视觉通过/u);
+  assert.match(repositoryReadme, /不把未测图例标题 geometry 改成已测/u);
+  assert.match(repositoryReadme, /原头部\/哈希检查漏掉空白/u);
+  assert.match(repositoryReadme, /完整 PNG 解码与白底非均匀前景检查/u);
+  assert.match(repositoryReadme, /缺 Pillow 时像素保持 `not_verified`/u);
+  assert.match(repositoryReadme, /绝不提升生产 canvas 策略/u);
+  assert.match(repositoryReadme, /缺少有效报告绑定 policy 时不读 `generatedRoot`/u);
+  assert.match(repositoryReadme, /所有产物引用和 MATLAB 源路径完整预检通过才做物理检查/u);
+  assert.match(repositoryReadme, /不能因科学字段失败跳过物理检查/u);
+  assert.match(repositoryReadme, /新代码仍未生产部署/u);
+  assert.match(repositorySkill, /12 completely white restored PNGs/u);
+  assert.match(evaluationReadme, /12 restored PNGs are blank/u);
+  assert.match(evaluationReadme, /native_proof_status=passed_before_and_after_export/u);
+  assert.match(evaluationReadme, /exports and manifest were `not_run`/u);
+  assert.match(evaluationReadme, /9405 bytes/u);
+  assert.match(evaluationReadme, /3faec2ab0fd5d7a2e5fcf43a211f3848f399e6a28eae2618566ba3ec6f4021f0/u);
+  assert.match(evaluationReadme, /astra-rendered-review-round23\.md/u);
+  assert.match(evaluationReadme, /fixture-canvas-consistency-round23\.md/u);
+  assert.match(evaluationReadme, /does\s+not repair the 12 blank originals/u);
+  assert.match(evaluationReadme, /SVG uses a\s+local font, not embedded glyphs/u);
+  for (const document of [repositorySkill, repositoryReadme, evaluationReadme]) {
+    assert.doesNotMatch(document, /visual review is not(?: yet)? signed|视觉审阅尚未签署/u);
+  }
 });
 
 test('keeps active report contracts in structured guidance and delegates historical diagnostics to repository documents', () => {
@@ -580,12 +627,16 @@ test('keeps active report contracts in structured guidance and delegates histori
   assert.match(evaluationReadme, /Font probe 33985570222/u);
   assert.match(evaluationReadme, /33988300354 did not\s+repair/u);
   assert.match(evaluationReadme, /comparisons shared a Cairo backend/u);
-  assert.match(evaluationReadme, /Production port 8011 has not reloaded/u);
+  assert.match(evaluationReadme, /Production port 8011 has not restarted/u);
   assert.match(evaluationReadme, /isolated port 8012/u);
-  assert.match(evaluationReadme, /completed two turns using separate/u);
-  assert.match(evaluationReadme, /generated source passed R2021a syntax checks but has not run in MATLAB yet/u);
-  assert.match(evaluationReadme, /model-selected 10x8\.5-inch page or descriptive labels/u);
-  assert.match(evaluationReadme, /Generation completion does not prove\s+native exports/u);
+  assert.match(evaluationReadme, /instances have stopped/u);
+  assert.match(evaluationReadme, /164 archived project files retain their hashes/u);
+  assert.match(evaluationReadme, /same original Astra thread completed two revision turns/u);
+  assert.match(evaluationReadme, /`gpt-6-astra`, high effort, never approval and danger-full-access/u);
+  assert.match(evaluationReadme, /At that generation-time checkpoint/u);
+  assert.match(evaluationReadme, /generation snapshot only/u);
+  assert.match(evaluationReadme, /model-selected\s+10x8\.5-inch page and descriptive labels were not rewritten/u);
+  assert.match(evaluationReadme, /HTTP 12, policy 109\s+and AST-related 498 checks are synthetic tests only/u);
 });
 
 test('repository entry separates verified sizing and SVG contracts from pending visual validation', () => {
@@ -612,15 +663,25 @@ test('repository entry separates verified sizing and SVG contracts from pending 
   assert.match(repositoryReadme, /不放宽既有门禁/u);
 });
 
-test('requires exact installed fonts without claiming PDF embedding or CJK readability', () => {
+test('uses the existing font availability policy without a listfonts-only gate or glyph claims', () => {
   const instructions = matlabPlottingInstructions();
-  assert.match(instructions, /listfonts 或 fc-list 枚举结果的精确字体族名匹配/u);
-  assert.match(instructions, /不得用 fc-match fallback 返回了替代字体就认定请求字体已安装/u);
-  assert.match(instructions, /字体候选匹配不等于 PDF 字体嵌入，也不等于 CJK 字形可读/u);
+  assert.match(instructions, /字体可用性使用 oi_font_available\(theme\.FontName\)/u);
+  assert.match(instructions, /不额外断言 listfonts 必须枚举所选字体/u);
+  assert.match(instructions, /精确匹配 listfonts 或 Unix fontconfig 返回的字体族/u);
+  assert.match(instructions, /不接受任意 fc-match 替代字体/u);
+  assert.match(instructions, /枚举缺项不等于系统字体缺失/u);
+  assert.match(instructions, /字体存在性不等于 PDF 字体嵌入或实际 glyph\/CJK 渲染通过/u);
   assert.match(instructions, /PNG\/PDF\/SVG 必须分别核验实际产物，未核验项保持 unverified/u);
-  assert.match(repositorySkill, /exact, case-insensitive matching against `listfonts` or `fc-list` enumeration/u);
+  assert.match(repositorySkill, /Use `oi_font_available` with the repository's exact, case-insensitive family matching/u);
+  assert.match(repositorySkill, /do not add a separate requirement that listfonts enumerate the selected family/u);
   assert.match(repositorySkill, /`fc-match` fallback does not prove the requested font is installed/u);
   assert.match(repositorySkill, /neither PDF font embedding nor readable CJK glyphs/u);
+  const fontAsset = readFileSync(new URL('oi_font_available.m', matlabAssetDirectory), 'utf8');
+  assert.match(fontAsset, /strcmpi\(installedFonts\(:\), fontName\)/u);
+  assert.match(fontAsset, /if available \|\| ~isunix/u);
+  assert.match(fontAsset, /fc-match -f/u);
+  assert.match(fontAsset, /strcmpi\(families\(:\), fontName\)/u);
+  assert.doesNotMatch(instructions, /字体安装证据必须来自 listfonts 或 fc-list 枚举结果/u);
 });
 
 test('scopes the WenQuanYi preference to the tested native vector font evidence', () => {

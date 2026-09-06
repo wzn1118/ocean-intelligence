@@ -1,8 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { MIMEType } from 'node:util';
 import { parseOceanEvidenceTime } from './ocean-evidence-time.mjs';
 import { parseOceanEvidenceDocument } from './ocean-report-html-parser.mjs';
 
+const require = createRequire(import.meta.url);
+const { parse: parseJavaScript } = require('acorn');
+const { selectAll, is: matchesSelector } = require('css-select');
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const INERT_HTML_ELEMENTS = new Set(['template', 'noscript']);
@@ -14,6 +18,20 @@ const JAVASCRIPT_TYPES = new Set([
   'text/javascript1.3', 'text/javascript1.4', 'text/javascript1.5', 'text/jscript', 'text/livescript',
   'text/x-ecmascript', 'text/x-javascript',
 ]);
+const HOVER_EVENTS = new Set(['pointerenter', 'pointerover', 'mouseenter', 'mouseover']);
+const FOCUS_EVENTS = new Set(['focus', 'focusin']);
+const BUBBLING_EVENTS = new Set(['pointerover', 'mouseover', 'focusin']);
+const DOM_SELECTOR_ADAPTER = {
+  isTag: node => Boolean(node.tagName),
+  getAttributeValue: (node, name) => node.attrs?.find(attribute => attribute.name === name && !attribute.prefix)?.value,
+  getChildren: node => node.childNodes || [],
+  getName: node => node.tagName,
+  getParent: node => node.parentNode || null,
+  getSiblings: node => node.parentNode?.childNodes || [node],
+  getText: node => node.nodeName === '#text' ? node.value : elementText(node),
+  hasAttrib: (node, name) => node.attrs?.some(attribute => attribute.name === name && !attribute.prefix) === true,
+  removeSubsets: nodes => [...new Set(nodes)].filter(node => !nodes.some(other => other !== node && isDescendantOf(node, other))),
+};
 
 export const POINT_INTERACTION_CHECK_IDS = Object.freeze([
   'html-readable',
@@ -144,7 +162,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
   const identityAudit = inspectStablePointIdentity(pointElements, dataModel);
   const identityCheck = makeCheck('stable-point-identity', htmlRead.ok && identityAudit.ok, identityAudit.violations, identityAudit);
 
-  const interactionAudit = inspectInteractions(executableScripts, styleText, pointElements);
+  const interactionAudit = inspectInteractions(executableScripts, styleText, pointElements, parsed.document);
   const interactionCheck = makeCheck('point-interaction', htmlRead.ok && interactionAudit.ok, interactionAudit.violations, interactionAudit);
 
   const tooltipAudit = inspectTooltipFields(elements, pointElements, dataModel);
@@ -249,6 +267,7 @@ function extractDocumentElements(document) {
     if (node.namespaceURI === HTML_NAMESPACE && INERT_HTML_ELEMENTS.has(node.tagName)) continue;
     if (node.tagName && [HTML_NAMESPACE, SVG_NAMESPACE].includes(node.namespaceURI)) {
       elements.push({
+        node,
         tag: node.tagName,
         namespace: node.namespaceURI,
         attributes: Object.fromEntries(node.attrs.map(({ name, prefix, value }) => [prefix ? `${prefix}:${name}` : name, value])),
@@ -345,8 +364,8 @@ function seriesNamesFromPoints(points) {
   return uniqueStrings(points.map((point) => firstDefined(point, ['series', 'seriesName', 'series_name', 'dataset'])));
 }
 
-function inspectInteractions(executableScripts, styleText, pointElements) {
-  const bindingAudit = inspectPointEventBindings(executableScripts);
+function inspectInteractions(executableScripts, styleText, pointElements, document) {
+  const bindingAudit = inspectPointEventBindings(executableScripts, pointElements, document);
   const css = styleText.replace(/\/\*[\s\S]*?\*\//gu, ' ');
   const hoverBinding = bindingAudit.hoverBinding;
   const hoverStyling = /\.temperature-point\s*:hover\b/iu.test(css);
@@ -360,11 +379,17 @@ function inspectInteractions(executableScripts, styleText, pointElements) {
   if (!focusBinding) violations.push({ rule: 'focus-handler-missing' });
   if (!focusStyling) violations.push({ rule: 'focus-state-missing' });
   if (nonFocusablePoints.length > 0) violations.push({ rule: 'points-not-focusable', pointIndexes: nonFocusablePoints });
+  if ((!hoverBinding || !focusBinding) && bindingAudit.diagnostics.length > 0) {
+    violations.push({ rule: 'point-bindings-not-verified', details: bindingAudit.diagnostics });
+  }
   return {
     ok: violations.length === 0,
     hoverOk: hoverBinding && hoverStyling && pointElements.length > 0,
     focusOk: focusBinding && focusStyling && pointElements.length > 0 && nonFocusablePoints.length === 0,
     nonFocusablePoints,
+    bindingStatus: hoverBinding && focusBinding ? 'statically-matched' : 'not-verified',
+    unverifiedHoverPointIndexes: bindingAudit.unverifiedHoverPointIndexes,
+    unverifiedFocusPointIndexes: bindingAudit.unverifiedFocusPointIndexes,
     violations,
   };
 }
@@ -505,7 +530,7 @@ function inspectExternalResources(html, executableScripts, styleText) {
     ['module-import', /\bimport\s*\(\s*["']/iu],
   ];
   for (const script of executableScripts) {
-    const executableCode = tokenizeJavaScriptStrings(script).code;
+    const executableCode = tokenizeJavaScriptStrings(script.text).code;
     for (const [rule, pattern] of networkPatterns) {
       if (pattern.test(executableCode)) violations.push({ rule });
     }
@@ -586,28 +611,405 @@ function extractExecutableScripts(elements) {
     if (type === 'module') return true;
     if (namespace === HTML_NAMESPACE && Object.hasOwn(attributes, 'nomodule')) return false;
     return type === '' || JAVASCRIPT_TYPES.has(type);
-  }).map(({ text }) => text);
+  }).map(({ text, attributes }) => ({
+    text,
+    sourceType: attributes.type?.trim().toLowerCase() === 'module' ? 'module' : 'script',
+  }));
 }
 
-function inspectPointEventBindings(scripts) {
-  let hoverBinding = false;
-  let focusBinding = false;
-  for (const script of scripts) {
-    const tokenized = tokenizeJavaScriptStrings(script);
-    const collectionPattern = /querySelectorAll\s*\(\s*__STRING_(\d+)__\s*\)\s*\.forEach\s*\(\s*\(?\s*([A-Za-z_$][\w$]*)/gu;
-    for (const match of tokenized.code.matchAll(collectionPattern)) {
-      const selector = tokenized.strings[Number(match[1])] || '';
-      if (!/(?:^|[\s>+~,])\.temperature-point(?:$|[\s>+~,.#[:])/u.test(selector)) continue;
-      const variable = escapeRegExp(match[2]);
-      const listenerPattern = new RegExp(`${variable}\\s*\\.\\s*addEventListener\\s*\\(\\s*__STRING_(\\d+)__`, 'gu');
-      for (const listener of tokenized.code.matchAll(listenerPattern)) {
-        const eventName = (tokenized.strings[Number(listener[1])] || '').toLowerCase();
-        hoverBinding ||= ['pointerenter', 'mouseenter', 'mouseover'].includes(eventName);
-        focusBinding ||= ['focus', 'focusin'].includes(eventName);
+function isDescendantOf(node, ancestor) {
+  for (let current = node.parentNode; current; current = current.parentNode) {
+    if (current === ancestor) return true;
+  }
+  return false;
+}
+
+function bindingNames(pattern) {
+  if (!pattern) return [];
+  if (pattern.type === 'Identifier') return [pattern.name];
+  if (pattern.type === 'RestElement') return bindingNames(pattern.argument);
+  if (pattern.type === 'AssignmentPattern') return bindingNames(pattern.left);
+  if (pattern.type === 'ArrayPattern') return pattern.elements.flatMap(bindingNames);
+  if (pattern.type === 'ObjectPattern') return pattern.properties.flatMap(property => bindingNames(property.value || property.argument));
+  return [];
+}
+
+function inspectPointEventBindings(scripts, pointElements, document) {
+  const unknown = Symbol('not-verified');
+  const pointNodes = new Set(pointElements.map(element => element.node));
+  const hover = new Set();
+  const focus = new Set();
+  const propertyHandlers = new Map();
+  const diagnostics = [];
+  const globalScope = { parent: null, bindings: new Map(), functionScope: true };
+  const selectorOptions = { adapter: DOM_SELECTOR_ADAPTER, xmlMode: true, relativeSelector: false };
+  let invalidated = false;
+  let effectsOnly = false;
+  let steps = 0;
+
+  function note(reason) {
+    if (diagnostics.length < 20 && !diagnostics.some(entry => entry.reason === reason)) diagnostics.push({ reason });
+  }
+
+  function nodesValue(nodes, collection = false, eventSource, nullable = false) {
+    return { kind: 'nodes', nodes: [...new Set(nodes)], collection, eventSource, nullable };
+  }
+
+  function invalidateMutation(receiver, reason) {
+    if (receiver?.kind === 'nodes' && !receiver.nodes.some(root =>
+      [...pointNodes].some(point => point === root || isDescendantOf(point, root)))) return;
+    invalidated = true;
+    note(reason);
+  }
+
+  function inspectPossibleEffects(statements, scope, context, depth) {
+    const previous = effectsOnly;
+    effectsOnly = true;
+    try { visitStatements(statements, scope, context, depth); }
+    finally { effectsOnly = previous; }
+  }
+
+  function inspectPossibleExpression(expression, scope, context, depth) {
+    inspectPossibleEffects([{ type: 'ExpressionStatement', expression }], scope, context, depth);
+  }
+
+  function lookup(scope, name) {
+    for (let current = scope; current; current = current.parent) {
+      if (current.bindings.has(name)) return { scope: current, value: current.bindings.get(name) };
+    }
+    return null;
+  }
+
+  function variableScope(scope) {
+    while (!scope.functionScope) scope = scope.parent;
+    return scope;
+  }
+
+  function prepare(statements, scope, hoistVars = false) {
+    const pending = hoistVars ? [...statements] : [];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type)) continue;
+      if (node.type === 'VariableDeclaration' && node.kind === 'var') {
+        for (const declaration of node.declarations) {
+          for (const name of bindingNames(declaration.id)) {
+            if (!scope.bindings.has(name)) scope.bindings.set(name, unknown);
+          }
+        }
+      }
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) pending.push(...value.filter(child => child?.type));
+        else if (value?.type) pending.push(value);
+      }
+    }
+    for (const statement of statements) {
+      if (statement.type === 'FunctionDeclaration' && statement.id) {
+        scope.bindings.set(statement.id.name, { kind: 'function', node: statement, scope });
+      } else if (statement.type === 'VariableDeclaration') {
+        const target = statement.kind === 'var' ? variableScope(scope) : scope;
+        for (const declaration of statement.declarations) {
+          for (const name of bindingNames(declaration.id)) {
+            if (!target.bindings.has(name)) target.bindings.set(name, unknown);
+          }
+        }
+      } else if (statement.type === 'ClassDeclaration' && statement.id) scope.bindings.set(statement.id.name, unknown);
+      else if (statement.type === 'ImportDeclaration') {
+        for (const specifier of statement.specifiers) scope.bindings.set(specifier.local.name, unknown);
       }
     }
   }
-  return { hoverBinding, focusBinding };
+
+  function truth(value) {
+    if (value === unknown) return unknown;
+    if (value?.kind === 'nodes') {
+      if (value.collection) return true;
+      return value.nullable && value.nodes.length > 0 ? unknown : value.nodes.length > 0;
+    }
+    return Boolean(value);
+  }
+
+  function select(receiver, selector, method) {
+    if (receiver?.kind !== 'nodes' || receiver.collection || receiver.nullable || typeof selector !== 'string') {
+      note('dynamic-selector-or-receiver');
+      return unknown;
+    }
+    if (!selector.trim() || /[:!<\\]/u.test(selector)) {
+      note('selector-outside-static-subset');
+      return unknown;
+    }
+    try {
+      const matchesByRoot = receiver.nodes.map(root => {
+        if (method !== 'closest') {
+          const matches = selectAll(selector, root, selectorOptions);
+          return method === 'querySelector' ? matches.slice(0, 1) : matches;
+        }
+        for (let current = root; current?.tagName; current = current.parentNode) {
+          if (matchesSelector(current, selector, selectorOptions)) return [current];
+        }
+        return [];
+      });
+      const selected = matchesByRoot.flat();
+      if (selected.length === 0) note('selector-matches-no-nodes');
+      return nodesValue(selected, method === 'querySelectorAll', method === 'closest' ? receiver.eventSource : undefined,
+        method !== 'querySelectorAll' && matchesByRoot.some(matches => matches.length === 0));
+    } catch {
+      note('selector-invalid-or-unsupported');
+      return unknown;
+    }
+  }
+
+  function record(eventName, value) {
+    if (effectsOnly) return;
+    const target = HOVER_EVENTS.has(eventName) ? hover : FOCUS_EVENTS.has(eventName) ? focus : null;
+    if (target && value?.kind === 'nodes' && !value.collection && !value.nullable) {
+      for (const node of value.nodes) if (pointNodes.has(node)) target.add(node);
+    }
+  }
+
+  function invoke(callback, args, context, depth) {
+    if (callback?.kind !== 'function' || callback.node.async || callback.node.generator || depth > 16) {
+      note('callback-not-statically-resolved');
+      return unknown;
+    }
+    const scope = { parent: callback.scope, bindings: new Map(), functionScope: true };
+    for (const [index, parameter] of callback.node.params.entries()) {
+      for (const name of bindingNames(parameter)) scope.bindings.set(name, parameter.type === 'Identifier' ? args[index] ?? unknown : unknown);
+    }
+    const body = callback.node.body;
+    if (body.type === 'BlockStatement') {
+      prepare(body.body, scope, true);
+      visitStatements(body.body, scope, context, depth);
+    } else evaluate(body, scope, context, depth);
+    return unknown;
+  }
+
+  function register(receiver, eventName, callback, options, depth) {
+    if (receiver?.kind !== 'nodes' || receiver.collection || receiver.nullable || callback?.kind !== 'function') {
+      note('listener-receiver-or-callback-not-resolved');
+      return;
+    }
+    if (eventName === 'DOMContentLoaded' && receiver.nodes.includes(document)) {
+      invoke(callback, [unknown], null, depth + 1);
+      return;
+    }
+    if (!HOVER_EVENTS.has(eventName) && !FOCUS_EVENTS.has(eventName)) return;
+    record(eventName, receiver);
+    const capture = options?.type === 'Literal' && options.value === true
+      || options?.type === 'ObjectExpression' && options.properties.some(property => !property.computed
+        && (property.key.name || property.key.value) === 'capture' && property.value.type === 'Literal' && property.value.value === true);
+    if (!BUBBLING_EVENTS.has(eventName) && !capture) return;
+    const reachable = [...pointNodes].filter(node => receiver.nodes.some(root => isDescendantOf(node, root)));
+    if (reachable.length === 0) return;
+    const delegation = { eventName };
+    const event = { kind: 'event', target: nodesValue(reachable, false, delegation), currentTarget: receiver };
+    invoke(callback, [event], delegation, depth + 1);
+  }
+
+  function evaluate(node, scope, context, depth) {
+    if (!node || ++steps > 20000) {
+      if (steps > 20000) { invalidated = true; note('static-analysis-budget'); }
+      return unknown;
+    }
+    if (node.type === 'Literal') return node.regex ? unknown : node.value;
+    if (node.type === 'TemplateLiteral' && node.expressions.length === 0) return node.quasis[0].value.cooked;
+    if (node.type === 'Identifier') {
+      const binding = lookup(scope, node.name);
+      return binding ? binding.value : node.name === 'document' && document ? nodesValue([document]) : unknown;
+    }
+    if (node.type === 'ThisExpression') return context?.inlinePoint || unknown;
+    if (['FunctionExpression', 'ArrowFunctionExpression'].includes(node.type)) return { kind: 'function', node, scope };
+    if (node.type === 'MemberExpression') {
+      const receiver = evaluate(node.object, scope, context, depth);
+      const property = node.computed ? evaluate(node.property, scope, context, depth) : node.property.name;
+      if (receiver?.kind === 'event' && ['target', 'currentTarget'].includes(property)) return receiver[property];
+      if (receiver?.kind === 'nodes' && receiver.nodes.length === 1 && receiver.nodes[0] === document && property === 'body') {
+        return select(receiver, 'body', 'querySelector');
+      }
+      if (receiver?.kind === 'nodes' && !receiver.collection && ['parentNode', 'parentElement'].includes(property)) {
+        const parents = receiver.nodes.map(node => node.parentNode)
+          .filter(parent => parent && (property === 'parentNode' || parent.tagName));
+        return nodesValue(parents, false, undefined, receiver.nullable || parents.length !== receiver.nodes.length);
+      }
+      return unknown;
+    }
+    if (node.type === 'UnaryExpression' && node.operator === '!') {
+      const value = truth(evaluate(node.argument, scope, context, depth));
+      return value === unknown ? unknown : !value;
+    }
+    if (node.type === 'LogicalExpression') {
+      const left = evaluate(node.left, scope, context, depth);
+      const condition = truth(left);
+      if (condition === unknown) {
+        inspectPossibleExpression(node.right, scope, context, depth);
+        return unknown;
+      }
+      if (node.operator === '&&') return condition ? evaluate(node.right, scope, context, depth) : left;
+      if (node.operator === '||') return condition ? left : evaluate(node.right, scope, context, depth);
+      return unknown;
+    }
+    if (node.type === 'ConditionalExpression') {
+      const condition = truth(evaluate(node.test, scope, context, depth));
+      if (condition !== unknown) return evaluate(condition ? node.consequent : node.alternate, scope, context, depth);
+      inspectPossibleExpression(node.consequent, scope, context, depth);
+      inspectPossibleExpression(node.alternate, scope, context, depth);
+      return unknown;
+    }
+    if (node.type === 'ChainExpression') {
+      inspectPossibleExpression(node.expression, scope, context, depth);
+      return unknown;
+    }
+    if (node.type === 'SequenceExpression') {
+      let value = unknown;
+      for (const expression of node.expressions) value = evaluate(expression, scope, context, depth);
+      return value;
+    }
+    if (node.type === 'AssignmentExpression' || node.type === 'UpdateExpression') {
+      const target = node.left || node.argument;
+      const value = node.type === 'AssignmentExpression' && node.operator === '=' ? evaluate(node.right, scope, context, depth) : unknown;
+      if (target.type === 'Identifier') {
+        const binding = lookup(scope, target.name);
+        if (binding) binding.scope.bindings.set(target.name, effectsOnly ? unknown : value);
+      } else if (target.type === 'MemberExpression') {
+        const property = target.computed ? evaluate(target.property, scope, context, depth) : target.property.name;
+        if (['addEventListener', 'querySelectorAll', 'querySelector', 'forEach', 'closest'].includes(property)) {
+          invalidated = true;
+          note('binding-method-reassigned');
+        } else if (typeof property === 'string' && property.startsWith('on')) {
+          const receiver = evaluate(target.object, scope, context, depth);
+          if (effectsOnly && (HOVER_EVENTS.has(property.slice(2)) || FOCUS_EVENTS.has(property.slice(2)))) {
+            invalidateMutation(receiver, 'point-listener-removal-not-verified');
+          } else if (!effectsOnly && receiver?.kind === 'nodes' && !receiver.collection && !receiver.nullable) {
+            for (const node of receiver.nodes) {
+              if (!propertyHandlers.has(node)) propertyHandlers.set(node, new Map());
+              propertyHandlers.get(node).set(property.slice(2), value?.kind === 'function');
+            }
+          }
+        } else if (['innerHTML', 'outerHTML', 'textContent', 'innerText'].includes(property)) {
+          invalidateMutation(evaluate(target.object, scope, context, depth), 'point-dom-mutation-not-verified');
+        }
+      }
+      return value;
+    }
+    if (node.type !== 'CallExpression') return unknown;
+    if (node.callee.type !== 'MemberExpression') {
+      const callback = evaluate(node.callee, scope, context, depth);
+      const args = node.arguments.map(argument => evaluate(argument, scope, context, depth));
+      if (callback?.kind !== 'function') return unknown;
+      if (context?.inlinePoint) record(context.eventName, context.inlinePoint);
+      else if (context) for (const value of args) if (value?.eventSource === context) record(context.eventName, value);
+      return invoke(callback, args, context, depth + 1);
+    }
+    const receiver = evaluate(node.callee.object, scope, context, depth);
+    const method = node.callee.computed ? evaluate(node.callee.property, scope, context, depth) : node.callee.property.name;
+    const args = node.arguments.map(argument => evaluate(argument, scope, context, depth));
+    if (['querySelectorAll', 'querySelector', 'closest'].includes(method)) return select(receiver, args[0], method);
+    if (method === 'forEach') {
+      if (receiver?.kind !== 'nodes' || !receiver.collection) note('foreach-collection-not-resolved');
+      else if (receiver.nodes.length > 0) invoke(args[0], [nodesValue(receiver.nodes)], context, depth + 1);
+    } else if (method === 'addEventListener') register(receiver, args[0], args[1], node.arguments[2], depth);
+    else if (method === 'removeEventListener') {
+      if (typeof args[0] !== 'string' || HOVER_EVENTS.has(args[0]) || FOCUS_EVENTS.has(args[0]) || args[0] === 'DOMContentLoaded') {
+        invalidateMutation(receiver, 'point-listener-removal-not-verified');
+      }
+    } else if (['remove', 'replaceWith', 'replaceChildren'].includes(method)) {
+      invalidateMutation(receiver, 'point-dom-mutation-not-verified');
+    } else if (['removeChild', 'replaceChild'].includes(method)) {
+      invalidateMutation(args[method === 'removeChild' ? 0 : 1], 'point-dom-mutation-not-verified');
+    }
+    return unknown;
+  }
+
+  function visitStatements(statements, scope, context, depth) {
+    for (const [index, statement] of statements.entries()) {
+      if (statement.type === 'FunctionDeclaration' || statement.type === 'EmptyStatement') continue;
+      if (statement.type === 'ExpressionStatement') evaluate(statement.expression, scope, context, depth);
+      else if (statement.type === 'VariableDeclaration') {
+        for (const declaration of statement.declarations) {
+          const target = statement.kind === 'var' ? variableScope(scope) : scope;
+          if (!declaration.init && statement.kind === 'var') continue;
+          const value = declaration.id.type === 'Identifier' ? evaluate(declaration.init, scope, context, depth) : unknown;
+          for (const name of bindingNames(declaration.id)) target.bindings.set(name, effectsOnly && statement.kind === 'var' ? unknown : value);
+        }
+      } else if (statement.type === 'BlockStatement') {
+        const child = { parent: scope, bindings: new Map(), functionScope: false };
+        prepare(statement.body, child);
+        const outcome = visitStatements(statement.body, child, context, depth);
+        if (outcome !== true) {
+          if (outcome === unknown) inspectPossibleEffects(statements.slice(index + 1), scope, context, depth);
+          return outcome;
+        }
+      } else if (statement.type === 'ReturnStatement') {
+        evaluate(statement.argument, scope, context, depth);
+        return false;
+      } else if (statement.type === 'IfStatement') {
+        const condition = truth(evaluate(statement.test, scope, context, depth));
+        if (condition === unknown) {
+          note('control-flow-not-verified');
+          if (!effectsOnly) {
+            inspectPossibleEffects(statements.slice(index), scope, context, depth);
+            return unknown;
+          }
+          visitStatements([statement.consequent], scope, context, depth);
+          if (statement.alternate) visitStatements([statement.alternate], scope, context, depth);
+          continue;
+        }
+        const branch = condition ? statement.consequent : statement.alternate;
+        const outcome = branch ? visitStatements([branch], scope, context, depth) : true;
+        if (outcome !== true) {
+          if (outcome === unknown) inspectPossibleEffects(statements.slice(index + 1), scope, context, depth);
+          return outcome;
+        }
+      } else {
+        invalidated = true;
+        note('statement-not-verified');
+        return false;
+      }
+    }
+    return true;
+  }
+
+  for (const script of scripts) {
+    let ast;
+    try {
+      ast = parseJavaScript(script.text, { ecmaVersion: 2022, sourceType: script.sourceType });
+    } catch {
+      note('script-syntax-not-verified');
+      continue;
+    }
+    try {
+      const scope = script.sourceType === 'module' ? { parent: globalScope, bindings: new Map(), functionScope: true } : globalScope;
+      prepare(ast.body, scope, true);
+      visitStatements(ast.body, scope, null, 0);
+    } catch {
+      invalidated = true;
+      note('script-analysis-not-verified');
+    }
+  }
+  for (const point of pointElements) {
+    for (const [eventName, attached] of propertyHandlers.get(point.node) || []) {
+      if (attached) record(eventName, nodesValue([point.node]));
+    }
+    for (const [attribute, source] of Object.entries(point.attributes)) {
+      const eventName = attribute.startsWith('on') ? attribute.slice(2) : '';
+      if (!HOVER_EVENTS.has(eventName) && !FOCUS_EVENTS.has(eventName)) continue;
+      if (propertyHandlers.get(point.node)?.has(eventName)) continue;
+      try {
+        const ast = parseJavaScript(source, { ecmaVersion: 2022, sourceType: 'script', allowReturnOutsideFunction: true });
+        const scope = { parent: globalScope, bindings: new Map(), functionScope: true };
+        prepare(ast.body, scope, true);
+        visitStatements(ast.body, scope, { eventName, inlinePoint: nodesValue([point.node]) }, 0);
+      } catch { note('inline-handler-not-verified'); }
+    }
+  }
+  const unverifiedHoverPointIndexes = pointElements.flatMap((point, index) => !invalidated && hover.has(point.node) ? [] : [index]);
+  const unverifiedFocusPointIndexes = pointElements.flatMap((point, index) => !invalidated && focus.has(point.node) ? [] : [index]);
+  return {
+    hoverBinding: pointElements.length > 0 && unverifiedHoverPointIndexes.length === 0,
+    focusBinding: pointElements.length > 0 && unverifiedFocusPointIndexes.length === 0,
+    unverifiedHoverPointIndexes,
+    unverifiedFocusPointIndexes,
+    diagnostics,
+  };
 }
 
 function tokenizeJavaScriptStrings(source) {
@@ -684,10 +1086,6 @@ function normalizedValue(value) {
 function hasNonemptyKey(value, keys) {
   const selected = firstDefined(value, keys);
   return normalizedValue(selected) !== '';
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
 function deduplicateViolations(violations) {

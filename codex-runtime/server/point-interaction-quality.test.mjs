@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   POINT_INTERACTION_CHECK_IDS,
@@ -714,4 +716,286 @@ test('DOM script evidence preserves inline SVG script and style text', () => {
   const quality = inspectSyntheticEvidence(html);
   assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
   assert.equal(quality.renderedPointCount, 2);
+});
+
+function withBindingScript(script) {
+  return scientificHtml().replace(/<script>[\s\S]*?<\/script>/u, `<script>${script}</script>`);
+}
+
+const directListeners = `point.addEventListener('pointerenter', showTooltip);
+point.addEventListener('focus', showTooltip);`;
+
+for (const selector of ['', '#missing .temperature-point', '.missing-temperature-point', '.temperature-point[data-point-index="0"]']) {
+  test(`AST bindings reject empty or incomplete selector coverage ${selector}`, () => {
+    const quality = inspectSyntheticEvidence(withBindingScript(`
+      document.querySelectorAll(${JSON.stringify(selector)}).forEach(point => { ${directListeners} });
+      function showTooltip() {}`));
+    assert.equal(quality.renderedPointCount, 2);
+    assert.equal(quality.pointInteractionOk, false);
+    assert.equal(quality.pointInteractionQualityOk, false);
+    assert.equal(quality.checkResults['point-interaction'].bindingStatus, 'not-verified');
+  });
+}
+
+for (const [name, script] of [
+  ['wrong receiver after empty forEach', `document.querySelectorAll('.temperature-point').forEach(point => {});
+    const point = document.body; ${directListeners}`],
+  ['same-name variable in another block', `document.querySelectorAll('.temperature-point').forEach(point => {
+    { const point = document.body; ${directListeners} }
+  });`],
+  ['uninvoked nested same-name parameter', `document.querySelectorAll('.temperature-point').forEach(point => {
+    function unused(point) { ${directListeners} }
+  });`],
+  ['reassigned callback parameter', `document.querySelectorAll('.temperature-point').forEach(point => {
+    point = document.body; ${directListeners}
+  });`],
+  ['fake document receiver', `const document = { querySelectorAll() { return [globalThis.document.body]; } };
+    document.querySelectorAll('.temperature-point').forEach(point => { ${directListeners} });`],
+  ['hoisted document shadow', `document.querySelectorAll('.temperature-point').forEach(point => { ${directListeners} });
+    if (false) { var document; }`],
+  ['uninvoked outer function', `function unused() {
+    document.querySelectorAll('.temperature-point').forEach(point => { ${directListeners} });
+  }`],
+  ['dead branch', `if (false) {
+    document.querySelectorAll('.temperature-point').forEach(point => { ${directListeners} });
+  }`],
+  ['dynamic selector', `document.querySelectorAll(window.pointSelector).forEach(point => { ${directListeners} });`],
+  ['non-function listener', `document.querySelectorAll('.temperature-point').forEach(point => {
+    point.addEventListener('pointerenter', null); point.addEventListener('focus', null);
+  });`],
+  ['overwritten listener method', `document.querySelectorAll('.temperature-point').forEach(point => {
+    point.addEventListener = () => {}; ${directListeners}
+  });`],
+  ['properties attached to a NodeList rather than its points', `const point = document.querySelectorAll('.temperature-point');
+    point.onpointerenter = showTooltip; point.onfocus = showTooltip;`],
+  ['cleared property handlers', `document.querySelectorAll('.temperature-point').forEach(point => {
+    point.onpointerenter = showTooltip; point.onfocus = showTooltip;
+    point.onpointerenter = null; point.onfocus = null;
+  });`],
+  ['syntax-invalid binding script', `document.querySelectorAll('.temperature-point').forEach(point => { ${directListeners} }); const = 1;`],
+]) {
+  test(`AST bindings do not certify ${name}`, () => {
+    const quality = inspectSyntheticEvidence(withBindingScript(`${script}\nfunction showTooltip() {}`));
+    assert.equal(quality.pointInteractionOk, false);
+    assert.equal(quality.pointInteractionQualityOk, false, JSON.stringify(quality.checkResults['point-interaction']));
+    assert.equal(quality.checkResults['point-interaction'].bindingStatus, 'not-verified');
+  });
+}
+
+for (const [name, script] of [
+  ['function callback', `document.querySelectorAll('.temperature-point').forEach(function(point) { ${directListeners} });`],
+  ['named callback', `function bindPoint(point) { ${directListeners} }
+    document.querySelectorAll('.temperature-point').forEach(bindPoint);`],
+  ['literal collection alias and actual ancestors', `const selector = 'svg > g.temperature-point';
+    const points = document.querySelectorAll(selector); points.forEach(point => { ${directListeners} });`],
+  ['decoded data attributes as selectors', `document.querySelectorAll('[data-point-index]').forEach(point => { ${directListeners} });`],
+  ['disjoint point subsets cover every record', `
+    document.querySelectorAll('[data-point-index="0"]').forEach(point => { ${directListeners} });
+    document.querySelectorAll('[data-point-index="1"]').forEach(point => { ${directListeners} });`],
+  ['shadow ends before real listener', `document.querySelectorAll('.temperature-point').forEach(point => {
+    { const point = document.body; }
+    ${directListeners}
+  });`],
+  ['same-name bindings in independent callback scopes', `
+    document.querySelectorAll('.temperature-point').forEach(point => point.addEventListener('pointerenter', showTooltip));
+    document.querySelectorAll('.temperature-point').forEach(point => point.addEventListener('focus', showTooltip));`],
+  ['property handlers on actual points', `document.querySelectorAll('.temperature-point').forEach(point => {
+    point.onpointerenter = showTooltip; point.onfocus = showTooltip;
+  });`],
+]) {
+  test(`AST bindings retain ${name} as static evidence only`, () => {
+    const quality = inspectSyntheticEvidence(withBindingScript(`${script}\nfunction showTooltip() {}`));
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.checkResults['point-interaction'].bindingStatus, 'statically-matched');
+  });
+}
+
+test('AST bindings retain real inline event attributes but not inert inline strings', () => {
+  const baseline = withBindingScript('function showTooltip() {}');
+  const html = baseline.replaceAll('<g ', '<g onpointerenter="showTooltip(this)" onfocus="return showTooltip(this)" ');
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  const decoy = inspectSyntheticEvidence(html.replaceAll('showTooltip(this)', '&quot;showTooltip(this)&quot;'));
+  assert.equal(decoy.pointInteractionOk, false);
+  assert.equal(decoy.pointInteractionQualityOk, false);
+  const cleared = inspectSyntheticEvidence(html.replace('function showTooltip() {}', `function showTooltip() {}
+    document.querySelectorAll('.temperature-point').forEach(point => { point.onpointerenter = null; point.onfocus = null; });`));
+  assert.equal(cleared.pointInteractionOk, false);
+});
+
+for (const [receiver, selector, accepted] of [
+  ['document', '.temperature-point', true],
+  ["document.querySelector('svg')", '.temperature-point', true],
+  ["document.querySelector('.legend')", '.temperature-point', false],
+  ['document', '#missing .temperature-point', false],
+  ['document', '[data-point-index="0"]', false],
+]) {
+  test(`AST delegated bindings connect ${receiver} and ${selector}`, () => {
+    const script = ['mouseover', 'focusin'].map(eventName => `
+      ${receiver}.addEventListener('${eventName}', function(event) {
+        const point = event.target.closest(${JSON.stringify(selector)});
+        if (!point) return;
+        showTooltip(point);
+      });`).join('\n');
+    const quality = inspectSyntheticEvidence(withBindingScript(`${script}\nfunction showTooltip() {}`));
+    assert.equal(quality.pointInteractionQualityOk, accepted, JSON.stringify(quality.violations));
+    assert.equal(quality.pointInteractionOk, accepted);
+  });
+}
+
+test('AST delegated focus requires a bubbling event or capture', () => {
+  const script = `
+    function handlePoint(event) {
+      const point = event.target.closest('.temperature-point');
+      if (!point) return;
+      showTooltip(point);
+    }
+    document.addEventListener('mouseover', handlePoint);
+    document.addEventListener('focus', handlePoint, true);
+    function showTooltip() {}`;
+  assert.equal(inspectSyntheticEvidence(withBindingScript(script)).pointInteractionQualityOk, true);
+  const uncaptured = inspectSyntheticEvidence(withBindingScript(script.replace('handlePoint, true', 'handlePoint')));
+  assert.equal(uncaptured.pointInteractionOk, false);
+  assert.equal(uncaptured.pointInteractionQualityOk, false);
+});
+
+test('AST delegated bindings do not borrow a point-like variable disconnected from the event', () => {
+  const script = ['mouseover', 'focusin'].map(eventName => `
+    document.addEventListener('${eventName}', event => {
+      const point = document.querySelector('.temperature-point');
+      const unused = event.target.closest('.temperature-point');
+      showTooltip(point);
+    });`).join('\n');
+  const quality = inspectSyntheticEvidence(withBindingScript(`${script}\nfunction showTooltip() {}`));
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.pointInteractionOk, false);
+});
+
+for (const [selector, accepted] of [['#first', false], ['svg', true]]) {
+  test(`AST bindings do not promote a per-point closest condition to universal coverage: ${selector}`, () => {
+    const html = withBindingScript(`
+      document.querySelectorAll('.temperature-point').forEach(point => {
+        if (point.closest('${selector}')) point.addEventListener('pointerenter', showTooltip);
+        point.addEventListener('focus', showTooltip);
+      });
+      function showTooltip() {}`).replace('<g class=', '<g id="first" class=');
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.pointInteractionQualityOk, accepted, JSON.stringify(quality.violations));
+    assert.equal(quality.pointInteractionOk, accepted);
+  });
+}
+
+function withPostBindingMutation(mutation) {
+  return withBindingScript(`
+    const tooltip = document.querySelector('[role="tooltip"]');
+    document.querySelectorAll('.temperature-point').forEach(point => {
+      point.addEventListener('mouseover', showTooltip);
+      point.addEventListener('focus', showTooltip);
+      ${mutation}
+    });
+    function showTooltip() {}`);
+}
+
+for (const [name, mutation] of [
+  ['same hover callback removed', "point.removeEventListener('mouseover', showTooltip);"],
+  ['same focus callback removed', "point.removeEventListener('focus', showTooltip);"],
+  ['point removed', 'point.remove();'],
+  ['point replaced', "point.replaceWith('');"],
+  ['parentNode contents cleared', "point.parentNode.innerHTML = '';"],
+  ['parentElement contents cleared', "point.parentElement.textContent = '';"],
+  ['selected ancestor contents replaced', "document.querySelector('svg').replaceChildren();"],
+  ['point removed through parent', 'point.parentNode.removeChild(point);'],
+  ['conditional unbinding', "if (window.reset) point.removeEventListener('focus', showTooltip);"],
+  ['conditional replacement', "if (window.reset) point.replaceWith('');"],
+  ['conditional parent mutation with a local alias', "if (window.reset) { const parent = point.parentNode; parent.innerHTML = ''; }"],
+  ['conditional removal through a named function', 'if (window.reset) detach(point); function detach(node) { node.remove(); }'],
+  ['mutation after uncertain nested block', "{ if (window.reset) tooltip.textContent = 'pending'; } point.remove();"],
+  ['uncertain reassignment cannot hide a destructive receiver', "let target = point; if (window.reset) target = tooltip; target.remove();"],
+  ['short-circuit unbinding', "window.reset && point.removeEventListener('mouseover', showTooltip);"],
+  ['conditional-expression replacement', "window.reset ? point.replaceWith('') : tooltip.textContent = 'ready';"],
+  ['optional point removal', 'point?.remove();'],
+]) {
+  test(`AST post-binding mutation is not verified: ${name}`, () => {
+    const quality = inspectSyntheticEvidence(withPostBindingMutation(mutation));
+    assert.equal(quality.renderedPointCount, 2);
+    assert.equal(quality.pointCountOk, true);
+    assert.equal(quality.stablePointIdentityOk, true);
+    assert.equal(quality.pointInteractionOk, false);
+    assert.equal(quality.pointInteractionQualityOk, false);
+    assert.equal(quality.checkResults['point-interaction'].bindingStatus, 'not-verified');
+    assert.ok(quality.violations.some(violation => violation.rule === 'point-bindings-not-verified'
+      && violation.details.some(detail => ['point-listener-removal-not-verified', 'point-dom-mutation-not-verified'].includes(detail.reason))));
+  });
+}
+
+for (const [name, mutation] of [
+  ['tooltip text and unrelated markup', "tooltip.textContent = 'ready'; tooltip.innerHTML = 'ready';"],
+  ['tooltip and point style updates', "tooltip.style.display = 'block'; point.style.opacity = '.8';"],
+  ['unrelated listener removal', "tooltip.removeEventListener('mouseover', showTooltip);"],
+  ['dead destructive branch', "if (false) { point.remove(); } tooltip.textContent = 'ready';"],
+  ['uncertain tooltip and style updates', "if (window.reset) { tooltip.textContent = 'pending'; } else { point.style.opacity = '.8'; }"],
+  ['uncertain branch with a local tooltip alias', "if (window.reset) { const target = tooltip; target.textContent = 'pending'; }"],
+  ['uninvoked destructive function', 'function unused() { point.remove(); }'],
+]) {
+  test(`AST post-binding mutation retains unrelated static evidence: ${name}`, () => {
+    const quality = inspectSyntheticEvidence(withPostBindingMutation(mutation));
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.checkResults['point-interaction'].bindingStatus, 'statically-matched');
+  });
+}
+
+test('AST uncertain branches cannot replace removed evidence with conditional registrations', () => {
+  const html = withPostBindingMutation(`
+    if (window.reset) {
+      point.removeEventListener('mouseover', showTooltip);
+    } else {
+      point.addEventListener('mouseover', showTooltip);
+    }`);
+  assert.equal(inspectSyntheticEvidence(html).pointInteractionOk, false);
+  const conditionalOnly = withBindingScript(`
+    document.querySelectorAll('.temperature-point').forEach(point => {
+      if (window.ready) { ${directListeners} }
+    }); function showTooltip() {}`);
+  assert.equal(inspectSyntheticEvidence(conditionalOnly).pointInteractionOk, false);
+});
+
+test('complete point checker resolves installed dependencies through NODE_PATH outside the source mount', context => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'ocean-point-checker-deployment-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  for (const filename of ['point-interaction-quality.mjs', 'ocean-evidence-time.mjs', 'ocean-report-html-parser.mjs']) {
+    copyFileSync(new URL(filename, import.meta.url), path.join(directory, filename));
+  }
+  assert.equal(existsSync(path.join(directory, 'node_modules')), false);
+  const isolatedModule = pathToFileURL(path.join(directory, 'point-interaction-quality.mjs')).href;
+  const dependencyDirectory = fileURLToPath(new URL('./node_modules', import.meta.url));
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { readFileSync } from 'node:fs';
+    import { createRequire } from 'node:module';
+    import { inspectPointInteractionQuality } from ${JSON.stringify(isolatedModule)};
+    const require = createRequire(${JSON.stringify(isolatedModule)});
+    const results = JSON.parse(readFileSync(0, 'utf8')).map(html => {
+      const result = inspectPointInteractionQuality({ html, requireScientificEvidence: true, requireMatlabEvidence: true });
+      return {
+        ok: result.pointInteractionQualityOk,
+        bindingStatus: result.checkResults['point-interaction'].bindingStatus,
+        pointCountOk: result.pointCountOk,
+        stablePointIdentityOk: result.stablePointIdentityOk,
+        scientificContextOk: result.scientificContextOk,
+      };
+    });
+    process.stdout.write(JSON.stringify({ results, dependencies: ['acorn', 'css-select', 'parse5'].map(name => require.resolve(name)) }));`], {
+    cwd: directory,
+    encoding: 'utf8',
+    timeout: 10_000,
+    env: { ...process.env, NODE_PATH: dependencyDirectory },
+    input: JSON.stringify([scientificHtml(), withPostBindingMutation('point.remove();')]),
+  });
+  assert.equal(child.status, 0, child.stderr || child.error?.message);
+  const { results, dependencies } = JSON.parse(child.stdout);
+  assert.deepEqual(results, [
+    { ok: true, bindingStatus: 'statically-matched', pointCountOk: true, stablePointIdentityOk: true, scientificContextOk: true },
+    { ok: false, bindingStatus: 'not-verified', pointCountOk: true, stablePointIdentityOk: true, scientificContextOk: true },
+  ]);
+  assert.equal(dependencies.length, 3);
+  for (const resolved of dependencies) assert.ok(resolved.startsWith(`${dependencyDirectory}${path.sep}`), resolved);
 });
