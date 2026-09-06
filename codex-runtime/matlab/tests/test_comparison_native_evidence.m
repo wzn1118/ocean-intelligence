@@ -250,6 +250,7 @@ for caseIndex = 1:size(returnedCases, 1)
     assert_same_evidence(reader, result, baseline, ['restored-' caseName]);
 end
 clear otherFigureCleanup legendCleanup;
+textProfileReport = test_text_profiles(result, fixture, inputSnapshot, figureHandle, baseline);
 assert_same_evidence(reader, result, baseline, 'final-restored-baseline');
 assert(isequal(file_hashes(artifactPaths), artifactHashes) ...
     && string(oi_sha256_file(snapshotPath)) == inputSnapshot.sha256, ...
@@ -263,12 +264,60 @@ report = struct('scope', 'synthetic_native_reader_adversarial_test_only', ...
 report.positive_cases = {'exported-baseline', 'exported-char-title-numeric-alpha', ...
     'flat-rgb-numeric-alpha', 'edge-only-numeric-alpha'};
 report.negative_cases = negativeRecords;
+report.text_profile_regression = textProfileReport;
 report.export_ids = {char(baselineEntry.id), char(charEntry.id)};
 report.artifact_sha256 = cellstr(artifactHashes);
 write_test_json(fullfile(testDirectory, 'native-reader-test-results.json'), report);
 fprintf('COMPARISON_NATIVE_READER_TEST_NEGATIVES=%d\n', numel(negativeRecords));
+fprintf('COMPARISON_TEXT_PROFILE_NEGATIVES=%d\n', numel(textProfileReport.negative_cases));
+fprintf('COMPARISON_TEXT_PROFILES=passed_synthetic_native_only\n');
 fprintf('COMPARISON_NATIVE_READER_TEST=passed_synthetic_native_mutations_only\n');
 clear figureCleanup pathCleanup;
+end
+
+function report = test_text_profiles(result, fixture, inputSnapshot, figureHandle, baseline)
+defaultReader = @(candidate) measure_comparison_plot_data( ...
+    candidate, fixture, inputSnapshot, figureHandle);
+explicitReader = @(candidate) measure_comparison_plot_data( ...
+    candidate, fixture, inputSnapshot, figureHandle, 'fixture-default');
+astraReader = @(candidate) measure_comparison_plot_data( ...
+    candidate, fixture, inputSnapshot, figureHandle, "astra-temperature-labels");
+assert_same_evidence(explicitReader, result, baseline, 'explicit-fixture-default');
+marker = 'COMPARISON_TEXT_PROFILE_REJECTED';
+negativeRecords = cell(0, 1);
+negativeRecords{end + 1, 1} = assert_reader_rejected(@() astraReader(result), ...
+    'ComparisonProofNativeText', 'astra-rejects-fixture-labels', marker);
+xLabel = result.Axes.XLabel;
+yLabel = result.Axes.YLabel;
+xState = property_state(xLabel, {'String'});
+yState = property_state(yLabel, {'String'});
+xCleanup = onCleanup(@() restore_properties(xLabel, xState));
+yCleanup = onCleanup(@() restore_properties(yLabel, yState));
+xLabel.String = 'Observation temperature (degC)';
+yLabel.String = 'Model temperature (degC)';
+negativeRecords{end + 1, 1} = assert_reader_rejected(@() defaultReader(result), ...
+    'ComparisonProofNativeText', 'default-rejects-astra-labels', marker);
+assert_same_evidence(astraReader, result, baseline, 'astra-labels-identical-v3');
+xLabel.String = 'Observation temperature (K)';
+negativeRecords{end + 1, 1} = assert_reader_rejected(@() astraReader(result), ...
+    'ComparisonProofNativeText', 'astra-rejects-x-unit', marker);
+xLabel.String = 'Observation temperature (degC)';
+yLabel.String = 'Model temperature (K)';
+negativeRecords{end + 1, 1} = assert_reader_rejected(@() astraReader(result), ...
+    'ComparisonProofNativeText', 'astra-rejects-y-unit', marker);
+clear yCleanup xCleanup;
+assert_same_evidence(defaultReader, result, baseline, 'restored-text-profiles');
+invalidProfiles = {'unknown'; ''; ["fixture-default", "astra-temperature-labels"]; 7};
+invalidNames = {'unknown-profile', 'empty-profile', 'array-profile', 'numeric-profile'};
+for caseIndex = 1:size(invalidProfiles, 1)
+    profile = invalidProfiles{caseIndex, 1};
+    negativeRecords{end + 1, 1} = assert_reader_rejected( ...
+        @() measure_comparison_plot_data(result, fixture, inputSnapshot, figureHandle, profile), ...
+        'ComparisonProofTextProfile', invalidNames{caseIndex}, marker); %#ok<AGROW>
+    assert_same_evidence(defaultReader, result, baseline, invalidNames{caseIndex});
+end
+report = struct('positive_cases', {{'explicit-fixture-default', 'astra-labels-identical-v3'}}, ...
+    'negative_cases', {negativeRecords}, 'visual_verified', false);
 end
 
 function entry = export_test_state(figureHandle, directory, identifier, fixture, theme)
@@ -328,7 +377,10 @@ assert(isequaln(reader(result), baseline), 'test_comparison_native_evidence:Rest
     'Reader evidence differs from the exported baseline in %s', caseName);
 end
 
-function record = assert_reader_rejected(callback, expectedSuffix, caseName)
+function record = assert_reader_rejected(callback, expectedSuffix, caseName, marker)
+if nargin < 4
+    marker = 'COMPARISON_NATIVE_REJECTED';
+end
 expectedIdentifier = ['run_matlab_gate:' char(expectedSuffix)];
 try
     callback();
@@ -338,7 +390,7 @@ catch exception
         '%s must be rejected by %s, not %s: %s', ...
         caseName, expectedIdentifier, exception.identifier, exception.message);
     record = struct('case', string(caseName), 'error_identifier', string(exception.identifier));
-    fprintf('COMPARISON_NATIVE_REJECTED=%s:%s\n', caseName, exception.identifier);
+    fprintf('%s=%s:%s\n', marker, caseName, exception.identifier);
     return;
 end
 error('test_comparison_native_evidence:MutationAccepted', ...

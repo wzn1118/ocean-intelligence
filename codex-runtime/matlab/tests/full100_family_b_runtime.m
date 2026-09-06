@@ -105,8 +105,12 @@ run_negative_contracts(theme);
 uncertaintyEntry = test_comparison_uncertainty(outputDirectory);
 test_comparison_record_metadata();
 test_comparison_native_evidence(outputDirectory);
+astraTrial = test_astra_generated_comparison(outputDirectory, ...
+    fullfile(fileparts(mfilename("fullpath")),"..","evals","fixtures", ...
+    "paired_observation_model.json"), ...
+    "508a8c8430c6d0d28797df1bc4256c1eca24eafe7fb816c8b77f686aa121e665");
 save(fullfile(outputDirectory,"family-b-runtime-evidence.mat"),"entries", ...
-    "timeResult","comparisonResult","tsResult","uncertaintyEntry");
+    "timeResult","comparisonResult","tsResult","uncertaintyEntry","astraTrial");
 fprintf("FAMILY_B_MATLAB_RUNTIME=passed\n");
 fprintf("FAMILY_B_EXPORT_COUNT=%d\n",numel(entries));
 end

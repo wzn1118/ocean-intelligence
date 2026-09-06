@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "scope": "isolated_builtin_codex_generation_only",
+  "generated_source_edited": false,
+  "source": {
+    "file": "astra_comparison_trial.m",
+    "bytes": 9303,
+    "sha256": "508a8c8430c6d0d28797df1bc4256c1eca24eafe7fb816c8b77f686aa121e665"
+  },
+  "report": {
+    "file": "astra_comparison_trial.md",
+    "bytes": 8241,
+    "sha256": "656c2d4025b7a6536fd50a905094fecb83e7cb2c53100c256f8cad1cad4f51e8"
+  },
+  "fixture": {
+    "file": "paired_observation_model.json",
+    "bytes": 2771,
+    "sha256": "dfdd4a9b3270151e02b8c91970775ed10ebfc862bc8119c3cccb85b99b6f676b",
+    "synthetic": true
+  },
+  "generation": {
+    "thread_id": "01a07422-6d4a-7052-8d6a-993e40f9d46a",
+    "cli_version": "0.153.4",
+    "provider_id_from_session_meta": "OpenAI",
+    "model_from_both_turn_contexts": "gpt-6-astra",
+    "effort": "high",
+    "approval_policy": "never",
+    "sandbox_policy": "danger-full-access",
+    "model_identity_scope": "Recorded CLI model/provider identifiers, not independent attestation of the remote model architecture.",
+    "started_at": "2026-09-06T00:33:28.169Z",
+    "completed_at": "2026-09-06T00:37:54.369Z",
+    "turns": [
+      {
+        "id": "01a07422-6dd8-7e62-aa83-83c5bdad26ac",
+        "requested_model": "gpt-6-astra",
+        "started_at": "2026-09-06T00:33:28.551Z",
+        "completed_at": "2026-09-06T00:37:20.439Z",
+        "status": "completed"
+      },
+      {
+        "id": "01a07425-f7cd-7413-86ed-8b10829a185a",
+        "requested_model": null,
+        "started_at": "2026-09-06T00:37:20.474Z",
+        "completed_at": "2026-09-06T00:37:54.362Z",
+        "status": "completed"
+      }
+    ]
+  },
+  "generation_snapshot": {
+    "local_commit": "587c382a7155c265abb82137b6e5ce47717b8de0",
+    "remote_commit": "7d51e714a23442e7a132d257d1ec94c91c6dd669",
+    "method": "git archive of committed codex-runtime; isolated workspace, SQLite and tenant; production port 8011 untouched",
+    "snapshot_file_count": 164,
+    "all_snapshot_source_bytes_unchanged": true,
+    "selected_sources": [
+      {
+        "path": "server/matlab-plotting-instructions.mjs",
+        "bytes": 42961,
+        "sha256": "a3b135d9637653a2a6e5453c606fdb84a2d61191b790ebf1ca992d0004699f4e"
+      },
+      {
+        "path": "server/ocean-report-html-parser.mjs",
+        "bytes": 4491,
+        "sha256": "d8f68251e2e60e75586f64672b233828f1bd009167a98c4559181cc8bd6b1929"
+      },
+      {
+        "path": "matlab/SKILL.md",
+        "bytes": 28298,
+        "sha256": "0a6b53612e3419d4e0e0cfc158524ecf4d23361cc6f684dc5400e15a8f07ca72"
+      },
+      {
+        "path": "matlab/assets/oi_plot_comparison.m",
+        "bytes": 39281,
+        "sha256": "e8df5b2a70f6d62c80ad551492e6323f6830fd4e3bbfbe7ee2ba36d6d030e217"
+      },
+      {
+        "path": "matlab/assets/oi_apply_axes.m",
+        "bytes": 4237,
+        "sha256": "41d85cbca83bcc54c43c4764ab842931d0764ff203cd0cd046f370b810cc5739"
+      }
+    ]
+  },
+  "local_evidence": {
+    "activation_file": ".runtime/matlab-capability-round22/activation.json",
+    "activation_sha256": "e1923eddcee72c54fd27c6d1cf8d3ff697196553d76489ecfa3dc3b108d86cea",
+    "rollout_file": "/root/.codex/sessions/2026/09/06/rollout-2026-09-06T00-33-28-01a07422-6d4a-7052-8d6a-993e40f9d46a.jsonl",
+    "rollout_sha256": "3a083ecf004b3554c4533209e9597d4bf17d750bb75f8feb27dcc41ee886f81a",
+    "initial_developer_content_sha256": "4685277fc0c28664c5d43daaf87139bc297f31ff86ec332efd784a0d1f3afc0a",
+    "developer_hash_encoding": "UTF-8 json.dumps(content, ensure_ascii=False, separators=(',', ':')); contains round20 run34000171748, 59/60 and 36/36 markers",
+    "publication_scope": "Coordinator-observed local evidence hashes; not signatures. Full activation and rollout remain local."
+  },
+  "independent_static_check": {
+    "tool": "MISS_HIT mh_lint --brief --input-encoding utf-8 --matlab 2021a",
+    "status": "passed",
+    "files": 1
+  },
+  "observed_output_contract": {
+    "page_inches": [
+      10,
+      8.5
+    ],
+    "xlabel": "Observation temperature (degC)",
+    "ylabel": "Model temperature (degC)",
+    "layout_scope": "Model-selected page and descriptive labels; generation prompt did not impose the evaluator's 8x5-inch page or shorter axis labels."
+  },
+  "matlab_execution_status": "not_run",
+  "visual_verified": false,
+  "desktop_interaction_verified": false,
+  "real_ocean_observations": false,
+  "score": null
+}

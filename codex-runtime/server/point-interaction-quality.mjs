@@ -1,10 +1,19 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { MIMEType } from 'node:util';
 import { parseOceanEvidenceTime } from './ocean-evidence-time.mjs';
 import { parseOceanEvidenceDocument } from './ocean-report-html-parser.mjs';
 
 const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
-const NON_EVIDENCE_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const INERT_HTML_ELEMENTS = new Set(['template', 'noscript']);
+const CODE_ELEMENTS = new Set(['script', 'style']);
 const EVIDENCE_ELEMENTS = new Set(['html', 'body', 'main', 'section']);
+const JAVASCRIPT_TYPES = new Set([
+  'application/ecmascript', 'application/javascript', 'application/x-ecmascript', 'application/x-javascript',
+  'text/ecmascript', 'text/javascript', 'text/javascript1.0', 'text/javascript1.1', 'text/javascript1.2',
+  'text/javascript1.3', 'text/javascript1.4', 'text/javascript1.5', 'text/jscript', 'text/livescript',
+  'text/x-ecmascript', 'text/x-javascript',
+]);
 
 export const POINT_INTERACTION_CHECK_IDS = Object.freeze([
   'html-readable',
@@ -95,10 +104,14 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
   const options = normalizeOptions(htmlOrOptions);
   const htmlRead = readHtml(options);
   const html = htmlRead.html;
-  const evidenceMarkup = htmlRead.ok ? extractEvidenceAttributes(html) : { ok: false, attributes: {}, violations: [] };
-  const pointElements = htmlRead.ok ? extractPointElements(html) : [];
-  const dataModel = htmlRead.ok ? extractDataModel(html) : emptyDataModel();
-  const externalResources = htmlRead.ok ? inspectExternalResources(html) : [];
+  const parsed = htmlRead.ok ? parseOceanEvidenceDocument(html) : { ok: false, document: null, violations: [] };
+  const elements = extractDocumentElements(parsed.document);
+  const evidenceMarkup = extractEvidenceAttributes(parsed, elements);
+  const pointElements = extractPointElements(elements);
+  const dataModel = extractDataModel(elements);
+  const executableScripts = extractExecutableScripts(elements);
+  const styleText = extractStyleText(elements);
+  const externalResources = htmlRead.ok ? inspectExternalResources(html, executableScripts, styleText) : [];
 
   const readableCheck = makeCheck('html-readable', htmlRead.ok, htmlRead.ok ? [] : [{
     rule: htmlRead.present ? 'html-unreadable' : 'html-missing',
@@ -113,7 +126,9 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
   const dataPointCount = dataModel.points.length;
   const pointCountOk = htmlRead.ok && dataModel.found && dataPointCount > 0 && renderedPointCount === dataPointCount;
   const pointCountViolations = [];
-  if (htmlRead.ok && !dataModel.found) pointCountViolations.push({ rule: 'embedded-data-missing' });
+  if (htmlRead.ok && dataModel.candidateCount > 1) {
+    pointCountViolations.push({ rule: 'embedded-data-ambiguous', candidateCount: dataModel.candidateCount });
+  } else if (htmlRead.ok && !dataModel.found) pointCountViolations.push({ rule: 'embedded-data-missing' });
   if (htmlRead.ok && dataModel.found && dataPointCount === 0) pointCountViolations.push({ rule: 'temperature-data-empty' });
   if (htmlRead.ok && renderedPointCount !== dataPointCount) pointCountViolations.push({
     rule: 'point-count-mismatch',
@@ -123,15 +138,16 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
   const pointCountCheck = makeCheck('point-count', pointCountOk, pointCountViolations, {
     renderedPointCount,
     dataPointCount,
+    dataModelCandidateCount: dataModel.candidateCount,
   });
 
   const identityAudit = inspectStablePointIdentity(pointElements, dataModel);
   const identityCheck = makeCheck('stable-point-identity', htmlRead.ok && identityAudit.ok, identityAudit.violations, identityAudit);
 
-  const interactionAudit = inspectInteractions(html, pointElements);
+  const interactionAudit = inspectInteractions(executableScripts, styleText, pointElements);
   const interactionCheck = makeCheck('point-interaction', htmlRead.ok && interactionAudit.ok, interactionAudit.violations, interactionAudit);
 
-  const tooltipAudit = inspectTooltipFields(html, pointElements, dataModel);
+  const tooltipAudit = inspectTooltipFields(elements, pointElements, dataModel);
   const tooltipCheck = makeCheck('tooltip-fields', htmlRead.ok && tooltipAudit.ok, tooltipAudit.violations, tooltipAudit);
 
   const legendAudit = inspectLegend(html, dataModel.seriesNames);
@@ -225,14 +241,44 @@ function makeCheck(id, ok, violations, details = {}) {
   return { id, ok: ok === true, violations, ...details };
 }
 
-function extractPointElements(html) {
+function extractDocumentElements(document) {
   const elements = [];
-  html = stripHtmlComments(html);
-  const tagPattern = /<([a-z][\w:-]*)\b([^>]*\b(?:data-point-index|data-temperature-point|class\s*=\s*["'][^"']*\btemperature-point\b)[^>]*)>/giu;
-  for (const match of html.matchAll(tagPattern)) {
-    elements.push({ tag: match[1].toLowerCase(), attributes: parseAttributes(match[2]), source: match[0] });
+  const pending = document ? [document] : [];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node.namespaceURI === HTML_NAMESPACE && INERT_HTML_ELEMENTS.has(node.tagName)) continue;
+    if (node.tagName && [HTML_NAMESPACE, SVG_NAMESPACE].includes(node.namespaceURI)) {
+      elements.push({
+        tag: node.tagName,
+        namespace: node.namespaceURI,
+        attributes: Object.fromEntries(node.attrs.map(({ name, prefix, value }) => [prefix ? `${prefix}:${name}` : name, value])),
+        text: CODE_ELEMENTS.has(node.tagName) ? elementText(node) : '',
+      });
+      if (CODE_ELEMENTS.has(node.tagName)) continue;
+    }
+    const children = node.childNodes || [];
+    for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
   }
   return elements;
+}
+
+function elementText(element) {
+  const text = [];
+  const pending = [...(element.childNodes || [])].reverse();
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node.nodeName === '#text') text.push(node.value);
+    const children = node.childNodes || [];
+    for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
+  }
+  return text.join('');
+}
+
+function extractPointElements(elements) {
+  return elements.filter(({ tag, attributes }) => !CODE_ELEMENTS.has(tag) && (
+    Object.hasOwn(attributes, 'data-point-index') || Object.hasOwn(attributes, 'data-temperature-point')
+    || (attributes.class || '').split(/[\t\n\f\r ]+/u).includes('temperature-point')
+  ));
 }
 
 function parseAttributes(source) {
@@ -244,21 +290,20 @@ function parseAttributes(source) {
   return attributes;
 }
 
-function extractDataModel(html) {
-  html = stripHtmlComments(html);
-  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/giu)];
-  for (const script of scripts) {
-    const attributes = parseAttributes(script[1]);
-    if (!/application\/json/iu.test(attributes.type || '')) continue;
+function extractDataModel(elements) {
+  const candidates = [];
+  for (const element of elements) {
+    if (element.tag !== 'script') continue;
     try {
-      const value = JSON.parse(script[2].trim());
+      if (new MIMEType(element.attributes.type || '').essence !== 'application/json') continue;
+      const value = JSON.parse(element.text);
       const model = normalizeDataModel(value);
-      if (model.found) return model;
+      if (model.found) candidates.push(model);
     } catch {
       continue;
     }
   }
-  return emptyDataModel();
+  return { ...(candidates.length === 1 ? candidates[0] : emptyDataModel()), candidateCount: candidates.length };
 }
 
 function normalizeDataModel(value) {
@@ -300,10 +345,9 @@ function seriesNamesFromPoints(points) {
   return uniqueStrings(points.map((point) => firstDefined(point, ['series', 'seriesName', 'series_name', 'dataset'])));
 }
 
-function inspectInteractions(html, pointElements) {
-  const executableScripts = extractExecutableScripts(html);
+function inspectInteractions(executableScripts, styleText, pointElements) {
   const bindingAudit = inspectPointEventBindings(executableScripts);
-  const css = extractStyleText(html).replace(/\/\*[\s\S]*?\*\//gu, ' ');
+  const css = styleText.replace(/\/\*[\s\S]*?\*\//gu, ' ');
   const hoverBinding = bindingAudit.hoverBinding;
   const hoverStyling = /\.temperature-point\s*:hover\b/iu.test(css);
   const focusBinding = bindingAudit.focusBinding;
@@ -374,9 +418,8 @@ function isFocusable(element) {
   return tabIndex !== undefined && Number(tabIndex) >= 0;
 }
 
-function inspectTooltipFields(html, pointElements, dataModel) {
-  html = stripHtmlComments(html);
-  const tooltipPresent = /<[^>]+\brole\s*=\s*["']tooltip["'][^>]*>/iu.test(html);
+function inspectTooltipFields(elements, pointElements, dataModel) {
+  const tooltipPresent = elements.some(({ tag, attributes }) => !CODE_ELEMENTS.has(tag) && attributes.role === 'tooltip');
   const rootUnitPresent = hasNonemptyKey(dataModel.root, FIELD_DEFINITIONS.unit.keys);
   const pointMissingFields = dataModel.points.map((point, index) => ({
     index,
@@ -430,7 +473,7 @@ function inspectLegend(html, expectedSeries) {
   };
 }
 
-function inspectExternalResources(html) {
+function inspectExternalResources(html, executableScripts, styleText) {
   html = stripHtmlComments(html);
   const violations = [];
   const resourceTags = /<(script|link|img|source|video|audio|iframe|embed|object)\b([^>]*)>/giu;
@@ -448,7 +491,7 @@ function inspectExternalResources(html) {
       }
     }
   }
-  const css = extractStyleText(html).replace(/\/\*[\s\S]*?\*\//gu, ' ');
+  const css = styleText.replace(/\/\*[\s\S]*?\*\//gu, ' ');
   for (const match of css.matchAll(/@import\s+(?:url\(\s*)?["']?([^\s"') ;]+)|url\(\s*["']?([^"')]+)["']?\s*\)/giu)) {
     const reference = match[1] || match[2];
     if (!isEmbeddedReference(reference)) violations.push({ rule: 'external-css-resource', reference });
@@ -461,7 +504,7 @@ function inspectExternalResources(html) {
     ['worker-resource', /\b(?:Worker|SharedWorker|importScripts)\s*\(/iu],
     ['module-import', /\bimport\s*\(\s*["']/iu],
   ];
-  for (const script of extractExecutableScripts(html)) {
+  for (const script of executableScripts) {
     const executableCode = tokenizeJavaScriptStrings(script).code;
     for (const [rule, pattern] of networkPatterns) {
       if (pattern.test(executableCode)) violations.push({ rule });
@@ -510,24 +553,13 @@ function inspectMatlabEvidence(attributes) {
   return { ok: violations.length === 0, evidence, violations };
 }
 
-function extractEvidenceAttributes(html) {
-  const { document, violations: issues } = parseOceanEvidenceDocument(html);
-  const violations = issues.map(({ code, ...location }) => ({
+function extractEvidenceAttributes(parsed, elements) {
+  const violations = parsed.violations.map(({ code, ...location }) => ({
     rule: code === 'parse_failed' ? 'html-parse-failed' : `html-${code}`, ...location,
   }));
-  if (!document) return { ok: false, attributes: {}, violations };
-  const pending = [document];
-  while (pending.length > 0) {
-    const node = pending.pop();
-    if (NON_EVIDENCE_ELEMENTS.has(node.tagName)) continue;
-    if (node.namespaceURI === HTML_NAMESPACE && EVIDENCE_ELEMENTS.has(node.tagName)
-      && node.attrs.some(({ name }) => name === 'data-snapshot-id')) {
-      return { ok: violations.length === 0, attributes: Object.fromEntries(node.attrs.map(({ name, value }) => [name, value])), violations };
-    }
-    const children = node.childNodes || [];
-    for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
-  }
-  return { ok: violations.length === 0, attributes: {}, violations };
+  const declaration = elements.find(({ namespace, tag, attributes }) => namespace === HTML_NAMESPACE
+    && EVIDENCE_ELEMENTS.has(tag) && Object.hasOwn(attributes, 'data-snapshot-id'));
+  return { ok: parsed.ok, attributes: declaration?.attributes || {}, violations };
 }
 
 function splitResourceReferences(value, attribute) {
@@ -540,14 +572,21 @@ function isEmbeddedReference(reference) {
   return value === '' || value.startsWith('#') || /^(?:data|about:blank$)/iu.test(value);
 }
 
-function extractStyleText(html) {
-  return [...stripHtmlComments(html).matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/giu)].map((match) => match[1]).join('\n');
+function extractStyleText(elements) {
+  return elements.filter(({ tag }) => tag === 'style').map(({ text }) => text).join('\n');
 }
 
-function extractExecutableScripts(html) {
-  return [...stripHtmlComments(html).matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/giu)]
-    .filter((match) => !/application\/json/iu.test(parseAttributes(match[1]).type || ''))
-    .map((match) => match[2]);
+function extractExecutableScripts(elements) {
+  return elements.filter(({ tag, namespace, attributes }) => {
+    if (tag !== 'script') return false;
+    const externalAttributes = namespace === HTML_NAMESPACE ? ['src'] : ['href', 'xlink:href'];
+    if (externalAttributes.some(attribute => Object.hasOwn(attributes, attribute))) return false;
+    const defaultType = namespace === HTML_NAMESPACE && attributes.language ? `text/${attributes.language}` : 'text/javascript';
+    const type = (attributes.type ?? defaultType).replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/gu, '').toLowerCase();
+    if (type === 'module') return true;
+    if (namespace === HTML_NAMESPACE && Object.hasOwn(attributes, 'nomodule')) return false;
+    return type === '' || JAVASCRIPT_TYPES.has(type);
+  }).map(({ text }) => text);
 }
 
 function inspectPointEventBindings(scripts) {

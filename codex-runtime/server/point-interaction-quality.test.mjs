@@ -495,3 +495,223 @@ test('returns composable checks and flattened violations without throwing on mis
   assert.equal(composed.checkResults.one.ok, true);
   assert.deepEqual(composed.violations, [{ check: 'two', rule: 'failed' }]);
 });
+
+test('DOM point evidence rejects an entirely inert template without changing top context', () => {
+  const html = scientificHtml().replace(/(<body[^>]*>)/u, '$1<template>').replace('</body>', '</template></body>');
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.evidenceMarkupOk, true);
+  assert.equal(quality.scientificContextOk, true);
+  assert.equal(quality.matlabEvidenceOk, true);
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.renderedPointCount, 0);
+  assert.equal(quality.dataPointCount, 0);
+  assert.equal(quality.tooltipPresent, false);
+  assert.equal(quality.pointInteractionOk, false);
+});
+
+for (const wrapper of ['textarea', 'script', 'template']) {
+  test(`DOM point evidence ignores apparent points inside ${wrapper}`, () => {
+    const html = scientificHtml().replace(/<svg>[\s\S]*?<\/svg>/u, markup => `<${wrapper}>${markup}</${wrapper}>`);
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.evidenceMarkupOk, true);
+    assert.equal(quality.renderedPointCount, 0);
+    assert.equal(quality.dataPointCount, 2);
+    assert.equal(quality.pointCountOk, false);
+    assert.equal(quality.pointInteractionQualityOk, false);
+  });
+}
+
+test('DOM point evidence preserves quoted tag boundaries and decoded marker attributes', () => {
+  const html = scientificHtml()
+    .replace('<g class=', '<g data-note="a > b" class=')
+    .replace('data-point-index="0"', 'DATA-POINT-INDEX=&#48;')
+    .replace('class="temperature-point"', 'CLASS=temperature-po&#105;nt');
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  assert.equal(quality.renderedPointCount, 2);
+  assert.deepEqual(quality.checkResults['stable-point-identity'].renderedIndexes, [0, 1]);
+});
+
+test('DOM point evidence does not treat attribute strings, class substrings or scripts as extra points', () => {
+  const html = scientificHtml().replace('</body>', `<aside data-note='data-point-index="2"' class="not-temperature-point"></aside>
+    <script type="text/plain" data-point-index="2">Not a point</script>
+    <style data-point-index="2">.other { color: red; }</style></body>`);
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  assert.equal(quality.renderedPointCount, 2);
+});
+
+for (const [opening, closing] of [
+  ['<svg><foreignObject><div>', '</div></foreignObject></svg>'],
+  ['<svg><template><foreignObject><div>', '</div></foreignObject></template></svg>'],
+]) {
+  test(`DOM point evidence preserves HTML points inside ${opening}`, () => {
+    const html = scientificHtml().replace('<svg>', opening).replace('</svg>', closing)
+      .replaceAll('<g ', '<button ').replaceAll('</g>', '</button>');
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.renderedPointCount, 2);
+  });
+}
+
+test('DOM point evidence still rejects real extra point markers', () => {
+  const quality = inspectSyntheticEvidence(scientificHtml().replace('</svg>', '<circle data-temperature-point tabindex="0"></circle></svg>'));
+  assert.equal(quality.renderedPointCount, 3);
+  assert.equal(quality.pointCountOk, false);
+  assert.equal(quality.pointInteractionQualityOk, false);
+});
+
+for (const [declaration, accepted] of [
+  ['role=tooltip', true],
+  ['ROLE="tool&#116;ip"', true],
+  ['data-note="a > b" role="tooltip"', true],
+  [`data-note='role="tooltip"'`, false],
+]) {
+  test(`DOM tooltip evidence reads the actual role in ${declaration}`, () => {
+    const quality = inspectSyntheticEvidence(scientificHtml().replace('role="tooltip"', declaration));
+    assert.equal(quality.tooltipPresent, accepted);
+    assert.equal(quality.tooltipFieldsOk, accepted);
+    assert.equal(quality.pointInteractionQualityOk, accepted, JSON.stringify(quality.violations));
+    if (!accepted) assert.deepEqual(quality.checkResults['tooltip-fields'].violations, [{ rule: 'tooltip-missing' }]);
+  });
+}
+
+for (const [attributeId, modelId, accepted] of [
+  ['P&#49;', 'P1', true],
+  ['P&#x31;', 'P1', true],
+  ['P&#49;', 'P&#49;', false],
+  ['A&amp;B', 'A&B', true],
+  ['P&amp;#49;', 'P&#49;', true],
+  ['P 1', 'P<!--ignored-->1', false],
+  ['P&lt;!--ignored--&gt;1', 'P<!--ignored-->1', true],
+]) {
+  test(`DOM identity compares ${attributeId} with raw JSON ${modelId}`, () => {
+    const html = scientificHtml().replace('data-observation-id="P1"', `data-observation-id="${attributeId}"`)
+      .replace('"id":"P1"', `"id":${JSON.stringify(modelId)}`);
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.pointInteractionQualityOk, accepted, JSON.stringify(quality.violations));
+    assert.equal(quality.stablePointIdentityOk, accepted);
+    assert.deepEqual(quality.checkResults['stable-point-identity'].modelObservationIds, [modelId, 'P2']);
+    if (!accepted) assert.equal(quality.checkResults['stable-point-identity'].violations[0].rule, 'rendered-observation-id-mismatch');
+  });
+}
+
+for (const ordering of ['correct-first', 'wrong-first', 'identical']) {
+  test(`DOM data evidence rejects ambiguous models: ${ordering}`, () => {
+    const baseline = scientificHtml();
+    const original = baseline.match(/<script type="application\/json"[\s\S]*?<\/script>/u)[0];
+    const other = original.replace('id="temperature-data"', 'id="unrelated"');
+    const wrong = original.replace('"id":"P1"', '"id":"WRONG"');
+    const replacements = { 'correct-first': other + wrong, 'wrong-first': wrong + other, identical: other + original };
+    const html = baseline.replace(original, replacements[ordering]).replace('function showTooltip() {}', `
+      const selectedModel = JSON.parse(document.getElementById('temperature-data').textContent);
+      function showTooltip(event) {
+        document.querySelector('[role="tooltip"]').textContent = selectedModel.points[Number(event.currentTarget.dataset.pointIndex)].id;
+      }`);
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.evidenceMarkupOk, true);
+    assert.equal(quality.renderedPointCount, 2);
+    assert.equal(quality.pointCountOk, false);
+    assert.equal(quality.stablePointIdentityOk, false);
+    assert.equal(quality.pointInteractionQualityOk, false);
+    assert.deepEqual(quality.checkResults['stable-point-identity'].modelObservationIds, []);
+    assert.equal(quality.checkResults['point-count'].dataModelCandidateCount, 2);
+    assert.ok(quality.checkResults['point-count'].violations.some(({ rule }) => rule === 'embedded-data-ambiguous'));
+  });
+}
+
+test('DOM data evidence preserves rejection of a unique wrong model', () => {
+  const quality = inspectSyntheticEvidence(scientificHtml().replace('"id":"P1"', '"id":"WRONG"'));
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.checkResults['stable-point-identity'].violations[0].rule, 'rendered-observation-id-mismatch');
+});
+
+for (const [name, model] of [
+  ['points', { points: validPoints() }],
+  ['array', validPoints()],
+  ['series', { series: validPoints().map(point => ({ name: point.series, data: [point] })) }],
+  ['datasets', { datasets: validPoints().map(point => ({ name: point.series, values: [point] })) }],
+]) {
+  test(`DOM data evidence preserves a unique legacy ${name} model without a required id`, () => {
+    const html = scientificHtml().replace(/<script type="application\/json"[\s\S]*?<\/script>/u,
+      `<script type="application/json">${JSON.stringify(model)}</script>`);
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.dataPointCount, 2);
+    assert.equal(quality.checkResults['point-count'].dataModelCandidateCount, 1);
+  });
+}
+
+test('DOM data evidence ignores inert, malformed and unrelated JSON without changing the unique model', () => {
+  const baseline = scientificHtml();
+  const original = baseline.match(/<script type="application\/json"[\s\S]*?<\/script>/u)[0];
+  const html = baseline.replace(original, `<template>${original}</template><textarea>${original}</textarea>
+    <script type="application/json">{malformed</script><script type="application/json">{"metadata":true}</script>${original}`);
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  assert.equal(quality.checkResults['point-count'].dataModelCandidateCount, 1);
+});
+
+test('DOM data evidence does not borrow its only model from a template', () => {
+  const html = scientificHtml().replace(/<script type="application\/json"[\s\S]*?<\/script>/u,
+    markup => `<template>${markup}</template>`);
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.dataPointCount, 0);
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.checkResults['point-count'].violations[0].rule, 'embedded-data-missing');
+});
+
+for (const [type, accepted] of [
+  ['application/&#106;son', true],
+  ['APPLICATION/JSON', true],
+  ['application/json; charset=utf-8', true],
+  ['text/application/json', false],
+  ['application/jsonp', false],
+]) {
+  test(`DOM data evidence uses the decoded MIME type ${type}`, () => {
+    const quality = inspectSyntheticEvidence(scientificHtml().replace('type="application/json"', `type="${type}"`));
+    assert.equal(quality.pointInteractionQualityOk, accepted, JSON.stringify(quality.violations));
+    assert.equal(quality.dataPointCount, accepted ? 2 : 0);
+  });
+}
+
+for (const [attributes, accepted] of [
+  ['type="text/plain"', false],
+  ['type="application/ld+json"', false],
+  ['type="text/javascript; charset=utf-8"', false],
+  ['type="text/javascript"', true],
+  ['type=" TEXT/JAVASCRIPT "', true],
+  ['type="text/java&#115;cript"', true],
+  ['type="module"', true],
+  ['language="javascript"', true],
+  ['language="vbscript"', false],
+  ['type="" language="vbscript"', true],
+  ['src="data:text/javascript,void%200"', false],
+]) {
+  test(`DOM script evidence classifies ${attributes} without certifying execution`, () => {
+    const quality = inspectSyntheticEvidence(scientificHtml().replace('<script>', `<script ${attributes}>`));
+    assert.equal(quality.renderedPointCount, 2);
+    assert.equal(quality.dataPointCount, 2);
+    assert.equal(quality.pointInteractionOk, accepted);
+    assert.equal(quality.pointInteractionQualityOk, accepted, JSON.stringify(quality.violations));
+  });
+}
+
+test('DOM script evidence ignores handlers inside a template while retaining actual points', () => {
+  const html = scientificHtml().replace(/<script>[\s\S]*?<\/script>/u, markup => `<template>${markup}</template>`);
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.renderedPointCount, 2);
+  assert.equal(quality.dataPointCount, 2);
+  assert.equal(quality.pointInteractionOk, false);
+  assert.equal(quality.pointInteractionQualityOk, false);
+});
+
+test('DOM script evidence preserves inline SVG script and style text', () => {
+  const baseline = scientificHtml();
+  const script = baseline.match(/<script>[\s\S]*?<\/script>/u)[0];
+  const style = baseline.match(/<style>[\s\S]*?<\/style>/u)[0];
+  const html = baseline.replace(script, '').replace(style, '').replace('</svg>', `${style}${script}</svg>`);
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  assert.equal(quality.renderedPointCount, 2);
+});

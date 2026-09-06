@@ -16,7 +16,7 @@ assert(isfolder(assetDirectory), "build_native_pdf_fixture_case:Assets", "Native
 addpath(assetDirectory);
 sourceFile = sourceFiles(caseIds == caseId);
 sourcePath = fullfile(fixtureDirectory, sourceFile);
-[fixture, inputHash] = read_fixture(sourcePath);
+[fixture, inputHash, inputBytes] = read_fixture(sourcePath);
 expectedFixtureId = caseId;
 if caseId == "paired-interactive"
     expectedFixtureId = "crossed-time-depth-temperature";
@@ -113,8 +113,7 @@ try
     drawnow;
     assert(isscalar(figureHandle) && isgraphics(figureHandle, "figure"), ...
         "build_native_pdf_fixture_case:Figure", "The caller must receive a live native figure");
-    assert(strcmpi(oi_sha256_file(sourcePath), inputHash), ...
-        "build_native_pdf_fixture_case:FixtureChanged", "Fixture bytes changed while building the figure");
+    verify_fixture_bytes(sourcePath, inputHash, inputBytes);
 catch errorRecord
     delete_new_figures(existingFigures);
     rethrow(errorRecord);
@@ -166,7 +165,30 @@ outputs = interactive_timeseries_native_template(data, fullfile(tempdir, "paired
     "UncertaintyType", uncertaintyType, "UncertaintyUnit", uncertaintyUnit);
 end
 
-function [fixture, inputHash] = read_fixture(sourcePath)
+function [fixture, inputHash, content] = read_fixture(sourcePath)
+content = read_fixture_bytes(sourcePath);
+snapshotPath = string(tempname);
+assert(~isfile(snapshotPath) && ~isfolder(snapshotPath), ...
+    "build_native_pdf_fixture_case:StaleSnapshot", "Refusing to overwrite a fixture snapshot");
+snapshotCleanup = onCleanup(@() delete_snapshot(snapshotPath));
+fileHandle = fopen(snapshotPath, "wb");
+assert(fileHandle >= 0, "build_native_pdf_fixture_case:FixtureWrite", ...
+    "Cannot write fixture snapshot: %s", snapshotPath);
+writeCleanup = onCleanup(@() fclose(fileHandle));
+written = fwrite(fileHandle, content, "uint8");
+assert(written == numel(content), "build_native_pdf_fixture_case:FixtureWrite", ...
+    "Fixture snapshot must contain every input byte: %s", snapshotPath);
+clear writeCleanup;
+assert(isequal(read_fixture_bytes(snapshotPath), content), ...
+    "build_native_pdf_fixture_case:FixtureChanged", "Fixture snapshot bytes differ from the input");
+inputHash = string(oi_sha256_file(snapshotPath));
+verify_fixture_bytes(snapshotPath, inputHash, content);
+verify_fixture_bytes(sourcePath, inputHash, content);
+fixture = jsondecode(native2unicode(content', 'UTF-8'));
+clear snapshotCleanup;
+end
+
+function content = read_fixture_bytes(sourcePath)
 assert(isfile(sourcePath), "build_native_pdf_fixture_case:FixtureMissing", ...
     "Fixture is missing: %s", sourcePath);
 fileHandle = fopen(sourcePath, "rb");
@@ -176,12 +198,19 @@ content = fread(fileHandle, Inf, "*uint8");
 assert(~isempty(content) && feof(fileHandle), "build_native_pdf_fixture_case:FixtureRead", ...
     "Fixture must be nonempty and completely readable: %s", sourcePath);
 clear cleanup;
-assert(usejava("jvm"), "build_native_pdf_fixture_case:JVMRequired", ...
-    "The fixture byte digest requires the MATLAB JVM");
-engine = java.security.MessageDigest.getInstance("SHA-256");
-engine.update(content);
-inputHash = string(lower(reshape(dec2hex(typecast(engine.digest(), "uint8"))', 1, [])));
-fixture = jsondecode(native2unicode(content', 'UTF-8'));
+end
+
+function verify_fixture_bytes(sourcePath, inputHash, content)
+assert(isequal(read_fixture_bytes(sourcePath), content) ...
+    && strcmpi(oi_sha256_file(sourcePath), inputHash) ...
+    && isequal(read_fixture_bytes(sourcePath), content), ...
+    "build_native_pdf_fixture_case:FixtureChanged", "Consumed fixture bytes changed: %s", sourcePath);
+end
+
+function delete_snapshot(snapshotPath)
+if isfile(snapshotPath)
+    delete(snapshotPath);
+end
 end
 
 function values = parse_utc_time(rawValues)

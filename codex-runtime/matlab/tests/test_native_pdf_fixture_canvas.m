@@ -106,8 +106,12 @@ try
 
     allRoots = allchild(figureHandle);
     record.root_inventory = geometry_state(num2cell(allRoots));
-    excludedRoots = arrayfun(@(object) isgraphics(object, "uimenu") ...
-        || isgraphics(object, "uitoolbar") || isgraphics(object, "uicontextmenu"), allRoots);
+    assert(record.root_inventory.status == "captured", ...
+        "test_native_pdf_fixture_canvas:RootInventory", "The complete root inventory must be captured");
+    for rootIndex = 1:numel(allRoots)
+        record.root_inventory.objects(rootIndex).properties.DirectChildCount = numel(allchild(allRoots(rootIndex)));
+    end
+    excludedRoots = arrayfun(@excluded_nonplot_root, allRoots);
     excludedHandles = allRoots(excludedRoots);
     for excludedIndex = 1:numel(excludedHandles)
         record.excluded_root_classes(end + 1, 1) = string(class(excludedHandles(excludedIndex)));
@@ -214,6 +218,14 @@ function supported = supported_root(object)
 supported = isa(object, "matlab.graphics.layout.TiledChartLayout") || isgraphics(object, "axes");
 end
 
+function excluded = excluded_nonplot_root(object)
+excluded = isgraphics(object, "uimenu") || isgraphics(object, "uitoolbar") ...
+    || isgraphics(object, "uicontextmenu");
+if isa(object, "matlab.graphics.shape.internal.AnnotationPane")
+    excluded = string(object.Tag) == "scribeOverlay" && isempty(allchild(object));
+end
+end
+
 function state = root_state(object)
 state = struct("Parent", get(object, "Parent"), "Units", get(object, "Units"), ...
     "Position", get(object, "Position"), "OuterPosition", get(object, "OuterPosition"), ...
@@ -292,7 +304,8 @@ try
             "An original graphics object no longer exists");
         record = struct("object_index", objectIndex, "class", string(class(object)), ...
             "parent_class", "", ...
-            "properties", struct(), "unavailable_properties", strings(0, 1));
+            "properties", struct(), "unavailable_properties", strings(0, 1), ...
+            "nonpublic_properties", strings(0, 1));
         if isprop(object, "Parent")
             record.parent_class = string(class(object.Parent));
         else
@@ -300,7 +313,15 @@ try
         end
         for property = properties
             if isprop(object, property)
-                record.properties.(property) = object.(property);
+                try
+                    record.properties.(property) = object.(property);
+                catch propertyError
+                    if ~strcmp(propertyError.identifier, "MATLAB:class:GetProhibited")
+                        rethrow(propertyError);
+                    end
+                    record.unavailable_properties(end + 1, 1) = property;
+                    record.nonpublic_properties(end + 1, 1) = property;
+                end
             else
                 record.unavailable_properties(end + 1, 1) = property;
             end

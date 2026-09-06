@@ -1,6 +1,6 @@
 # MATLAB 绘图与海区报告持续升级
 
-更新日期：2026-09-05 UTC。持续目标保持 active；以下是可复核检查点，不是完成报告或满分证明。
+更新日期：2026-09-06 UTC。持续目标保持 active；以下是可复核检查点，不是完成报告或满分证明。
 
 ## 协调边界
 
@@ -14,16 +14,16 @@
 
 | 工作 | 已交付 | 当前接续 |
 | --- | --- | --- |
-| 回归与图族布局 | 三版主运行60/60 | 单侧观测不确定度实现及真实三格式测试待CI |
-| Manifest 完整性 | 拒绝篡改、混合API及快照复核 | 补齐真实文件校验verified字段，不提升视觉状态 |
-| 中文海区报告 | 原生声明3/4、显式外部审计三版通过 | 比较图v3采集及消费者已实现待CI，不冒充实测海区 |
+| 回归与图族布局 | 第21轮三版主运行60/60，Subtitle修复通过 | Astra原始生成函数首次三版验收待CI |
+| Manifest 完整性 | 拒绝篡改、混合API及快照复核 | 复杂canvas独立声明/实际文件检查，不提升视觉状态 |
+| 中文海区报告 | 合成原生声明4/4；Astra报告57项数值复核吻合 | 生产status尚未接入报告全证据门禁，不冒充实测海区 |
 | 颜色与冗余编码 | 隐藏数据系列、连续色标与不确定度审计 | 自动门禁通过；最终视觉仍未通过 |
 | 文字几何 | points/pixels参考及完整正负例三版通过 | 保留原data Extent异常诊断及逐格式视觉缺口 |
 | MATLAB 交互 | 原生 UIAxes 调用、稳定 ID 与刷选兼容 | 三版本无桌面回退通过，桌面操作未验证 |
 | 字体与导出能力 | PNG原生尺寸、受限SVG规范化三版通过 | 旧版PDF Courier与R24额外DISPLAY内嵌SVG字体未解决 |
 | 外部产物检查 | R26十二产物通过、旧版各8/12 | 失败叶子进入中文报告，不把声明当工具认证 |
-| CI 证据汇总 | 第16轮57/60，图例非法属性导致新测试失败 | 原始90分非全量通过；兼容修复待新CI |
-| 逐格式视觉核验 | 两SVG布局引擎对照、真实产物哈希绑定 | 四件第15轮SVG零像素差，不代表全图族或字体验收 |
+| CI 证据汇总 | 第21轮60/60，严格stage-status内容三版通过 | 原始90分非全量通过；第22轮候选待新CI |
+| 逐格式视觉核验 | 两SVG布局引擎对照、真实产物哈希绑定 | 旧PDF裁切/图例遮挡仍在；复杂canvas未成功导出 |
 
 ## 实跑历史
 
@@ -268,3 +268,16 @@
 - 十个原代理本轮已分批续派：原生mutation审阅、比较图实物视觉、canvas实物/方案审阅、四fixture builder、stage状态门禁、交互解析、浏览器边界审计、共享DOM修复、诊断汇总及真实结果文档同步。峰值并发六，不冒充十个用户侧边栏会话同时运行。主线程负责Subtitle修复、复杂canvas探针、跨模块复核、依赖说明及CI；根README只提交新增npm ci行，用户Astra/CLI和部署改动继续保留。
 - `canvas-native-review-round21.md`重新检查本批六份0pt PDF，旧两版四份均576x360pt、WenQuanYi嵌入和预期文字完整；36份字体/几何快照采集完成，但R21 PositionConstraint改变，R26背景TightInset增加15pt、页面仍578x362pt且PNG失败。44个包内原件未改；仅本次查看的六PDF有图面观察，3pt及PNG不补签视觉，复杂fixture亦未执行。
 - 推送前324项Python、全部已跟踪服务器Node、365项定向报告/交互测试、8项生成器smoke、资产/技能/Family B/导出静态检查通过。63个MATLAB文件按CI的UTF-8/R2021a参数语法检查通过，shell语法和31文件冻结复核通过。完整静态评分70/100、runtime_pending；新的原生修复及复杂canvas仍待本轮licensed CI，仓库/文档变化不等于常驻服务或既有线程提示已刷新。
+
+## 第二十二批接续
+
+- 第二十一批本地提交 `587c382a7155c265abb82137b6e5ce47717b8de0`，远端 `7d51e714a23442e7a132d257d1ec94c91c6dd669`，运行 [34001173593](https://github.com/wzn1118/ocean-intelligence/actions/runs/34001173593) 已 completed/failure。三版主阶段各20/20、合计60/60，原始评分90、runtime_pending。原件 `/tmp/matlab-run-34001173593`，汇总 `/tmp/matlab-ci-summary-34001173593/summary.md`。Subtitle修复和新增stage-status-content均实际通过；旧两版四PDF字体及整体视觉门禁仍失败，不给100分。
+- 复杂四fixture探针的R21八次构建因无JVM失败；R24八次均因空 `scribeOverlay` AnnotationPane 被未知root拒绝，其中profile/comparison还有非公开Text.Position读取失败；R26两个上下文明确不适用。`fixture-canvas-native-review-round22.md`审阅16件R24参考图件，39个原件未改，无canvas PDF/恢复PNG，不借简单canvas结果补签。
+- R22候选在builder用既有SHA fallback绑定实际消费字节及独立快照；root先记录清单，只排除精确类/tag且无任何子对象的AnnotationPane。几何采集仅将GetProhibited列为nonpublic/unavailable，其余异常仍失败。新独立 `inspect_fixture_canvas.py` 检查固定路径、严格JSON、输入和产物bytes/hash及PNG头部；不证明字体、页面、像素、几何等价、回调或视觉，不改变分数/主阶段数。
+- 点交互检查改用同一parse5文档读取点、tooltip、原始JSON、脚本和样式，排除inert伪节点，属性实体解码一次、JSON原文不删注释或解码实体，多份可用模型拒绝歧义；保留SVG/foreignObject真节点和合法旧格式。413项定向测试通过；wrong-receiver/empty-selector等动态JS问题仍未解决，不冒充浏览器交互全验收。
+- 实际内置Astra隔离生成完成，见 `runtime-generation-result-round22.md`：提交587c382归档中的164源文件不变，8012独立服务/tenant执行两轮，实际turn上下文均为gpt-6-astra/high/never/danger-full-access，生产8011未重启。原样归档生成函数与中文说明，独立57项数值声明核对通过，仅用途分类措辞有轻微发现。无本地MATLAB，源码语法检查不等于原生输出。
+- 新family-B验收入口将执行该9303字节原函数，保留12记录、11配对、完整QC/U与13.96未绘制模型值；绑定源码及输入，读回同图导出前后v3并导出PNG/PDF/SVG。原提示没规定8x5或短标签，保留实际10x8.5和描述性标签，共享reader仅增加受限枚举；原36负例不变，新文本profile另计。首次MATLAB执行仍待本轮CI，不用自建替代图加分。
+- `ocean-report-e2e-plan-round22.md`及 `report-status-wiring-plan-round22.md`确认production status未调用完整illustrated inspector，缺manifest/point可能跳过相关检查；readonly提取分支仍因正文缺失complete=false，未观察到真实错误complete=true。新增持久化报告policy/manifest归属和Octave分支尚未实施，不把单纯路径加固说成产品闭环或真实海区报告通过。
+- 十个原代理本轮已分批续派：Huygens负责无JVM构建和布局方案；Laplace负责模型原函数原生driver及标签profile；Confucius负责真实报告路径梳理与生成统计独立复核；Aristotle负责逐点DOM修复；Euler负责提示/技能同步；Faraday负责复杂canvas原件审阅；Hume负责真实stage门禁审阅；Boole负责独立canvas校验器；Heisenberg负责运行服务刷新边界；Dirac负责报告status接线审计和路径边界加固。峰值并发六，部分线程续派第二任务，不声称十个侧边栏会话同时运行。主线程负责原生probe修复、真实内置生成、CI及跨模块整合。
+- 报告校验器路径加固已完成：要求显式outputDirectory，入口和exports先做目录归属/逐级链接检查，再以O_NOFOLLOW和dev/ino绑定读取；点检查复用同一HTML字节，不重读路径。42项新增反例/兼容用例及相关五模块471项通过，合法nested bundle保留。这不等于生产status已接通；任意并发目录替换的TOCTOU仍未完全消除，使用受控稳定文件树。
+- 推送前346项Python、全部已跟踪服务器Node、8项router smoke、资产/技能/Family B/导出静态检查通过；65个MATLAB文件通过UTF-8/R2021a语法检查。冻结33文件复核通过，静态评分70/100、runtime_pending。实际生成函数、文本profile正负例和复杂canvas修复仍待首次本轮licensed CI；保留旧PDF/视觉失败及用户无关的Astra、CLI、部署、Copernicus改动。

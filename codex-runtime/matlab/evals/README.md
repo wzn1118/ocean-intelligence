@@ -5,6 +5,51 @@ three deterministic synthetic fixtures, all explicitly marked as non-observed
 data. Every fixture repeats multiple depths at multiple UTC times; time and
 depth therefore form a crossed design instead of a one-to-one confounded axis.
 
+## Current Evidence
+
+Round-21 run 34001173593 (remote commit `7d51e714`) is `completed/failure`.
+R2021a/R2024b/R2026a each passed 20/20 primary stages, 60/60 in total, including
+`evaluator-runtime`. Each original evaluator result remains score 90 with
+`runtime_pending`; visual inspection is unverified. `oi_apply_axes` now applies
+`theme.FontSize` explicitly to Subtitle, and the `comparison-statistics-layout`
+subtitle perturbation/restyle assertion passed natively without weakening its
+font-size check. All three reports retain 4/4 input-bound declarations; this is
+separate from the four-positive, 36/36 synthetic native reader suite described
+below, not independent re-execution, real-sea analysis, or visual approval.
+R2026a passed 12/12 external evaluator artifact checks; R2021a/R2024b each retain
+four `pdf_font_embedding` failures, including unembedded Courier. Primary-stage
+success and report construction do not clear these failures or grant a CI pass.
+
+The four-fixture `test_native_pdf_fixture_canvas` diagnostic reached these
+outcomes in both primary and DISPLAY contexts:
+
+| Release | Actual Diagnostic Outcome | Canvas PDF |
+| --- | --- | --- |
+| R2021a | Four `build_native_pdf_fixture_case:JVMRequired` failures | `canvas_pdf.api_invoked=false` |
+| R2024b | Four `test_native_pdf_fixture_canvas:RootObjects` failures, involving the empty `scribeOverlay` `AnnotationPane` | `canvas_pdf.api_invoked=false` |
+| R2026a | `not_applicable`, not passed | No candidate export |
+
+Some R2024b geometry records also contain `MATLAB:class:GetProhibited`; they are
+not complete measurements. The round-22 candidate removes the JVM dependency
+from snapshot SHA and excludes only strictly empty AnnotationPane objects,
+rejecting nonempty ones. It has not run natively and does not prove repaired
+geometry, canvas PDF export, restoration, or appearance. Diagnostic outcomes
+remain separate from the original three-candidate native PDF probe stage,
+score, and promoted report artifacts.
+
+Production port 8011 has not reloaded. The Astra generation trial from git
+archive `587c382` on isolated port 8012 completed two turns using separate
+workspace/SQLite/tenant and CLI 0.153.4. Both actual turn contexts record
+`gpt-6-astra`, high effort, never approval and danger-full-access. The original
+source/report and generation provenance are retained in
+`../tests/model-generated-round22/`; independent review matched all 57 numeric
+claims, with one minor source-label wording issue recorded separately. The
+generated source passed R2021a syntax checks but has not run in MATLAB yet.
+The family-B trial now executes those pinned bytes without rewriting the
+model-selected 10x8.5-inch page or descriptive labels; its explicit reader text
+profile preserves all scientific checks. Generation completion does not prove
+native exports, visual quality, real-ocean analysis or production refresh.
+
 ## Layers
 
 1. `evaluate.py --runtime skip` validates fixtures, scientific contracts,
@@ -70,7 +115,7 @@ dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
 Round 13 passed this v2 path on R2021a/R2024b/R2026a. Those earlier archived
 reports retain 3/4 native-proof coverage, with comparison `not_verified`.
-Rounds 18/19/20 have 4/4 bound declarations on all three releases: every entry under
+Rounds 18/19/20 and current round 21 have 4/4 bound declarations on all three releases: every entry under
 `report-evidence.json`'s `runtime_evidence.figures` has
 `plot_data_evidence.status="runtime_declaration_verified"`. Do not upgrade old
 packages with evidence from this later run.
@@ -138,8 +183,8 @@ the experimental PDF has exact dimensions, embedded fonts, or correct layout.
 Round 20's two simple canvas diagnostics (0pt/3pt inset) captured
 `geometry_before_pdf`, `geometry_after_pdf`, and `geometry_after_png` on
 R2021a/R2024b in both primary and DISPLAY runs. `captured` means a snapshot exists,
-not unchanged geometry, successful restoration, or visual approval. The new
-four-fixture `test_native_pdf_fixture_canvas` diagnostic has not run in MATLAB.
+not unchanged geometry, successful restoration, or visual approval. The separate
+four-fixture diagnostic's first native failures are listed in Current Evidence.
 Neither it nor the supplementary simple-canvas cases counts toward the original
 three-candidate native PDF probe stage, score, or promoted report artifacts.
 
@@ -149,6 +194,26 @@ and display-server logs are independent diagnostics. `summarize_ci.py` displays
 them separately, without adding stages or points or changing the main outcome.
 Virtual display availability and callback completion do not prove desktop
 interaction, font embedding, text alignment, or a successful visual review.
+
+## Evidence History
+
+These historical controls explain the current policy; they are not extra
+default-injection requirements or claims about every new figure. The repository
+`../SKILL.md` retains the detailed font and sizing limits. Font probe 33985570222
+verified tested WenQuanYi CJK/Latin/numerals and embedding in content-cropped
+native vector PDFs, not exact-page legacy print exports. Older Noto titles and
+Droid Latin/numerals failed glyph rendering; installed-font detection did not
+prove readability. Repeated export and PNG prewarming in run 33988300354 did not
+repair the R2026a vector-text control.
+
+Round 15's three-release Java DOM checks covered ten positive and 34 rejection
+cases. Historical two-engine SVG comparisons shared a Cairo backend, so zero
+pixel differences did not establish independent browser or visual approval.
+Round 16's `Legend.Title` FontUnits failure led to the supported fixed-point
+FontSize policy; round 17 passed four legend-title coverage cases without
+turning an unmeasured title into measured geometry. Round 19's two Astra turns
+used low effort with read-only diagnostic commands, not a read-only permission
+profile or MATLAB execution.
 
 Run 33989124823 retained a no-display baseline on all three releases. Its R2026a
 display controls removed the observed text-anchor clipping in two samples while
@@ -206,10 +271,10 @@ not overall CI or visual approval. Overall CI still failed. The only primary-sta
 failure was R2021a `comparison-statistics-layout`, with
 `test_comparison_statistics_layout:NativeSubtitle`: the subtitle started at
 10 points, perturbing axes to 12 changed it to 12, and restyling restored axes to
-10 but left Subtitle at 12. The round-21 `oi_apply_axes` candidate explicitly
-applies `theme.FontSize` to Subtitle; it awaits new licensed CI without relaxing
-the failing font-size assertion. Passing the separate synthetic native mutation
-suite does not clear this layout failure or the independent postprocessing gates.
+10 but left Subtitle at 12. Round 21 subsequently passed the native assertion
+after `oi_apply_axes` explicitly applied `theme.FontSize` to Subtitle, without
+relaxing the check. That later fix does not upgrade the historical failing
+package or remove the independent postprocessing gates.
 
 Existing appdata `OI_ColorAccessibilityRole="uncertainty"` annotates only actual
 helper-created uncertainty Lines. Round 18 completed the independent

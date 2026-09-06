@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import fs, { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -124,6 +125,182 @@ test('audits conclusion evidence, limitations, figure links, hashes, and manifes
   assert.equal(result.figureEvidenceOk, true);
   assert.equal(result.interactiveFigureCount, 1);
 });
+
+for (const field of ['htmlPath', 'markdownPath', 'manifestPath', 'png', 'pdf', 'html']) {
+  for (const kind of ['absolute', 'traversal', 'symlink', 'intermediate-symlink', 'internal-symlink']) {
+    test(`authorized paths reject ${field} ${kind} before external filesystem access`, (context) => {
+      const fixture = createReportEvidenceFixture();
+      const outside = mkdtempSync(`${fixture.root}-outside-`);
+      context.after(() => {
+        rmSync(fixture.root, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      });
+      const entry = field.endsWith('Path');
+      const source = entry ? fixture[field] : path.join(fixture.root, fixture.manifest.figures[0].exports[field].file);
+      const externalFile = path.join(outside, path.basename(source));
+      copyFileSync(source, externalFile);
+      let reference = externalFile;
+      let link;
+      if (kind === 'traversal') {
+        reference = `${fixture.root}/../${path.basename(outside)}/${path.basename(source)}`;
+      } else if (kind.includes('symlink')) {
+        link = path.join(fixture.root, 'linked');
+        const directoryLink = kind === 'intermediate-symlink';
+        symlinkSync(directoryLink ? outside : kind === 'internal-symlink' ? source : externalFile,
+          link, directoryLink ? 'dir' : 'file');
+        reference = directoryLink ? path.join(link, path.basename(source)) : link;
+      }
+      if (entry) fixture[field] = reference;
+      else {
+        fixture.manifest.figures[0].exports[field].file = kind === 'absolute'
+          ? reference : kind === 'traversal'
+            ? `../${path.basename(outside)}/${path.basename(source)}` : path.relative(fixture.root, reference);
+        writeFixtureManifest(fixture);
+      }
+      const { result, accesses } = traceEvidenceFilesystem(context, fixture);
+      assert.equal(result.ok, false);
+      if (entry) {
+        assert.equal(result.pathsOk, false);
+        assert.ok(result.pathViolations.includes(`${field}.${link ? 'symlink' : 'outside_output_directory'}`),
+          JSON.stringify(result.pathViolations));
+        if (field === 'manifestPath') assert.equal(result.manifestOk, false);
+      } else {
+        const artifact = result.artifactChecks.find((candidate) => candidate.format === field);
+        assert.equal(artifact.pathOk, false);
+        assert.equal(artifact.present, false);
+        assert.equal(artifact.bytes, 0);
+        assert.equal(artifact.hashOk, false);
+        assert.deepEqual(artifact.pathViolations, [link ? 'symlink' : kind]);
+        if (field === 'html') assert.equal(artifact.interactionQuality, undefined);
+      }
+      assert.deepEqual(accesses.filter((access) => atOrInside(outside, access.file)), []);
+      if (link) assert.deepEqual(accesses.filter((access) => atOrInside(link, access.file)
+        && !(access.method === 'lstatSync' && access.file === link)), []);
+    });
+  }
+}
+
+test('authorized exports reject absolute in-root and parent-segment paths', (context) => {
+  const fixture = createReportEvidenceFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  for (const reference of [fixture.artifactPath, 'nested/../figure.png', 'nested\\..\\figure.png', 'C:\\outside\\figure.png']) {
+    fixture.manifest.figures[0].exports.png.file = reference;
+    writeFixtureManifest(fixture);
+    const { result, accesses } = traceEvidenceFilesystem(context, fixture);
+    assert.equal(result.ok, false);
+    assert.equal(result.artifactChecks[0].pathOk, false);
+    assert.deepEqual(accesses.filter((access) => access.file === fixture.artifactPath), []);
+  }
+});
+
+for (const kind of ['missing', 'empty', 'unavailable', 'not-directory', 'symlink', 'intermediate-symlink']) {
+  test(`authorized outputDirectory fails closed for ${kind}`, (context) => {
+    const fixture = createReportEvidenceFixture();
+    const links = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'report-directory-links-')));
+    context.after(() => {
+      rmSync(fixture.root, { recursive: true, force: true });
+      rmSync(links, { recursive: true, force: true });
+    });
+    if (kind === 'missing') delete fixture.outputDirectory;
+    else if (kind === 'empty') fixture.outputDirectory = '';
+    else if (kind === 'unavailable') fixture.outputDirectory = path.join(fixture.root, 'missing');
+    else if (kind === 'not-directory') fixture.outputDirectory = fixture.artifactPath;
+    else {
+      symlinkSync(fixture.root, path.join(links, 'alias'), 'dir');
+      fixture.outputDirectory = path.join(links, 'alias');
+      if (kind === 'intermediate-symlink') {
+        mkdirSync(path.join(fixture.root, 'nested'));
+        fixture.outputDirectory = path.join(fixture.outputDirectory, 'nested');
+      }
+    }
+    const { result, accesses } = traceEvidenceFilesystem(context, fixture);
+    assert.equal(result.ok, false);
+    assert.equal(result.pathsOk, false);
+    assert.equal(result.manifestOk, false);
+    assert.deepEqual(accesses.filter((access) => ['readFileSync', 'openSync', 'statSync'].includes(access.method)), []);
+    if (kind.includes('symlink')) assert.deepEqual(accesses.filter((access) => atOrInside(path.join(links, 'alias'), access.file)
+      && !(access.method === 'lstatSync' && access.file === path.join(links, 'alias'))), []);
+  });
+}
+
+test('authorized nested bundle preserves strict checks and reads interactive HTML only once', (context) => {
+  const fixture = createReportEvidenceFixture();
+  context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  mkdirSync(path.join(fixture.root, 'reports', 'nested'), { recursive: true });
+  mkdirSync(path.join(fixture.root, 'assets', 'nested'), { recursive: true });
+  for (const field of ['htmlPath', 'markdownPath', 'manifestPath']) {
+    const destination = path.join(fixture.root, 'reports', 'nested', path.basename(fixture[field]));
+    renameSync(fixture[field], destination);
+    fixture[field] = destination;
+  }
+  for (const [format, field] of [['png', 'artifactPath'], ['pdf', 'pdfPath'], ['html', 'interactionPath']]) {
+    const destination = path.join(fixture.root, 'assets', 'nested', path.basename(fixture[field]));
+    renameSync(fixture[field], destination);
+    fixture[field] = destination;
+    fixture.manifest.figures[0].exports[format].file = path.relative(fixture.root, destination);
+  }
+  writeFixtureManifest(fixture);
+  const files = [fixture.htmlPath, fixture.markdownPath, fixture.manifestPath,
+    fixture.artifactPath, fixture.pdfPath, fixture.interactionPath];
+  const before = files.map(fileHash);
+  const { result, accesses } = traceEvidenceFilesystem(context, fixture);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.pathsOk, true);
+  assert.deepEqual(result.pathViolations, []);
+  assert.ok(result.artifactChecks.every((artifact) => artifact.pathOk && artifact.hashOk && artifact.bytesOk));
+  assert.equal(result.artifactChecks.find((artifact) => artifact.format === 'html').interactionQuality.pointInteractionQualityOk, true);
+  const htmlAccesses = accesses.filter((access) => access.file === fixture.interactionPath);
+  assert.equal(htmlAccesses.filter((access) => access.method === 'openSync').length, 1);
+  const reads = htmlAccesses.filter((access) => access.method === 'readFileSync');
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].descriptor, true);
+  assert.deepEqual(files.map(fileHash), before);
+});
+
+for (const replacement of ['symlink', 'regular-file', 'parent-symlink', 'root-symlink']) {
+  test(`authorized evidence rejects ${replacement} replacement at open before content read`, (context) => {
+    const fixture = createReportEvidenceFixture();
+    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'report-race-fixture-')));
+    const parkedRoot = `${fixture.root}-parked`;
+    context.after(() => {
+      rmSync(fixture.root, { recursive: true, force: true });
+      rmSync(parkedRoot, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    });
+    mkdirSync(path.join(fixture.root, 'assets'));
+    const artifactPath = path.join(fixture.root, 'assets', 'figure.html');
+    renameSync(fixture.interactionPath, artifactPath);
+    fixture.manifest.figures[0].exports.html.file = 'assets/figure.html';
+    writeFixtureManifest(fixture);
+    copyFileSync(artifactPath, path.join(outside, 'figure.html'));
+    let replaced = false;
+    const { result, accesses } = traceEvidenceFilesystem(context, fixture, (method, args) => {
+      if (replaced || method !== 'openSync' || args[0] !== artifactPath) return;
+      replaced = true;
+      assert.ok(args[1] & fs.constants.O_NOFOLLOW);
+      if (replacement === 'root-symlink') {
+        renameSync(fixture.root, parkedRoot);
+        symlinkSync(parkedRoot, fixture.root, 'dir');
+      } else if (replacement === 'parent-symlink') {
+        renameSync(path.dirname(artifactPath), path.join(fixture.root, 'parked-assets'));
+        symlinkSync(outside, path.dirname(artifactPath), 'dir');
+      } else {
+        renameSync(artifactPath, `${artifactPath}.original`);
+        if (replacement === 'symlink') symlinkSync(path.join(outside, 'figure.html'), artifactPath, 'file');
+        else copyFileSync(path.join(outside, 'figure.html'), artifactPath);
+      }
+    });
+    assert.equal(replaced, true);
+    assert.equal(result.ok, false);
+    const artifact = result.artifactChecks.find((candidate) => candidate.format === 'html');
+    assert.equal(artifact.hashOk, false);
+    assert.equal(artifact.interactionQuality, undefined);
+    assert.deepEqual(accesses.filter((access) => access.method === 'readFileSync' && access.file === artifactPath), []);
+    assert.deepEqual(accesses.filter((access) => access.method === 'openSync' && access.file === artifactPath
+      && access.succeeded).map((access) => access.fd),
+      accesses.filter((access) => access.method === 'closeSync' && access.file === artifactPath).map((access) => access.fd));
+  });
+}
 
 test('rejects comment-forged claims, fake hashes, and stale regenerated manifests', () => {
   const fixture = createReportEvidenceFixture();
@@ -1253,8 +1430,43 @@ function writeFixtureManifest(fixture) {
   writeFileSync(fixture.manifestPath, JSON.stringify(fixture.manifest));
 }
 
+function atOrInside(root, file) {
+  if (typeof file !== 'string') return false;
+  const relative = path.relative(root, file);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function traceEvidenceFilesystem(context, options, beforeAccess = () => {}) {
+  const accesses = [];
+  const descriptors = new Map();
+  const mocks = [];
+  for (const method of ['lstatSync', 'statSync', 'realpathSync', 'existsSync', 'openSync', 'fstatSync', 'readFileSync', 'closeSync']) {
+    const original = fs[method];
+    mocks.push(context.mock.method(fs, method, (...args) => {
+      const descriptor = typeof args[0] === 'number';
+      const access = { method, file: descriptor ? descriptors.get(args[0]) : args[0], descriptor };
+      accesses.push(access);
+      beforeAccess(method, args);
+      const result = original(...args);
+      if (method === 'openSync') {
+        descriptors.set(result, args[0]);
+        access.succeeded = true;
+        access.fd = result;
+      } else if (method === 'closeSync') access.fd = args[0];
+      return result;
+    }));
+  }
+  syncBuiltinESMExports();
+  try {
+    return { result: inspectIllustratedReportEvidence(options), accesses };
+  } finally {
+    for (const mocked of mocks.reverse()) mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+}
+
 function createReportEvidenceFixture() {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'illustrated-report-evidence-'));
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'illustrated-report-evidence-')));
   const htmlPath = path.join(root, 'report.html');
   const markdownPath = path.join(root, 'report.md');
   const artifactPath = path.join(root, 'figure.png');

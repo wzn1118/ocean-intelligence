@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { OCEAN_REPORT_SPEC } from './ocean-report-spec.mjs';
 import { UNIVERSAL_OCEAN_REPORT_SPEC } from './beibu-gulf-report-spec.mjs';
 import { WIND_REPORT_SPEC } from './wind-report-spec.mjs';
@@ -123,15 +123,19 @@ export function illustratedReportInstructions(contract) {
 }
 
 export function inspectIllustratedReportEvidence(options = {}) {
-  const htmlPath = resolvePath(options.htmlPath);
-  const markdownPath = resolvePath(options.markdownPath);
-  const manifestPath = resolvePath(options.manifestPath);
-  const outputDirectory = resolvePath(options.outputDirectory)
-    || (manifestPath ? path.dirname(manifestPath) : process.cwd());
+  const outputDirectory = inspectOutputDirectory(options.outputDirectory);
+  const inputPaths = Object.fromEntries(['htmlPath', 'markdownPath', 'manifestPath'].map((name) => [
+    name, inspectEvidencePath(options[name], outputDirectory),
+  ]));
+  const pathsOk = outputDirectory.ok && Object.values(inputPaths).every((location) => location.ok);
+  const pathViolations = [
+    ...outputDirectory.violations.map((violation) => `outputDirectory.${violation}`),
+    ...Object.entries(inputPaths).flatMap(([name, location]) => location.violations.map((violation) => `${name}.${violation}`)),
+  ];
   const toleranceMs = positiveInteger(options.freshnessToleranceMs, 2_000);
-  const html = readText(htmlPath);
-  const markdown = readText(markdownPath);
-  const manifestRead = readJson(manifestPath);
+  const html = readEvidence(inputPaths.htmlPath)?.toString('utf8') || '';
+  const markdown = readEvidence(inputPaths.markdownPath)?.toString('utf8') || '';
+  const manifestRead = readJson(inputPaths.manifestPath);
   const manifest = manifestRead.value;
   const htmlEvidence = parseOceanReportHtml(html);
   const { figures, claims } = htmlEvidence;
@@ -192,10 +196,12 @@ export function inspectIllustratedReportEvidence(options = {}) {
       id: `figures[${figureIndex}].exports[${artifactIndex}]`,
     })));
   const interactiveChecks = artifactChecks.filter((artifact) => artifact.format === 'html');
-  const reportFiles = [htmlPath, markdownPath].filter(Boolean).map((file) => ({ file, ...fileInfo(file) }));
+  const reportFiles = [inputPaths.htmlPath, inputPaths.markdownPath].map((location) => ({
+    file: location.file, ...location.info,
+  }));
   const freshness = inspectReportFreshness({
     generatedAt: manifest?.generated_at,
-    manifestPath,
+    manifest: inputPaths.manifestPath.info,
     files: [...reportFiles, ...artifactChecks.map((artifact) => ({
       file: artifact.file,
       present: artifact.present,
@@ -210,8 +216,10 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const artifactsOk = artifactChecks.length > 0 && artifactChecks.every((artifact) => artifact.ok)
     && interactiveChecks.length >= MINIMUM_INTERACTIVE_FIGURES;
   return {
-    ok: contentOk && htmlEvidence.ok && manifestRead.ok && claimsOk && figureLinksOk && figureEvidenceOk
+    ok: pathsOk && contentOk && htmlEvidence.ok && manifestRead.ok && claimsOk && figureLinksOk && figureEvidenceOk
       && artifactsOk && freshness.ok && oceanReportAudit.ok && matlabRuntimeAudit.ok,
+    pathsOk,
+    pathViolations,
     contentOk,
     htmlParsingOk: htmlEvidence.ok,
     htmlParsingViolations: htmlEvidence.violations,
@@ -247,15 +255,16 @@ function normalizeReportExports(exportsValue) {
 
 function inspectReportArtifact({ artifact, figure, outputDirectory, id }) {
   const relative = stringValue(artifact?.file);
-  const file = relative ? path.resolve(outputDirectory, relative) : undefined;
-  const safeRelative = relative && !path.isAbsolute(relative) && file && pathInside(outputDirectory, file);
-  const info = fileInfo(file);
+  const location = inspectEvidencePath(relative, outputDirectory, true);
+  const { file, info } = location;
+  const contents = readEvidence(location);
   const format = (stringValue(artifact?.format) || extensionFormat(relative)).toLowerCase();
   const bytesOk = info.present && Number.isInteger(artifact?.bytes) && artifact.bytes === info.bytes;
   const hashOk = info.present && /^[a-f\d]{64}$/iu.test(String(artifact?.sha256 || ''))
-    && sha256(file) === String(artifact.sha256).toLowerCase();
+    && contents !== undefined && createHash('sha256').update(contents).digest('hex') === String(artifact.sha256).toLowerCase();
   const metadataViolations = inspectArtifactMetadata(artifact, format);
-  const interactionQuality = format === 'html' && info.present ? inspectPointInteractionQuality({
+  const interactionQuality = format === 'html' && contents !== undefined ? inspectPointInteractionQuality({
+    html: contents.toString('utf8'),
     htmlPath: file,
     requireScientificEvidence: true,
     requireMatlabEvidence: true,
@@ -276,10 +285,10 @@ function inspectReportArtifact({ artifact, figure, outputDirectory, id }) {
   }
   const interactionOk = format !== 'html' || interactionQuality?.pointInteractionQualityOk === true;
   return {
-    id, file, format, ...info, pathOk: Boolean(safeRelative), bytesOk, hashOk,
+    id, file, format, ...info, pathOk: location.ok, pathViolations: location.violations, bytesOk, hashOk,
     metadataOk: metadataViolations.length === 0, metadataViolations,
     interactionOk, interactionQuality,
-    ok: Boolean(safeRelative) && bytesOk && hashOk && metadataViolations.length === 0 && interactionOk,
+    ok: location.ok && bytesOk && hashOk && metadataViolations.length === 0 && interactionOk,
   };
 }
 
@@ -508,10 +517,63 @@ function pathInside(root, candidate) {
   return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-function inspectReportFreshness({ generatedAt, manifestPath, files, toleranceMs }) {
+function inspectOutputDirectory(value) {
+  const directory = resolvePath(value);
+  const reject = (violation) => ({ ok: false, directory, violations: [violation] });
+  if (!directory) return reject('missing');
+  try {
+    const filesystemRoot = path.parse(directory).root;
+    let current = filesystemRoot;
+    let info = lstatSync(current);
+    for (const segment of path.relative(filesystemRoot, directory).split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      info = lstatSync(current);
+      if (info.isSymbolicLink()) return reject('symlink');
+      if (!info.isDirectory()) return reject('not_directory');
+    }
+    return { ok: true, directory, realDirectory: realpathSync(directory), identity: info, violations: [] };
+  } catch {
+    return reject('unavailable');
+  }
+}
+
+function inspectEvidencePath(value, outputDirectory, relativeOnly = false) {
+  const reference = stringValue(value);
+  let file;
+  const reject = (violation) => ({
+    ok: false, file, violations: [violation], info: { present: false, bytes: 0, mtimeMs: 0 },
+  });
+  if (!outputDirectory.ok) return reject('output_directory_invalid');
+  if (!reference) return reject('missing');
+  if (relativeOnly && (path.isAbsolute(reference) || path.win32.isAbsolute(reference))) return reject('absolute');
+  if (relativeOnly && reference.split(/[\\/]/u).includes('..')) return reject('traversal');
+  file = relativeOnly ? path.resolve(outputDirectory.directory, reference) : path.resolve(reference);
+  if (!pathInside(outputDirectory.directory, file)) return reject('outside_output_directory');
+  try {
+    const segments = path.relative(outputDirectory.directory, file).split(path.sep);
+    let current = outputDirectory.directory;
+    let info;
+    for (const [index, segment] of segments.entries()) {
+      current = path.join(current, segment);
+      info = lstatSync(current);
+      if (info.isSymbolicLink()) return reject('symlink');
+      if (index < segments.length - 1 && !info.isDirectory()) return reject('not_directory');
+    }
+    if (!info.isFile()) return reject('not_file');
+    const realFile = realpathSync(file);
+    if (!pathInside(outputDirectory.realDirectory, realFile)) return reject('outside_output_directory');
+    return {
+      ok: true, file, realFile, outputDirectory, identity: info, violations: [],
+      info: { present: true, bytes: info.size, mtimeMs: info.mtimeMs },
+    };
+  } catch {
+    return reject('unavailable');
+  }
+}
+
+function inspectReportFreshness({ generatedAt, manifest, files, toleranceMs }) {
   const violations = [];
   const generatedAtMs = Date.parse(String(generatedAt || ''));
-  const manifest = fileInfo(manifestPath);
   if (!Number.isFinite(generatedAtMs)) violations.push('generated_at.invalid');
   if (!manifest.present) violations.push('manifest.missing');
   if (Number.isFinite(generatedAtMs) && generatedAtMs > Date.now() + toleranceMs) violations.push('generated_at.future');
@@ -533,24 +595,44 @@ function inspectReportFreshness({ generatedAt, manifestPath, files, toleranceMs 
   return { ok: violations.length === 0 && files.length > 0, violations };
 }
 
-function readJson(file) {
-  if (!file || !existsSync(file)) return { ok: false };
-  try { return { ok: true, value: JSON.parse(readFileSync(file, 'utf8')) }; } catch { return { ok: false }; }
+function readJson(location) {
+  const contents = readEvidence(location);
+  try { return { ok: true, value: JSON.parse(contents?.toString('utf8')) }; } catch { return { ok: false }; }
 }
 
-function readText(file) {
-  try { return file ? readFileSync(file, 'utf8') : ''; } catch { return ''; }
-}
-
-function fileInfo(file) {
+function readEvidence(location) {
+  if (!location.ok || !Number.isInteger(constants.O_NOFOLLOW)) return undefined;
+  let descriptor;
   try {
-    const info = file ? statSync(file) : undefined;
-    return { present: Boolean(info?.isFile()), bytes: info?.isFile() ? info.size : 0, mtimeMs: info?.isFile() ? info.mtimeMs : 0 };
-  } catch { return { present: false, bytes: 0, mtimeMs: 0 }; }
+    if (!evidenceLocationUnchanged(location)) return undefined;
+    descriptor = openSync(location.realFile, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const info = fstatSync(descriptor);
+    if (!info.isFile() || !sameFileIdentity(info, location.identity)
+      || info.size !== location.info.bytes || info.mtimeMs !== location.info.mtimeMs
+      || !evidenceLocationUnchanged(location)) return undefined;
+    const contents = readFileSync(descriptor);
+    const after = fstatSync(descriptor);
+    if (after.size !== info.size || after.mtimeMs !== info.mtimeMs) return undefined;
+    return contents;
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
-function sha256(file) {
-  try { return createHash('sha256').update(readFileSync(file)).digest('hex'); } catch { return ''; }
+function evidenceLocationUnchanged(location) {
+  const root = inspectOutputDirectory(location.outputDirectory.directory);
+  if (!root.ok || root.realDirectory !== location.outputDirectory.realDirectory
+    || !sameFileIdentity(root.identity, location.outputDirectory.identity)) return false;
+  const current = inspectEvidencePath(location.file, root);
+  return current.ok && current.realFile === location.realFile
+    && sameFileIdentity(current.identity, location.identity)
+    && current.info.bytes === location.info.bytes && current.info.mtimeMs === location.info.mtimeMs;
+}
+
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 function resolvePath(value) {
