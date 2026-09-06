@@ -56,6 +56,9 @@ export const POINT_TEMPERATURE_INTERACTION_SPEC = String.raw`
 - 自包含交互 HTML 必须内嵌运行所需的数据、样式和脚本，离线打开即可使用，不得依赖 CDN、远程接口、本机服务、外部 JavaScript/CSS 文件或绝对文件路径。
 - 交互 HTML 必须保留全部逐点 hover/focus 提示、键盘导航、多系列图例和必要的无障碍语义；PNG/PDF 与 HTML 必须使用同一数据快照、单位、时间口径、QC 口径和系列编码。
 - 交互 HTML 的 html、body、main 或顶层 section 必须声明 data-snapshot-id、data-source、data-variable、data-unit、data-time-start、data-time-end、data-timezone="UTC"、data-spatial-coverage、data-qc-summary、data-uncertainty 和 data-anomaly-status，且 snapshot id 必须与 PNG/PDF 清单一致。
+- 顶层 data-time-start/data-time-end 是 coverage 端点，point-quality 与 report 共享 parseOceanEvidenceTime：仅接受有界格式 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm:ss[.1-3位小数][Z|±HH:mm|±HHmm]；日期时间必须完整到秒，可选小数仅 1-3 位。无后缀明确按 UTC，合法 offset 按其表示的原时刻换算，不依赖宿主 TZ；coverage 的 timezone 元数据仍声明 UTC。校验真实日历分量，拒绝无效日期、rollover、24:00 和超毫秒精度；结束时间不得早于开始时间。
+- 交互 HTML 顶层端点必须在解析后的实际 instant 上与所属 manifest figure 的 scientific_context.temporal_coverage.start/end 一致，允许同一时刻的合法 offset 写法。主报告 HTML figure 的 data-time-start/data-time-end 仍须与所属 manifest figure 逐字一致；不同 figure 之间、图件与总报告 requested/effective coverage 之间不要求所有时间窗相等。
+- coverage 端点解析与绑定不代表已逐条认证原始 point 时间；逐点提示、ObservationID 和源键检查仍按原契约执行，不能由端点通过推断 MATLAB 执行或视觉检查通过。
 - 只有真实 MATLAB 验证通过时，才可声明 data-authoritative-runtime="MATLAB"、data-matlab-release、data-runtime-status="passed"、data-execution-verified="true"、data-artifact-validation="passed" 和 data-visual-inspection="passed"；Octave、static-only、runtime_pending 或未审图状态不得伪装成通过。
 
 六、交付前验收
@@ -63,7 +66,7 @@ export const POINT_TEMPERATURE_INTERACTION_SPEC = String.raw`
 - 对过滤和排序后的数据逐点核对 data-point-index、ObservationID 与源键；模拟 brush/选择并确认返回的稳定 ID 不随显示顺序改变。
 - 重复触发回调，关闭图窗并制造一次预期异常，确认无残留图窗、回调或交互模式；分别记录 desktop 与 headless 的真实执行状态。
 - 对每张多系列图验证图例存在且系列集合完整；对交互 HTML 断网加载，确认无外部资源请求且交互仍可使用。
-- 核对交互 HTML 顶层科学上下文、MATLAB release、执行状态、制品校验和视觉检查字段，并与 figures.json、PNG、PDF 的 SHA-256、时间窗、空间范围、变量单位及 snapshot id 逐项一致。
+- 核对交互 HTML 顶层科学上下文、MATLAB release、执行状态、制品校验和视觉检查字段，并与所属 figures.json 图项、PNG、PDF 的 SHA-256、时间窗端点实际 instant、空间范围、变量单位及 snapshot id 逐项一致。
 - 任一温度点缺少 hover/focus 提示、任一必填字段缺失、任一多系列图缺少图例，或未交付自包含交互 HTML，均视为绘图交付不合格。
 `;
 

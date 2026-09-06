@@ -12,6 +12,8 @@ import { PHYSICAL_INTERPRETATION_IMPACT_SPEC } from './physical-interpretation-i
 import { ANOMALY_LINKAGE_REPORT_SPEC } from './anomaly-linkage-report-spec.mjs';
 import { POINT_TEMPERATURE_INTERACTION_SPEC } from './point-temperature-interaction-spec.mjs';
 import { inspectPointInteractionQuality } from './point-interaction-quality.mjs';
+import { parseOceanEvidenceTime } from './ocean-evidence-time.mjs';
+import { parseOceanReportHtml } from './ocean-report-html-parser.mjs';
 
 const REPORT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{7,79}$/u;
 export const MINIMUM_REPORT_VISUALS = 20;
@@ -92,7 +94,9 @@ export function illustratedReportInstructions(contract) {
     'Visuals must carry real explanatory value and be grounded in the report evidence. Do not use empty placeholders, repeated decorative graphics, or meaningless stock-like imagery.',
     'Every scientific conclusion must be encoded on a real HTML element with a unique data-claim-id, space-separated data-evidence-ids, and a substantive data-limitations value. Report prose, comments, hidden text, self-ratings, or statements that a check passed are not evidence.',
     'Every analytical <figure> must declare a unique data-figure-id matching a figure id in the freshly generated manifest, and its figcaption must state what is shown, the evidence window/sample/QC context, the supported conclusion, and limitations. A filename mention without a matching checked artifact does not establish correspondence.',
-    'Every analytical <figure> must also declare data-snapshot-id, data-variable, data-unit, data-time-start, data-time-end, data-spatial-coverage, data-qc-summary, data-uncertainty, data-anomaly-status and data-matlab-release. These values must agree with the figure scientific_context and runtime evidence in figures.json.',
+    'Every analytical <figure> must also declare data-snapshot-id, data-variable, data-unit, data-time-start, data-time-end, data-spatial-coverage, data-qc-summary, data-uncertainty, data-uncertainty-status, data-uncertainty-method, data-anomaly-status and data-matlab-release. These values must agree with the figure scientific_context and runtime evidence in figures.json.',
+    'data-uncertainty-status must exactly match the declared present/absent/unknown/not-evaluated status; data-uncertainty-method must exactly match the complete declared method. Only leading/trailing whitespace is trimmed; case and internal whitespace remain significant. data-uncertainty must retain a nonempty natural-language explanation, but cannot substitute for either machine field. Matching machine fields does not certify that the narrative is free of contradictions.',
+    'Coverage timestamps must be calendar-valid date-only or ISO seconds with at most three fractional digits and an optional legal offset; timestamps without a suffix use the declared UTC timezone. Main HTML time endpoints must match their figure declarations literally. Each interactive HTML export must represent the same start/end instants as its owning figure. Requested, effective and individual figure windows need not be identical.',
     `The manifest ocean_report object must record the named sea area, numeric bounds, all ${contract.requiredZoneCount} named zones, requested and effective UTC coverage, data sources with versions/access times, variables with quantities/units/source ids, and explicit anomaly, uncertainty and conclusion limitations. Unknown or unavailable evidence must remain explicit rather than fabricated.`,
     `Every figure must provide freshly hashed ${contract.requiredExportFormats.join(' and ').toUpperCase()} exports from the same snapshot. At least ${contract.minimumInteractiveFigures} point-capable figure must additionally provide a self-contained HTML export that passes complete hover/focus, stable ObservationID, scientific-context and MATLAB-evidence checks.`,
     `The manifest matlab_ci matrix must contain ${contract.requiredMatlabReleases.join(', ')} exactly once in required_releases and in runs. Each release must identify MATLAB as the authoritative runtime, record a reproducible command and toolboxes, and prove execution, artifact validation and visual inspection passed. Duplicate or conflicting release records, pending, static-only, failed or Octave evidence must not satisfy the report gate.`,
@@ -129,16 +133,15 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const markdown = readText(markdownPath);
   const manifestRead = readJson(manifestPath);
   const manifest = manifestRead.value;
-  const sanitizedHtml = stripNonEvidenceHtml(html);
-  const figures = extractFigureBlocks(sanitizedHtml);
-  const claims = extractAttributedTags(sanitizedHtml, 'data-claim-id');
+  const htmlEvidence = parseOceanReportHtml(html);
+  const { figures, claims } = htmlEvidence;
   const manifestFigures = Array.isArray(manifest?.figures) ? manifest.figures : [];
   const oceanReportAudit = inspectOceanReportMetadata(manifest?.ocean_report);
   const matlabRuntimeAudit = inspectMatlabRuntimeMatrix(manifest?.matlab_ci);
   const manifestFigureIds = new Set(manifestFigures.map((figure) => stringValue(figure?.id)).filter(Boolean));
   const declaredEvidenceIds = new Set([
     ...manifestFigureIds,
-    ...extractAttributedTags(sanitizedHtml, 'data-evidence-id')
+    ...htmlEvidence.evidence
       .map((entry) => stringValue(entry.attributes['data-evidence-id']))
       .filter(Boolean),
   ]);
@@ -158,15 +161,15 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const figureViolations = figures.flatMap((entry, index) => {
     const id = stringValue(entry.attributes['data-figure-id']);
     const manifestFigure = manifestFigures.find((figure) => stringValue(figure?.id) === id);
-    const caption = entry.body.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/iu)?.[1]
-      ?.replace(/<[^>]+>/gu, ' ').replace(/\s+/gu, ' ').trim() || '';
+    const caption = entry.caption;
     const violations = [];
     if (!id) violations.push(`figures[${index}].id`);
     else if (!manifestFigureIds.has(id)) violations.push(`figures[${index}].manifest_link`);
     if (caption.length < 40) violations.push(`figures[${index}].caption`);
     for (const attribute of [
       'data-snapshot-id', 'data-variable', 'data-unit', 'data-time-start', 'data-time-end',
-      'data-spatial-coverage', 'data-qc-summary', 'data-uncertainty', 'data-anomaly-status',
+      'data-spatial-coverage', 'data-qc-summary', 'data-uncertainty', 'data-uncertainty-status',
+      'data-uncertainty-method', 'data-anomaly-status',
       'data-matlab-release',
     ]) {
       if (!stringValue(entry.attributes[attribute])) violations.push(`figures[${index}].${attribute}`);
@@ -184,6 +187,7 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const artifactChecks = manifestFigures.flatMap((figure, figureIndex) => normalizeReportExports(figure?.exports)
     .map((artifact, artifactIndex) => inspectReportArtifact({
       artifact,
+      figure,
       outputDirectory,
       id: `figures[${figureIndex}].exports[${artifactIndex}]`,
     })));
@@ -206,9 +210,11 @@ export function inspectIllustratedReportEvidence(options = {}) {
   const artifactsOk = artifactChecks.length > 0 && artifactChecks.every((artifact) => artifact.ok)
     && interactiveChecks.length >= MINIMUM_INTERACTIVE_FIGURES;
   return {
-    ok: contentOk && manifestRead.ok && claimsOk && figureLinksOk && figureEvidenceOk
+    ok: contentOk && htmlEvidence.ok && manifestRead.ok && claimsOk && figureLinksOk && figureEvidenceOk
       && artifactsOk && freshness.ok && oceanReportAudit.ok && matlabRuntimeAudit.ok,
     contentOk,
+    htmlParsingOk: htmlEvidence.ok,
+    htmlParsingViolations: htmlEvidence.violations,
     manifestOk: manifestRead.ok,
     claimsOk,
     claimCount: claims.length,
@@ -231,28 +237,6 @@ export function inspectIllustratedReportEvidence(options = {}) {
   };
 }
 
-function stripNonEvidenceHtml(html) {
-  return html
-    .replace(/<!--[\s\S]*?-->/gu, '')
-    .replace(/<script\b[\s\S]*?<\/script>/giu, '')
-    .replace(/<style\b[\s\S]*?<\/style>/giu, '');
-}
-
-function extractFigureBlocks(html) {
-  return [...html.matchAll(/<figure\b([^>]*)>([\s\S]*?)<\/figure>/giu)]
-    .map((match) => ({ attributes: parseAttributes(match[1]), body: match[2] }));
-}
-
-function extractAttributedTags(html, attribute) {
-  const expression = new RegExp(`<[a-z][^>]*\\b${attribute}\\s*=\\s*(?:"[^"]*"|'[^']*')[^>]*>`, 'giu');
-  return [...html.matchAll(expression)].map((match) => ({ attributes: parseAttributes(match[0]) }));
-}
-
-function parseAttributes(tag) {
-  return Object.fromEntries([...tag.matchAll(/([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/gu)]
-    .map((match) => [match[1].toLowerCase(), match[2] ?? match[3] ?? '']));
-}
-
 function normalizeReportExports(exportsValue) {
   if (Array.isArray(exportsValue)) return exportsValue.filter((entry) => entry && typeof entry === 'object')
     .map((entry) => ({ ...entry, format: stringValue(entry.format) || extensionFormat(entry.file) }));
@@ -261,7 +245,7 @@ function normalizeReportExports(exportsValue) {
     .map(([format, entry]) => ({ ...entry, format: stringValue(entry.format) || format.toLowerCase() }));
 }
 
-function inspectReportArtifact({ artifact, outputDirectory, id }) {
+function inspectReportArtifact({ artifact, figure, outputDirectory, id }) {
   const relative = stringValue(artifact?.file);
   const file = relative ? path.resolve(outputDirectory, relative) : undefined;
   const safeRelative = relative && !path.isAbsolute(relative) && file && pathInside(outputDirectory, file);
@@ -276,6 +260,20 @@ function inspectReportArtifact({ artifact, outputDirectory, id }) {
     requireScientificEvidence: true,
     requireMatlabEvidence: true,
   }) : undefined;
+  if (format === 'html' && interactionQuality) {
+    const context = interactionQuality.scientificContext;
+    const coverage = figure?.scientific_context?.temporal_coverage;
+    if (!/^UTC(?:[+-]00(?::?00)?)?$/iu.test(stringValue(context?.timezone))) {
+      metadataViolations.push('html.temporal_coverage.timezone');
+    }
+    for (const [field, contextField] of [['start', 'timeStart'], ['end', 'timeEnd']]) {
+      const actual = parseOceanEvidenceTime(stringValue(context?.[contextField]), stringValue(context?.timezone));
+      const expected = parseOceanEvidenceTime(stringValue(coverage?.[field]), stringValue(coverage?.timezone));
+      if (!Number.isFinite(actual) || !Number.isFinite(expected) || actual !== expected) {
+        metadataViolations.push(`html.temporal_coverage.${field}.mismatch`);
+      }
+    }
+  }
   const interactionOk = format !== 'html' || interactionQuality?.pointInteractionQualityOk === true;
   return {
     id, file, format, ...info, pathOk: Boolean(safeRelative), bytesOk, hashOk,
@@ -432,8 +430,8 @@ function inspectArtifactMetadata(artifact, format) {
 }
 
 function inspectCoverage(coverage, prefix, violations, requireScope = false) {
-  const start = Date.parse(stringValue(coverage?.start));
-  const end = Date.parse(stringValue(coverage?.end));
+  const start = parseOceanEvidenceTime(stringValue(coverage?.start), stringValue(coverage?.timezone));
+  const end = parseOceanEvidenceTime(stringValue(coverage?.end), stringValue(coverage?.timezone));
   if (!Number.isFinite(start)) violations.push(`${prefix}.start`);
   if (!Number.isFinite(end)) violations.push(`${prefix}.end`);
   if (Number.isFinite(start) && Number.isFinite(end) && end < start) violations.push(`${prefix}.reversed`);
@@ -464,11 +462,8 @@ function inspectHtmlFigureCorrespondence(entry, figure, index, matlabRuntimeAudi
   for (const key of ['raw', 'valid', 'missing', 'qc_rejected']) {
     if (!qcCounts || qcCounts[key] !== context.qc?.[key]) violations.push(`figures[${index}].data-qc-summary.${key}.mismatch`);
   }
-  const uncertainty = stringValue(attributes['data-uncertainty']).toLowerCase();
-  if (!uncertainty.includes(stringValue(context.uncertainty?.status).toLowerCase())
-    || !uncertainty.includes(stringValue(context.uncertainty?.method).toLowerCase())) {
-    violations.push(`figures[${index}].data-uncertainty.mismatch`);
-  }
+  compare('data-uncertainty-status', context.uncertainty?.status);
+  compare('data-uncertainty-method', context.uncertainty?.method);
   compare('data-anomaly-status', context.anomaly?.status);
   const release = stringValue(attributes['data-matlab-release']);
   if (release !== stringValue(figure.runtime?.matlab_release)

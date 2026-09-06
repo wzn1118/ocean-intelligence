@@ -80,6 +80,9 @@ test('creates an adaptive illustrated report contract', () => {
   assert.match(OCEAN_REPORT_SPEC, /最终质量闸门/u);
   assert.match(instructions, /only a real MathWorks MATLAB run/u);
   assert.match(instructions, /data-claim-id/u);
+  assert.match(instructions, /data-uncertainty-status/u);
+  assert.match(instructions, /data-uncertainty-method/u);
+  assert.match(instructions, /cannot substitute for either machine field/u);
   assert.match(instructions, /generated_at/u);
   assert.match(instructions, /R2021a, R2024b, R2026a/u);
   assert.match(instructions, /ocean_report object/u);
@@ -573,6 +576,582 @@ test('synthetic variable catalog does not let HTML borrow a variable absent from
   assert.equal(result.oceanReportOk, true);
 });
 
+for (const declared of ['present', 'absent', 'unknown', 'not-evaluated']) {
+  for (const reported of ['present', 'absent', 'unknown', 'not-evaluated']) {
+    test(`synthetic uncertainty compares explicit status ${declared}/${reported}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      fixture.manifest.figures[0].scientific_context.uncertainty.status = declared;
+      setReportFigureAttribute(fixture, 'data-uncertainty-status', reported);
+      setReportFigureAttribute(fixture, 'data-uncertainty',
+        'Calibration evidence is limited; identifiers can be present while model uncertainty remains unknown.');
+      if (declared === reported) {
+        writeFixtureManifest(fixture);
+        const result = inspectIllustratedReportEvidence(fixture);
+        assert.equal(result.ok, true, JSON.stringify(result));
+      } else {
+        assertSyntheticUncertaintyRejected(fixture, 'data-uncertainty-status');
+      }
+    });
+  }
+}
+
+for (const [name, status, method, machineStatus, machineMethod, description] of [
+  ['not-present', 'present', 'Instrument accuracy metadata', 'not-present', 'Instrument accuracy metadata',
+    'Uncertainty is not-present; Instrument accuracy metadata.'],
+  ['absent-not-present', 'present', 'Instrument accuracy metadata', 'absent', 'Instrument accuracy metadata',
+    'Uncertainty is absent, not present; Instrument accuracy metadata.'],
+  ['present-not-absent', 'absent', 'Instrument accuracy metadata', 'present', 'Instrument accuracy metadata',
+    'Uncertainty is present, not absent; Instrument accuracy metadata.'],
+  ['known-not-unknown', 'unknown', 'Instrument accuracy metadata', 'known', 'Instrument accuracy metadata',
+    'Uncertainty is known, not unknown; Instrument accuracy metadata.'],
+  ['already-evaluated', 'not-evaluated', 'Instrument accuracy metadata', 'evaluated', 'Instrument accuracy metadata',
+    'Uncertainty has been evaluated; no longer not-evaluated; Instrument accuracy metadata.'],
+  ['negated-method', 'present', 'bootstrap', 'present', 'not-bootstrap', 'present; method=not-bootstrap'],
+  ['negated-multiword-method', 'present', 'Instrument accuracy metadata', 'present', 'bootstrap',
+    'Uncertainty is present; method is bootstrap, not Instrument accuracy metadata.'],
+  ['status-only-in-method', 'present', 'Metadata present in calibration report', 'absent', 'Metadata present in calibration report',
+    'Uncertainty is absent; method: Metadata present in calibration report.'],
+  ['word-in-present', 'present', 'bootstrap', 'representative', 'bootstrap', 'status=representative; bootstrap'],
+  ['word-in-absent', 'absent', 'bootstrap', 'absentee', 'bootstrap', 'status=absentee; bootstrap'],
+  ['word-in-unknown', 'unknown', 'bootstrap', 'unknownish', 'bootstrap', 'status=unknownish; bootstrap'],
+  ['word-in-not-evaluated', 'not-evaluated', 'bootstrap', 'not-evaluatedness', 'bootstrap', 'status=not-evaluatedness; bootstrap'],
+  ['word-in-method', 'present', 'bootstrap', 'present', 'nonbootstrap', 'present; nonbootstrap'],
+]) {
+  test(`synthetic uncertainty rejects R19 ${name} without narrative fallback`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    Object.assign(fixture.manifest.figures[0].scientific_context.uncertainty, { status, method });
+    setReportFigureAttribute(fixture, 'data-uncertainty-status', machineStatus);
+    setReportFigureAttribute(fixture, 'data-uncertainty-method', machineMethod);
+    setReportFigureAttribute(fixture, 'data-uncertainty', description);
+    assertSyntheticUncertaintyRejected(fixture, status === machineStatus ? 'data-uncertainty-method' : 'data-uncertainty-status');
+  });
+}
+
+for (const attribute of ['data-uncertainty-status', 'data-uncertainty-method']) {
+  test(`synthetic uncertainty requires ${attribute} even with the old complete free string`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace(new RegExp(` ${attribute}="[^"]*"`, 'u'), ''));
+    assertSyntheticUncertaintyRejected(fixture, attribute);
+  });
+}
+
+for (const [name, method, reported, passed] of [
+  ['trimmed', '  Instrument accuracy metadata \t', '\t Instrument accuracy metadata  ', true],
+  ['matching-internal-whitespace', 'Instrument  accuracy\tmetadata', 'Instrument  accuracy\tmetadata', true],
+  ['different-case', 'Instrument accuracy metadata', 'instrument accuracy metadata', false],
+  ['collapsed-internal-whitespace', 'Instrument  accuracy metadata', 'Instrument accuracy metadata', false],
+  ['expanded-internal-whitespace', 'Instrument accuracy metadata', 'Instrument  accuracy metadata', false],
+  ['method-suffix', 'bootstrap', 'bootstrap percentile intervals', false],
+]) {
+  test(`synthetic uncertainty ${name} uses only symmetric edge trimming`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures[0].scientific_context.uncertainty.method = method;
+    setReportFigureAttribute(fixture, 'data-uncertainty-status', '  present \t');
+    setReportFigureAttribute(fixture, 'data-uncertainty-method', reported);
+    setReportFigureAttribute(fixture, 'data-uncertainty', 'Only the supplied calibration records support this estimate.');
+    if (passed) {
+      writeFixtureManifest(fixture);
+      const result = inspectIllustratedReportEvidence(fixture);
+      assert.equal(result.ok, true, JSON.stringify(result));
+    } else {
+      assertSyntheticUncertaintyRejected(fixture, 'data-uncertainty-method');
+    }
+  });
+}
+
+for (const attribute of ['data-uncertainty', 'data-uncertainty-status', 'data-uncertainty-method']) {
+  for (const value of ['', ' \t\n ']) {
+    test(`synthetic uncertainty rejects blank ${attribute}=${JSON.stringify(value)}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      setReportFigureAttribute(fixture, attribute, value);
+      assertSyntheticUncertaintyRejected(fixture, attribute);
+    });
+  }
+}
+
+for (const method of ['', ' \t\n ']) {
+  test(`synthetic uncertainty retains the manifest nonempty-method gate for ${JSON.stringify(method)}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures[0].scientific_context.uncertainty.method = method;
+    setReportFigureAttribute(fixture, 'data-uncertainty-method', method);
+    const result = assertSyntheticIdentityRejected(fixture, 'figureEvidenceOk',
+      'manifest.figures[0].scientific_context.uncertainty.method');
+    assert.equal(result.figureLinksOk, false);
+  });
+}
+
+for (const [name, method, attribute] of [
+  ['named-amp', 'Instrument & calibration metadata', 'data-uncertainty-method="Instrument &amp; calibration metadata"'],
+  ['named-quot', 'Instrument "A" accuracy', 'data-uncertainty-method="Instrument &quot;A&quot; accuracy"'],
+  ['single-quoted-apos', "Instrument 'A' accuracy", "data-uncertainty-method='Instrument &apos;A&apos; accuracy'"],
+  ['decimal-amp', 'Instrument & calibration metadata', 'data-uncertainty-method="Instrument &#38; calibration metadata"'],
+  ['hex-amp', 'Instrument & calibration metadata', 'data-uncertainty-method="Instrument &#x26; calibration metadata"'],
+  ['decimal-letter', 'bootstrap', 'data-uncertainty-method="boot&#115;trap"'],
+  ['unquoted-hex-letter', 'bootstrap', 'data-uncertainty-method=boot&#x73;trap'],
+  ['unquoted-spaces', 'Instrument accuracy metadata', 'data-uncertainty-method=Instrument&#32;accuracy&#32;metadata'],
+  ['unquoted-tab', 'Instrument\taccuracy metadata', 'data-uncertainty-method=Instrument&#9;accuracy&#32;metadata'],
+  ['uppercase-name', 'Instrument accuracy metadata', 'DATA-UNCERTAINTY-METHOD="Instrument accuracy metadata"'],
+  ['quoted-greater-than', 'Estimate > calibration threshold', 'data-uncertainty-method="Estimate > calibration threshold"'],
+  ['literal-entity-decoded-once', 'Instrument &amp; calibration metadata', 'data-uncertainty-method="Instrument &amp;amp; calibration metadata"'],
+]) {
+  test(`synthetic HTML parsing accepts equivalent ${name} method`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures[0].scientific_context.uncertainty.method = method;
+    fixture.manifest.ocean_report.uncertainty.method = method;
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace(/ data-uncertainty-method="[^"]*"/u, () => ` ${attribute}`));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureLinksOk, true);
+    assert.deepEqual(result.figureViolations, []);
+  });
+}
+
+for (const [status, encoded] of [
+  ['present', 'pre&#115;ent'], ['absent', 'ab&#x73;ent'],
+  ['unknown', '&#117;nknown'], ['not-evaluated', 'not&#45;evaluated'],
+]) {
+  test(`synthetic HTML parsing accepts encoded unquoted ${status} and uppercase tags`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures[0].scientific_context.uncertainty.status = status;
+    fixture.manifest.ocean_report.uncertainty.status = status;
+    const html = readFileSync(fixture.htmlPath, 'utf8')
+      .replace('data-uncertainty-status="present"', `DATA-UNCERTAINTY-STATUS=${encoded}`)
+      .replace('<figure ', '<FIGURE ').replace('</figure>', '</FIGURE>');
+    writeFileSync(fixture.htmlPath, html);
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureCount, 1);
+    assert.deepEqual(result.figureViolations, []);
+  });
+}
+
+for (const [name, method, encoded] of [
+  ['source-spelling-is-not-dom-value', 'Instrument &amp; calibration metadata', 'Instrument &amp; calibration metadata'],
+  ['does-not-decode-twice', 'Instrument & calibration metadata', 'Instrument &amp;amp; calibration metadata'],
+]) {
+  test(`synthetic HTML parsing rejects ${name} method mismatch`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    fixture.manifest.figures[0].scientific_context.uncertainty.method = method;
+    fixture.manifest.ocean_report.uncertainty.method = method;
+    setReportFigureAttribute(fixture, 'data-uncertainty-method', encoded);
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureLinksOk, false);
+    assert.deepEqual(result.figureViolations, ['figures[0].data-uncertainty-method.mismatch']);
+    assert.equal(result.figureEvidenceOk, true);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const [name, attribute, replacement] of [
+  ['status-wrong-first', 'data-uncertainty-status', 'data-uncertainty-status="absent" data-uncertainty-status="present"'],
+  ['status-right-first', 'data-uncertainty-status', 'data-uncertainty-status="present" data-uncertainty-status="absent"'],
+  ['status-identical', 'data-uncertainty-status', 'data-uncertainty-status="present" data-uncertainty-status="present"'],
+  ['status-casefold', 'data-uncertainty-status', 'data-uncertainty-status="absent" DATA-UNCERTAINTY-STATUS="present"'],
+  ['status-unquoted-first', 'data-uncertainty-status', 'data-uncertainty-status=absent data-uncertainty-status="present"'],
+  ['status-unquoted-last', 'data-uncertainty-status', 'data-uncertainty-status="present" data-uncertainty-status=absent'],
+  ['method-wrong-first', 'data-uncertainty-method', 'data-uncertainty-method="bootstrap" data-uncertainty-method="Instrument accuracy metadata"'],
+  ['method-right-first', 'data-uncertainty-method', 'data-uncertainty-method="Instrument accuracy metadata" data-uncertainty-method="bootstrap"'],
+  ['method-identical', 'data-uncertainty-method', 'data-uncertainty-method="Instrument accuracy metadata" data-uncertainty-method="Instrument accuracy metadata"'],
+  ['narrative-blank-first', 'data-uncertainty', 'data-uncertainty="" data-uncertainty="Synthetic calibration limitations."'],
+]) {
+  test(`synthetic HTML parsing rejects duplicate ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace(new RegExp(` ${attribute}="[^"]*"`, 'u'), () => ` ${replacement}`));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, false);
+    assert.ok(Array.isArray(result.htmlParsingViolations));
+    assert.match(JSON.stringify(result.htmlParsingViolations), /duplicate-attribute/u);
+    assert.equal(result.figureEvidenceOk, true);
+    assert.equal(result.artifactsOk, true, JSON.stringify(result.artifactChecks));
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const [name, markup] of [
+  ['outside-figure', '<section id="first" id="second"></section>'],
+  ['inside-template', '<template><section id="same" id="same"></section></template>'],
+]) {
+  test(`synthetic HTML parsing rejects document duplicate attributes ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace('</body>', `${markup}</body>`));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, false);
+    assert.ok(Array.isArray(result.htmlParsingViolations));
+    assert.match(JSON.stringify(result.htmlParsingViolations), /duplicate-attribute/u);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const [name, opening, closing] of [
+  ['script', '<script type="text/plain">', '</script>'],
+  ['style', '<style>', '</style>'],
+  ['template', '<template>', '</template>'],
+  ['comment', '<!--', '-->'],
+]) {
+  test(`synthetic HTML parsing ignores extra forged evidence in ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    const figure = html.match(/<figure\b[\s\S]*?<\/figure>/u)[0];
+    const claim = html.match(/<p data-claim-id="claim-1"[\s\S]*?<\/p>/u)[0];
+    writeFileSync(fixture.htmlPath, html.replace('</body>', `${opening}${figure}${claim}${closing}</body>`));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureCount, 1);
+    assert.equal(result.claimCount, 1);
+    assert.deepEqual(result.figureViolations, []);
+    assert.deepEqual(result.claimViolations, []);
+  });
+
+  for (const kind of ['figure', 'claim']) {
+    test(`synthetic HTML parsing cannot use ${name} as the only ${kind} evidence`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      const html = readFileSync(fixture.htmlPath, 'utf8');
+      const expression = kind === 'figure' ? /<figure\b[\s\S]*?<\/figure>/u : /<p data-claim-id="claim-1"[\s\S]*?<\/p>/u;
+      writeFileSync(fixture.htmlPath, html.replace(expression, (markup) => `${opening}${markup}${closing}`));
+      writeFixtureManifest(fixture);
+      const result = inspectIllustratedReportEvidence(fixture);
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.equal(result.htmlParsingOk, true);
+      assert.deepEqual(result.htmlParsingViolations, []);
+      assert.equal(kind === 'figure' ? result.figureCount : result.claimCount, 0);
+      assert.equal(kind === 'figure' ? result.figureLinksOk : result.claimsOk, false);
+      assert.equal(result.figureEvidenceOk, true);
+      assert.equal(result.artifactsOk, true);
+      assert.equal(result.manifestFreshnessOk, true);
+    });
+  }
+
+  test(`synthetic HTML parsing cannot borrow evidence ids from ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8')
+      .replace('data-evidence-ids="fig-1"', 'data-evidence-ids="forged-only"')
+      .replace('</body>', `${opening}<span data-evidence-id="forged-only">Synthetic evidence</span>${closing}</body>`);
+    writeFileSync(fixture.htmlPath, html);
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.claimCount, 1);
+    assert.equal(result.claimsOk, false);
+    assert.deepEqual(result.claimViolations, ['claims[0].evidence_missing']);
+    assert.equal(result.figureLinksOk, true);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+
+  test(`synthetic HTML parsing excludes ${name} content from caption text`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    const caption = `<figcaption>Short.${opening}Synthetic calibration prose must not inflate visible caption length.${closing}</figcaption>`;
+    writeFileSync(fixture.htmlPath, html.replace(/<figcaption>[\s\S]*?<\/figcaption>/u, () => caption));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureCount, 1);
+    assert.equal(result.figureLinksOk, false);
+    assert.deepEqual(result.figureViolations, ['figures[0].caption']);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const [name, markup, accepted] of [
+  ['nested-visible-text', '<figcaption>Calibration <em>uncertainty</em> describes the observed sample &amp; its explicit limitations within this snapshot.</figcaption>', true],
+  ['decoded-short-text', `<figcaption>${'&#65;'.repeat(8)}</figcaption>`, false],
+  ['attribute-is-not-caption', '<span data-note="<figcaption>Calibration uncertainty for the observed sample has explicit limitations.</figcaption>">Short.</span>', false],
+]) {
+  test(`synthetic HTML parsing measures actual caption nodes for ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace(/<figcaption>[\s\S]*?<\/figcaption>/u, () => markup));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, accepted, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureLinksOk, accepted);
+    assert.deepEqual(result.figureViolations, accepted ? [] : ['figures[0].caption']);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const scope of ['requested_coverage', 'effective_coverage', 'figure']) {
+  for (const [field, value, violation] of [
+    ['start', '2026-02-30T00:00:00Z', 'start'],
+    ['start', '2026-02-29T00:00:00Z', 'start'],
+    ['start', '2026-13-03T00:00:00Z', 'start'],
+    ['start', '2026-09-03T00:00:00.0001Z', 'start'],
+    ['end', '2026-02-30T01:00:00Z', 'end'],
+    ['start', '2026-09-04T00:00:00Z', 'reversed'],
+    ['timezone', 'UTC+08:00', 'timezone'],
+  ]) {
+    test(`synthetic time rejects ${scope}.${field}=${value}`, (context) => {
+      const fixture = createSyntheticIdentityFixture(context);
+      if (scope === 'figure') setSyntheticFigureCoverage(fixture, { [field]: value });
+      else fixture.manifest.ocean_report[scope][field] = value;
+      writeFixtureManifest(fixture);
+      const result = inspectIllustratedReportEvidence(fixture);
+      const violations = scope === 'figure' ? result.figureEvidenceViolations : result.oceanReport.violations;
+      const prefix = scope === 'figure' ? 'manifest.figures[0].scientific_context.temporal_coverage' : `ocean_report.${scope}`;
+      assert.equal(result.ok, false);
+      assert.equal(scope === 'figure' ? result.figureEvidenceOk : result.oceanReportOk, false);
+      assert.ok(violations.includes(`${prefix}.${violation}`), JSON.stringify(violations));
+      assert.equal(result.figureLinksOk, true);
+      assert.ok(result.artifactChecks.every((artifact) => artifact.bytesOk && artifact.hashOk));
+      assert.equal(result.manifestFreshnessOk, true);
+    });
+  }
+}
+
+for (const [name, figureCoverage, interactionCoverage] of [
+  ['equivalent-figure-offset', { start: '2026-09-03T08:00:00+08:00', end: '2026-09-03T09:00:00+08:00' }, {}],
+  ['equivalent-interaction-offset', {}, { start: '2026-09-02T20:00:00-04:00', end: '2026-09-02T21:00:00-04:00' }],
+  ['mixed-suffix-UTC', { start: '2026-09-03T00:00:00', end: '2026-09-03T01:00:00Z' },
+    { start: '2026-09-03T00:00:00', end: '2026-09-03T01:00:00Z' }],
+  ['both-without-suffix', { start: '2026-09-03T00:00:00', end: '2026-09-03T01:00:00' },
+    { start: '2026-09-03T00:00:00', end: '2026-09-03T01:00:00' }],
+  ['date-only', { start: '2026-09-03', end: '2026-09-04' },
+    { start: '2026-09-03T00:00:00Z', end: '2026-09-04T00:00:00Z' }],
+  ['fractional-seconds', { start: '2026-09-03T00:00:00.0Z', end: '2026-09-03T01:00:00.00Z' },
+    { start: '2026-09-03T00:00:00.000Z', end: '2026-09-03T01:00:00.000Z' }],
+  ['UTC-zero-aliases', { timezone: 'UTC-00:00' }, { timezone: 'UTC+00:00' }],
+]) {
+  test(`synthetic time accepts ${name} by instant without rewriting main HTML`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    setSyntheticFigureCoverage(fixture, figureCoverage);
+    setSyntheticInteractionCoverage(fixture, interactionCoverage);
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.figureLinksOk, true);
+    assert.equal(result.artifactsOk, true);
+  });
+}
+
+test('synthetic time keeps requested, effective and figure windows independent', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  Object.assign(fixture.manifest.ocean_report.requested_coverage, { start: '2026-08-01', end: '2026-09-05' });
+  Object.assign(fixture.manifest.ocean_report.effective_coverage, { start: '2026-09-02', end: '2026-09-04' });
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+test('synthetic time retains equal endpoints with a consistent interactive snapshot', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  setSyntheticFigureCoverage(fixture, { end: '2026-09-03T00:00:00Z' });
+  const html = readFileSync(fixture.interactionPath, 'utf8').replaceAll('2026-09-03T01:00:00Z', '2026-09-03T00:00:00Z');
+  writeFileSync(fixture.interactionPath, html);
+  setSyntheticInteractionCoverage(fixture, { end: '2026-09-03T00:00:00Z' });
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+for (const [name, side, coverage, fields] of [
+  ['figure-2030', 'figure', { start: '2030-01-01T00:00:00Z', end: '2030-01-01T01:00:00Z' }, ['start', 'end']],
+  ['interaction-2030', 'interaction', { start: '2030-01-01T00:00:00Z', end: '2030-01-01T01:00:00Z' }, ['start', 'end']],
+  ['non-equivalent-offset', 'figure', { start: '2026-09-03T00:00:00+08:00', end: '2026-09-03T01:00:00+08:00' }, ['start', 'end']],
+  ['one-millisecond', 'interaction', { end: '2026-09-03T01:00:00.001Z' }, ['end']],
+  ['invalid-interaction-timezone', 'interaction', { timezone: 'UTC+08:00' }, ['timezone']],
+]) {
+  test(`synthetic time rejects ${name} despite matching bytes, hash and freshness`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const previousHash = fixture.manifest.figures[0].exports.html.sha256;
+    if (side === 'figure') setSyntheticFigureCoverage(fixture, coverage);
+    else setSyntheticInteractionCoverage(fixture, coverage);
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    const artifact = result.artifactChecks.find((entry) => entry.format === 'html');
+    assert.equal(result.ok, false);
+    assert.equal(result.artifactsOk, false);
+    assert.equal(result.figureEvidenceOk, true);
+    assert.equal(result.figureLinksOk, true);
+    assert.equal(result.oceanReportOk, true);
+    assert.equal(result.matlabRuntimeOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+    assert.equal(artifact.bytesOk, true);
+    assert.equal(artifact.hashOk, true);
+    assert.equal(artifact.metadataOk, false);
+    for (const field of fields) assert.ok(artifact.metadataViolations.some((value) => value.startsWith(`html.temporal_coverage.${field}`)),
+      JSON.stringify(artifact.metadataViolations));
+    if (side === 'figure') assert.equal(fixture.manifest.figures[0].exports.html.sha256, previousHash);
+    else assert.notEqual(fixture.manifest.figures[0].exports.html.sha256, previousHash);
+  });
+}
+
+for (const [field, attribute, coverageFields] of [
+  ['timeStart', 'data-time-start', ['start']],
+  ['timeEnd', 'data-time-end', ['end']],
+  ['timezone', 'data-timezone', ['timezone', 'start', 'end']],
+]) {
+  test(`synthetic time preserves missing ${field} diagnostics without defaulting the context`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.interactionPath, 'utf8');
+    writeFileSync(fixture.interactionPath, html.replace(new RegExp(` ${attribute}="[^"]*"`, 'u'), ''));
+    setSyntheticInteractionCoverage(fixture, {});
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    const artifact = result.artifactChecks.find((entry) => entry.format === 'html');
+    const quality = artifact.interactionQuality;
+    const violations = quality.checkResults['scientific-context'].violations;
+    assert.equal(result.ok, false);
+    assert.equal(result.artifactsOk, false);
+    assert.equal(result.figureEvidenceOk, true);
+    assert.equal(result.figureLinksOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+    assert.equal(artifact.bytesOk, true);
+    assert.equal(artifact.hashOk, true);
+    assert.equal(artifact.metadataOk, false);
+    assert.equal(artifact.interactionOk, false);
+    assert.equal(quality.scientificContext[field], '');
+    assert.equal(quality.scientificContextOk, false);
+    assert.ok(violations.some((violation) => violation.rule === 'scientific-context-field-missing'
+      && violation.field === field && violation.attribute === attribute), JSON.stringify(violations));
+    for (const coverageField of coverageFields) {
+      assert.ok(artifact.metadataViolations.some((value) => value.startsWith(`html.temporal_coverage.${coverageField}`)),
+        JSON.stringify(artifact.metadataViolations));
+    }
+  });
+}
+
+test('synthetic time rejects identical invalid endpoints on both sides and preserves the original context', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  const coverage = { start: '2026-02-30T00:00:00Z', end: '2026-02-30T01:00:00Z', timezone: 'UTC' };
+  setSyntheticFigureCoverage(fixture, coverage);
+  setSyntheticInteractionCoverage(fixture, coverage);
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  const artifact = result.artifactChecks.find((entry) => entry.format === 'html');
+  const quality = artifact.interactionQuality;
+  const violations = quality.checkResults['scientific-context'].violations;
+  assert.equal(result.ok, false);
+  assert.equal(result.figureEvidenceOk, false);
+  assert.equal(result.figureLinksOk, true);
+  assert.equal(result.artifactsOk, false);
+  assert.equal(result.manifestFreshnessOk, true);
+  assert.equal(artifact.bytesOk, true);
+  assert.equal(artifact.hashOk, true);
+  assert.equal(artifact.metadataOk, false);
+  assert.equal(artifact.interactionOk, false);
+  assert.equal(quality.scientificContextOk, false);
+  assert.equal(quality.scientificContext.timezone, coverage.timezone);
+  for (const [field, contextField] of [['start', 'timeStart'], ['end', 'timeEnd']]) {
+    assert.equal(quality.scientificContext[contextField], coverage[field]);
+    assert.ok(violations.some((violation) => violation.rule === 'scientific-time-invalid' && violation.field === contextField),
+      JSON.stringify(violations));
+    assert.ok(result.figureEvidenceViolations.includes(`manifest.figures[0].scientific_context.temporal_coverage.${field}`),
+      JSON.stringify(result.figureEvidenceViolations));
+    assert.ok(artifact.metadataViolations.includes(`html.temporal_coverage.${field}.mismatch`),
+      JSON.stringify(artifact.metadataViolations));
+  }
+});
+
+test('synthetic time still rejects equivalent but nonliteral main HTML endpoints', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  setReportFigureAttribute(fixture, 'data-time-start', '2026-09-03T08:00:00+08:00');
+  setReportFigureAttribute(fixture, 'data-time-end', '2026-09-03T09:00:00+08:00');
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, false);
+  assert.equal(result.figureLinksOk, false);
+  assert.equal(result.artifactsOk, true);
+  assert.ok(result.figureViolations.includes('figures[0].data-time-start.mismatch'));
+  assert.ok(result.figureViolations.includes('figures[0].data-time-end.mismatch'));
+});
+
+test('synthetic time binds each interactive export to its owning figure, not the report window', (context) => {
+  const fixture = createSyntheticIdentityFixture(context);
+  const secondFigure = structuredClone(fixture.manifest.figures[0]);
+  secondFigure.id = 'fig-2';
+  Object.assign(secondFigure.scientific_context.temporal_coverage, { start: '2030-01-01T00:00:00Z', end: '2030-01-01T01:00:00Z' });
+  const secondPath = path.join(fixture.root, 'second-interactive.html');
+  writeFileSync(secondPath, readFileSync(fixture.interactionPath, 'utf8').replaceAll('2026-09-03', '2030-01-01'));
+  Object.assign(secondFigure.exports.html, { file: path.basename(secondPath), bytes: statSync(secondPath).size, sha256: fileHash(secondPath) });
+  fixture.manifest.figures.push(secondFigure);
+  const html = readFileSync(fixture.htmlPath, 'utf8');
+  const secondBlock = html.match(/<figure\b[\s\S]*?<\/figure>/u)[0]
+    .replace('data-figure-id="fig-1"', 'data-figure-id="fig-2"').replaceAll('2026-09-03', '2030-01-01');
+  writeFileSync(fixture.htmlPath, html.replace('</body>', `${secondBlock}</body>`));
+  writeFixtureManifest(fixture);
+  const baseline = inspectIllustratedReportEvidence(fixture);
+  assert.equal(baseline.ok, true, JSON.stringify(baseline));
+  const firstExport = fixture.manifest.figures[0].exports.html;
+  fixture.manifest.figures[0].exports.html = secondFigure.exports.html;
+  secondFigure.exports.html = firstExport;
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, false);
+  assert.equal(result.artifactsOk, false);
+  assert.equal(result.figureLinksOk, true);
+  assert.equal(result.figureEvidenceOk, true);
+  assert.equal(result.manifestFreshnessOk, true);
+  const artifacts = result.artifactChecks.filter((entry) => entry.format === 'html');
+  assert.equal(artifacts.length, 2);
+  for (const artifact of artifacts) {
+    assert.equal(artifact.bytesOk, true);
+    assert.equal(artifact.hashOk, true);
+    assert.ok(artifact.metadataViolations.includes('html.temporal_coverage.start.mismatch'));
+    assert.ok(artifact.metadataViolations.includes('html.temporal_coverage.end.mismatch'));
+  }
+});
+
+function setSyntheticFigureCoverage(fixture, coverage) {
+  Object.assign(fixture.manifest.figures[0].scientific_context.temporal_coverage, coverage);
+  for (const field of ['start', 'end']) if (Object.hasOwn(coverage, field)) {
+    setReportFigureAttribute(fixture, `data-time-${field}`, coverage[field]);
+  }
+}
+
+function setSyntheticInteractionCoverage(fixture, coverage) {
+  let html = readFileSync(fixture.interactionPath, 'utf8');
+  for (const [field, attribute] of [['start', 'data-time-start'], ['end', 'data-time-end'], ['timezone', 'data-timezone']]) {
+    if (Object.hasOwn(coverage, field)) html = html.replace(new RegExp(`${attribute}="[^"]*"`, 'u'), `${attribute}="${coverage[field]}"`);
+  }
+  writeFileSync(fixture.interactionPath, html);
+  Object.assign(fixture.manifest.figures[0].exports.html, { bytes: statSync(fixture.interactionPath).size, sha256: fileHash(fixture.interactionPath) });
+}
+
+function assertSyntheticUncertaintyRejected(fixture, attribute) {
+  writeFixtureManifest(fixture);
+  const result = inspectIllustratedReportEvidence(fixture);
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.figureLinksOk, false);
+  assert.ok(result.figureViolations.some((violation) => violation.startsWith(`figures[0].${attribute}`)),
+    JSON.stringify(result.figureViolations));
+  assert.equal(result.figureEvidenceOk, true);
+  assert.equal(result.matlabRuntimeOk, true);
+  assert.equal(result.artifactsOk, true, JSON.stringify(result.artifactChecks));
+  assert.equal(result.manifestFreshnessOk, true);
+}
+
 function createSyntheticIdentityFixture(context, release = 'R2026a') {
   const fixture = createReportEvidenceFixture();
   context.after(() => rmSync(fixture.root, { recursive: true, force: true }));
@@ -620,7 +1199,7 @@ function createReportEvidenceFixture() {
   writeFileSync(htmlPath, [
     '<html><body>',
     '<p data-claim-id="claim-1" data-evidence-ids="fig-1" data-limitations="Only the observed UTC window is supported.">SST increased.</p>',
-    '<figure data-figure-id="fig-1" data-chart-type="line" data-chart-family="temporal" data-source="fixture" data-snapshot-id="snapshot-20260905" data-variable="sea_water_temperature" data-unit="degree_Celsius" data-time-start="2026-09-03T00:00:00Z" data-time-end="2026-09-03T01:00:00Z" data-spatial-coverage="Test Sea 120-121E 30-31N" data-qc-summary="raw=2 valid=2 missing=0 qc_rejected=0" data-uncertainty="present Instrument accuracy metadata" data-anomaly-status="not-evaluated" data-matlab-release="R2026a">',
+    '<figure data-figure-id="fig-1" data-chart-type="line" data-chart-family="temporal" data-source="fixture" data-snapshot-id="snapshot-20260905" data-variable="sea_water_temperature" data-unit="degree_Celsius" data-time-start="2026-09-03T00:00:00Z" data-time-end="2026-09-03T01:00:00Z" data-spatial-coverage="Test Sea 120-121E 30-31N" data-qc-summary="raw=2 valid=2 missing=0 qc_rejected=0" data-uncertainty="present Instrument accuracy metadata" data-uncertainty-status="present" data-uncertainty-method="Instrument accuracy metadata" data-anomaly-status="not-evaluated" data-matlab-release="R2026a">',
     '<figcaption>SST in degrees Celsius over the observed UTC window; n=24 after QC, supporting claim-1 while not establishing a long-term trend.</figcaption>',
     '</figure>',
     '</body></html>',
@@ -717,7 +1296,7 @@ function interactionFixtureHtml() {
     { id: 'P2', series: 'bottom', temperature: 18, unit: 'degree_Celsius', time: '2026-09-03T01:00:00Z', longitude: 120.4, latitude: 30.4, qc: 'good' },
   ];
   const pointMarkup = points.map((point, index) => `<g class="temperature-point" tabindex="0" role="img" data-point-index="${index}" data-observation-id="${point.id}" data-temperature="${point.temperature}" data-unit="${point.unit}" data-time="${point.time}" data-longitude="${point.longitude}" data-latitude="${point.latitude}" data-qc="${point.qc}" aria-label="点位 ${point.id} 温度 ${point.temperature} 单位 ${point.unit} 时间 ${point.time} 经度 ${point.longitude} 纬度 ${point.latitude} QC ${point.qc}"></g>`).join('');
-  return `<!doctype html><html><head><style>.temperature-point:hover{opacity:.8}.temperature-point:focus-visible{outline:2px solid black}</style></head><body data-snapshot-id="snapshot-20260905" data-source="source-1" data-variable="sea_water_temperature" data-unit="degree_Celsius" data-time-start="2026-09-03T00:00:00Z" data-time-end="2026-09-03T01:00:00Z" data-timezone="UTC" data-spatial-coverage="Test Sea 120-121E 30-31N" data-qc-summary="raw=2 valid=2 missing=0 qc_rejected=0" data-uncertainty="instrument accuracy; limited calibration evidence" data-anomaly-status="not-evaluated" data-authoritative-runtime="MATLAB" data-matlab-release="R2026a" data-runtime-status="passed" data-execution-verified="true" data-artifact-validation="passed" data-visual-inspection="passed"><svg>${pointMarkup}</svg><div class="legend" aria-label="系列图例"><span data-series-name="surface">surface</span><span data-series-name="bottom">bottom</span></div><div role="tooltip" hidden></div><script type="application/json">${JSON.stringify({ points })}</script><script>document.querySelectorAll('.temperature-point').forEach((point)=>{point.addEventListener('pointerenter',showTooltip);point.addEventListener('focus',showTooltip);});function showTooltip(){}</script></body></html>`;
+  return `<!doctype html><html><head><style>.temperature-point:hover{opacity:.8}.temperature-point:focus-visible{outline:2px solid black}</style></head><body data-snapshot-id="snapshot-20260905" data-source="source-1" data-variable="sea_water_temperature" data-unit="degree_Celsius" data-time-start="2026-09-03T00:00:00Z" data-time-end="2026-09-03T01:00:00Z" data-timezone="UTC" data-spatial-coverage="Test Sea 120-121E 30-31N" data-qc-summary="raw=2 valid=2 missing=0 qc_rejected=0" data-uncertainty="instrument accuracy; limited calibration evidence" data-uncertainty-status="present" data-uncertainty-method="Instrument accuracy metadata" data-anomaly-status="not-evaluated" data-authoritative-runtime="MATLAB" data-matlab-release="R2026a" data-runtime-status="passed" data-execution-verified="true" data-artifact-validation="passed" data-visual-inspection="passed"><svg>${pointMarkup}</svg><div class="legend" aria-label="系列图例"><span data-series-name="surface">surface</span><span data-series-name="bottom">bottom</span></div><div role="tooltip" hidden></div><script type="application/json">${JSON.stringify({ points })}</script><script>document.querySelectorAll('.temperature-point').forEach((point)=>{point.addEventListener('pointerenter',showTooltip);point.addEventListener('focus',showTooltip);});function showTooltip(){}</script></body></html>`;
 }
 
 function fileHash(file) {

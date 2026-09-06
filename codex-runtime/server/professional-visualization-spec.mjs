@@ -51,6 +51,10 @@ export const PROFESSIONAL_VISUALIZATION_SPEC = String.raw`
 六、海区报告与跨版本 MATLAB 证据合同
 - figures.json 必须包含 ocean_report：海区名称、合法经纬度边界、九区名称、请求与实际 UTC 时间窗、空间/深度覆盖、数据源版本与访问时间、变量物理量/单位/来源、异常方法、不确定性方法和结论限制。unknown、absent 和 not-evaluated 必须显式记录原因，不得删除字段。
 - 每个 figure 必须包含 scientific_context.snapshot_id、变量与单位、UTC 时间覆盖、海区与边界、raw/valid/missing/qc_rejected 计数、异常状态及方法、不确定性状态及方法；HTML figure 的 data-* 字段必须与清单一致。
+- 每个主报告 figure 必须声明 data-uncertainty-status 和 data-uncertainty-method：data-uncertainty-status 精确等于 scientific_context.uncertainty.status，data-uncertainty-method 精确等于 scientific_context.uncertainty.method；仅去除首尾空白，大小写和内部空白保持区分。data-uncertainty 保留非空自然语言说明，但不能替代这两个机器字段；不得通过 includes 子串命中认证语义，自由说明仍需人审，字段一致不等于说明科学有效。
+- 每个 figure 的 scientific_context.variables 名称必须非空且唯一，并逐项对照 ocean_report.variables 目录中的唯一同名条目，单位必须精确一致。允许按顺序选取目录子集；未知变量、重复名称、歧义目录或单位冲突必须拒绝。HTML 的 data-variable 必须属于该 figure 的变量列表，data-unit 与所选变量一致，不能仅在总目录中找到同名项就通过。
+- report 与 point-quality 的 coverage 端点共享 parseOceanEvidenceTime：仅接受有界格式 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm:ss[.1-3位小数][Z|±HH:mm|±HHmm]；日期时间必须完整到秒，可选小数仅 1-3 位。无后缀明确按 UTC，合法 offset 按其表示的原时刻换算，不依赖宿主 TZ；coverage 的 timezone 元数据仍声明 UTC。校验真实日历分量，拒绝无效日期、rollover、24:00 和超毫秒精度；结束时间不得早于开始时间。
+- 主报告 HTML figure 的 data-time-start/data-time-end 必须与所属 manifest figure 的 scientific_context.temporal_coverage.start/end 逐字一致；交互 HTML 导出的顶层端点则在解析后的实际 instant 上与所属 figure 一致，允许同一时刻的合法 offset 写法。不同 figure 之间、图件与总报告 requested/effective coverage 之间不要求所有时间窗相等。此端点解析与绑定不代表已逐条认证原始 point 时间，也不代表 MATLAB 执行或视觉检查通过。
 - 每个 figure 至少交付同一快照的 PNG 和 PDF，逐项核对相对路径、尺寸、DPI或页面尺寸、PDF文本证据、字节数、SHA-256和新鲜性。点位型图至少一张同时交付完全自包含交互 HTML，并通过全部点的 hover/focus、ObservationID、图例、离线资源、科学上下文和 MATLAB 证据检查。
 - 跨版本矩阵固定审计 R2021a、R2024b、R2026a。每个 release 必须记录 authoritative_runtime=MATLAB、runtime_status=passed、execution_verified=true、可复现命令、工具箱、artifact_validation=passed、visual_inspection=passed 和独立 evidence_id；任一 release 缺失、pending、static-only、failed 或以 Octave 代替时，整份报告不得标记为通过。
 - 可审计结论必须区分观测事实、派生统计和物理推断，并绑定 figure/evidence id、数据源、时间空间范围、单位、QC、异常/不确定性和限制。证据不足时结论状态降级，不得以格式完整替代科学有效性。

@@ -70,7 +70,7 @@ dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
 Round 13 passed this v2 path on R2021a/R2024b/R2026a. Those earlier archived
 reports retain 3/4 native-proof coverage, with comparison `not_verified`.
-Round 18 has 4/4 bound declarations on all three releases: every entry under
+Rounds 18 and 19 have 4/4 bound declarations on all three releases: every entry under
 `report-evidence.json`'s `runtime_evidence.figures` has
 `plot_data_evidence.status="runtime_declaration_verified"`. Do not upgrade old
 packages with evidence from this later run.
@@ -97,10 +97,11 @@ synthetic records, all 11 scatter pairs, unplotted input values, complete masks,
 statistics, release and input hashes. Model QC and uncertainty stay
 `not_provided`: never fill them with zeros or copy observation values. Missing
 observation uncertainty does not remove otherwise accepted scatter pairs.
-Run 33997547843 produced and consumed v3 on R2021a/R2024b/R2026a. Consumer mutation
-tests are distinct from `test_comparison_native_evidence`, which this run did
-not reach after the preceding metadata label-test failure. Its 4/4 declarations
-are not native mutation-test success, independent re-execution, or visual
+Runs 33997547843 and 33999054663 produced and consumed v3 on R2021a/R2024b/R2026a.
+Consumer mutation tests are distinct from `test_comparison_native_evidence`:
+round 18 never reached that suite; round 19 completed four positive cases and
+only 5/36 reader-negative cases before an invalid SizeData setter stopped it.
+The 4/4 declarations are not native mutation-test success, independent re-execution, or visual
 approval. Legacy packages without v3 remain compatible,
 with comparison unverified; malformed or inconsistent declarations fail.
 The fixtures remain synthetic, not measurements of real ocean conditions.
@@ -179,14 +180,16 @@ The existing strict SVG gate remains unchanged. The points-based text test also
 exposed a row/column broadcasting bug; normalizing both extents to four-element
 rows fixes the comparison without changing its 1e-6-pixel threshold.
 
-Round-18 run 33997547843 completed 19/20 primary stages on each of
+Round-19 run 33999054663 (remote commit `85ab9d20`) completed 19/20 primary stages on each of
 R2021a/R2024b/R2026a, 57/60 in total. `evaluator-runtime` passed on all three;
 each original `evaluator-result.json` has score 90 and status `runtime_pending`,
-not overall CI or visual approval. `family-b-runtime` failed with
-`test_comparison_record_metadata:MissingRejection` for `SampleLabels`: the test
-incorrectly rejected matching `cellstr` labels. Round 19 corrects only that test,
-with new licensed CI still pending; the subsequent native mutation test was not
-reached. Do not change helper APIs or report that test as passed.
+not overall CI or visual approval. Corrected `SampleLabels`/`cellstr` metadata
+tests passed. The native adversarial suite completed four positive cases and
+5/36 reader-negative cases, then `Scatter.SizeData=0` failed at its setter with
+`MATLAB:hg:shaped_arrays:PositiveOrNanVectorDataPredicate`, before the reader call.
+Round 20 substitutes setter-valid `NaN` and guards cleanup of deleted handles;
+remaining cases and final restoration/hash assertions still need licensed CI.
+Do not count setter failures as reader rejections or declare the suite passed.
 
 Existing appdata `OI_ColorAccessibilityRole="uncertainty"` annotates only actual
 helper-created uncertainty Lines. Round 18 completed the independent
@@ -195,7 +198,7 @@ releases. This does not change the audit algorithm, data, dimension gates or
 visual gates. Hidden handles or role declarations must not exempt arbitrary
 data lines or establish visual approval.
 
-Round 18 passed 12/12 external evaluator artifact checks on R2026a.
+Round 19 passed 12/12 external evaluator artifact checks on R2026a.
 R2021a/R2024b each retained four `pdf_font_embedding` failures, including
 unembedded Courier; the generated reports preserve those failures. The separate
 R2024b DISPLAY diagnostic still rejected an unsupported SVG `font` element with
@@ -205,6 +208,7 @@ profile. Neither that diagnostic nor external declarations replace visual audit.
 ## Commands
 
 ```bash
+npm ci --prefix codex-runtime/server --ignore-scripts --no-audit --no-fund
 python3 -m unittest discover -s codex-runtime/matlab/evals/tests -p 'test_*.py' -v
 python3 codex-runtime/matlab/evals/evaluate.py --runtime skip
 python3 codex-runtime/matlab/evals/evaluate.py --runtime require \

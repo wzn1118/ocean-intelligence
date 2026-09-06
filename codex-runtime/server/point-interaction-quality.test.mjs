@@ -71,15 +71,15 @@ test('accepts complete standalone point-temperature interaction HTML', () => {
   assert.equal(quality.pointInteractionQualityOk, true);
 });
 
-test('strict mode audits scientific context and real MATLAB evidence', () => {
+function scientificHtml({ timeStart = '2026-09-03T00:00:00Z', timeEnd = '2026-09-03T01:00:00Z', timezone = 'UTC' } = {}) {
   const scientificAttributes = [
     'data-snapshot-id="snapshot-20260905"',
     'data-source="source-1"',
     'data-variable="sea_water_temperature"',
     'data-unit="degree_Celsius"',
-    'data-time-start="2026-09-03T00:00:00Z"',
-    'data-time-end="2026-09-03T01:00:00Z"',
-    'data-timezone="UTC"',
+    `data-time-start="${timeStart}"`,
+    `data-time-end="${timeEnd}"`,
+    `data-timezone="${timezone}"`,
     'data-spatial-coverage="Test Sea 120-121E 30-31N"',
     'data-qc-summary="raw=2 valid=2 missing=0 qc_rejected=0"',
     'data-uncertainty="instrument accuracy; calibration evidence limited"',
@@ -91,7 +91,11 @@ test('strict mode audits scientific context and real MATLAB evidence', () => {
     'data-artifact-validation="passed"',
     'data-visual-inspection="passed"',
   ].join(' ');
-  const html = validHtml().replace('<body>', `<body ${scientificAttributes}>`);
+  return validHtml().replace('<body>', `<body ${scientificAttributes}>`);
+}
+
+test('strict mode audits scientific context and real MATLAB evidence', () => {
+  const html = scientificHtml();
   const quality = inspectPointInteractionQuality({ html, requireScientificEvidence: true, requireMatlabEvidence: true });
   assert.equal(quality.scientificContextOk, true, JSON.stringify(quality.checkResults['scientific-context']));
   assert.equal(quality.matlabEvidenceOk, true, JSON.stringify(quality.checkResults['matlab-evidence']));
@@ -105,6 +109,42 @@ test('strict mode audits scientific context and real MATLAB evidence', () => {
   assert.equal(octave.matlabEvidenceOk, false);
   assert.equal(octave.checkResults['matlab-evidence'].violations[0].rule, 'authoritative-runtime-not-matlab');
 });
+
+for (const [timeStart, timeEnd, timezone] of [
+  ['2026-09-03T00:00:00', '2026-09-03T01:00:00Z', 'UTC'],
+  ['2026-09-03', '2026-09-03', 'UTC'],
+  ['2026-09-03T08:00:00+08:00', '2026-09-03T01:00:00Z', 'UTC'],
+  ['2024-02-29T00:00:00.1Z', '2024-02-29T00:00:00.100Z', 'UTC+00:00'],
+]) {
+  test(`scientific context uses explicit UTC for ${timeStart} through ${timeEnd}`, () => {
+    const quality = inspectPointInteractionQuality({
+      html: scientificHtml({ timeStart, timeEnd, timezone }), requireScientificEvidence: true,
+    });
+    assert.equal(quality.scientificContextOk, true, JSON.stringify(quality.checkResults['scientific-context']));
+    assert.equal(quality.scientificContext.timeStart, timeStart);
+    assert.equal(quality.scientificContext.timeEnd, timeEnd);
+  });
+}
+
+for (const [overrides, rule, field] of [
+  [{ timeStart: '2026-02-30T00:00:00Z' }, 'scientific-time-invalid', 'timeStart'],
+  [{ timeEnd: '2026-02-29T01:00:00Z' }, 'scientific-time-invalid', 'timeEnd'],
+  [{ timeStart: '2026-09-03T00:00:00.0001Z' }, 'scientific-time-invalid', 'timeStart'],
+  [{ timeStart: '2026-09-03T24:00:00Z' }, 'scientific-time-invalid', 'timeStart'],
+  [{ timeStart: '2026-09-03T02:00:00', timeEnd: '2026-09-03T01:00:00Z' }, 'scientific-time-reversed'],
+  [{ timeStart: '2026-09-03T08:00:00-08:00', timeEnd: '2026-09-03T01:00:00Z' }, 'scientific-time-reversed'],
+  [{ timezone: 'UTC+08:00' }, 'scientific-timezone-not-utc'],
+]) {
+  test(`scientific context rejects ${JSON.stringify(overrides)}`, () => {
+    const quality = inspectPointInteractionQuality({
+      html: scientificHtml(overrides), requireScientificEvidence: true,
+    });
+    assert.equal(quality.scientificContextOk, false);
+    assert.equal(quality.pointInteractionQualityOk, false);
+    assert.ok(quality.checkResults['scientific-context'].violations.some((violation) =>
+      violation.rule === rule && (field === undefined || violation.field === field)));
+  });
+}
 
 test('rejects duplicate, missing and mismatched stable observation identities', () => {
   const duplicatePoints = validPoints();

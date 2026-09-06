@@ -23,12 +23,14 @@ baseline = oi_plot_comparison(baselineAxes, observations, models, baselineOption
 assert(isempty(baseline.UncertaintyGraphics) && ~any(baseline.Uncertainty.GraphicsMask), ...
     "test_comparison_uncertainty:NoUncertaintyLines", "Absent U must not create any uncertainty line");
 assert_color_roles(baseline);
+assert_legend_font(baseline, theme);
 
 [figureHandle, axesHandle, figureCleanup] = make_axes();
 result = oi_plot_comparison(axesHandle, observations, models, options);
-assert_observation_case(result, baseline, observations, models);
+assert_observation_case(result, baseline, observations, models, theme);
 test_uncertainty_role_audit(result);
-assert_observation_case(result, baseline, observations, models);
+assert_observation_case(result, baseline, observations, models, theme);
+test_nondefault_legend_font(observations, models, options, baseline);
 test_qc_policy(observations, models, options);
 test_missing_and_zero_uncertainty(theme);
 test_default_both(theme);
@@ -40,7 +42,7 @@ entry = oi_export_figure(figureHandle, outputDirectory, "synthetic-observation-u
     2400, 1500, 300, "Title", options.Title, ...
     "Source", "synthetic observation-only uncertainty regression; not ocean observations", ...
     "Theme", theme.Name, "ExportSVG", true);
-assert_observation_case(result, baseline, observations, models);
+assert_observation_case(result, baseline, observations, models, theme);
 nativeLines = read_lines(result.UncertaintyGraphics);
 entry.comparison_uncertainty_evidence = struct( ...
     "schema_version", 1, "data_source", "synthetic benchmark, not observed ocean conditions", ...
@@ -101,7 +103,7 @@ options = struct("PairingRule", "inner-key", "PairKeys", "Key", ...
     "Title", "Synthetic observation-only uncertainty");
 end
 
-function assert_observation_case(result, baseline, observations, models)
+function assert_observation_case(result, baseline, observations, models, theme)
 assert(isequal(result.ObservationPairIndices, (1:6)') ...
     && isequal(result.ModelPairIndices, [6; 4; 2; 3; 1; 5]), ...
     "test_comparison_uncertainty:PairOrder", "Inner-key pairing must preserve observation row order");
@@ -126,7 +128,7 @@ assert(numel(result.Scatter) == 1 && isgraphics(result.Scatter, "scatter") ...
 assert(string(result.UncertaintyType) == "standard-uncertainty" ...
     && string(result.UncertaintyUnit) == "degC" && isnan(result.ConfidenceLevel), ...
     "test_comparison_uncertainty:Definition", "Standard uncertainty is not SD, SEM or a confidence interval");
-assert_observation_metadata(result, observations.Uncertainty(1:6), logical([1; 1; 0; 0; 0; 0]));
+assert_observation_metadata(result, observations.Uncertainty(1:6), logical([1; 1; 0; 0; 0; 0]), theme);
 assert_horizontal_lines(result, [-1 7; -1 3], [3.5; 1.5]);
 assert_limits(result, [-1; 7]);
 assert(result.Limits(1) > -2 && result.Limits(2) < 8, ...
@@ -135,7 +137,10 @@ assert(observations.Uncertainty(4) == 100 && isnan(models.Model(3)), ...
     "test_comparison_uncertainty:MissingModelInput", "The missing-model row must retain real observation U");
 end
 
-function assert_observation_metadata(result, expectedValues, expectedMask)
+function assert_observation_metadata(result, expectedValues, expectedMask, theme)
+if nargin < 4
+    theme = oi_ocean_theme();
+end
 metadata = result.Uncertainty;
 assert(string(metadata.Sides) == "observation" ...
     && string(metadata.Observation.Status) == "provided" ...
@@ -149,7 +154,8 @@ assert(string(metadata.Sides) == "observation" ...
     "Result must retain observation U on missing-model rows and never fabricate model magnitudes");
 titleHandle = result.Legend.Title;
 titleLines = string(titleHandle.String);
-theme = oi_ocean_theme();
+assert_legend_font(result, theme);
+assert_uncertainty_color(result, theme);
 assert(isscalar(titleHandle) && isa(titleHandle, "matlab.graphics.illustration.legend.Text") ...
     && string(result.Legend.Visible) == "on" ...
     && string(titleHandle.Visible) == "on" ...
@@ -160,6 +166,47 @@ assert(isscalar(titleHandle) && isa(titleHandle, "matlab.graphics.illustration.l
     && string(titleHandle.FontName) == string(theme.FontName), ...
     "test_comparison_uncertainty:NativeExplanation", ...
     "The native legend title must explicitly distinguish observed standard uncertainty from absent model U");
+end
+
+function assert_legend_font(result, theme)
+assert(isgraphics(result.Legend, "legend") ...
+    && string(result.Legend.FontName) == string(theme.FontName) ...
+    && result.Legend.FontSize == theme.FontSize, ...
+    "test_comparison_uncertainty:LegendFont", ...
+    "Legend font must match the explicit theme before and after styling or export");
+end
+
+function assert_uncertainty_color(result, theme)
+for handleIndex = 1:numel(result.UncertaintyGraphics)
+    handle = result.UncertaintyGraphics(handleIndex);
+    assert(isgraphics(handle, "line") && isequal(handle.Color, theme.TextColor), ...
+        "test_comparison_uncertainty:UncertaintyColor", ...
+        "Every actual uncertainty Line must use the selected theme TextColor before and after export");
+end
+end
+
+function test_nondefault_legend_font(observations, models, options, baseline)
+theme = options.Theme;
+theme.FontSize = theme.FontSize + 2;
+theme.TextColor = [0.12 0.18 0.10];
+options.Theme = theme;
+[~, axesHandle, cleanup] = make_axes();
+result = oi_plot_comparison(axesHandle, observations, models, options);
+drawnow;
+assert_observation_case(result, baseline, observations, models, theme);
+originalState = native_state(result);
+axesHandle.FontSize = theme.FontSize + 4;
+drawnow;
+assert(axesHandle.FontSize == theme.FontSize + 4, ...
+    "test_comparison_uncertainty:AxesFontProbe", "The axes font perturbation must actually take effect");
+assert_observation_case(result, baseline, observations, models, theme);
+oi_apply_axes(axesHandle, theme);
+drawnow;
+assert_observation_case(result, baseline, observations, models, theme);
+assert(isequaln(native_state(result), originalState), ...
+    "test_comparison_uncertainty:FontDataMutation", ...
+    "Explicit legend fonts and axes restyling must not change native data, UserData, masks or metrics");
+clear cleanup;
 end
 
 function assert_horizontal_lines(result, expectedX, expectedY)
@@ -349,6 +396,8 @@ assert(isequaln(lines.x, expectedX) && isequaln(lines.y, expectedY) ...
     "test_comparison_uncertainty:BothCoordinates", "Both-sided native lines must retain horizontal and vertical U");
 assert_color_roles(result);
 assert_limits(result, [0.75; 4.5]);
+assert_legend_font(result, theme);
+assert_uncertainty_color(result, theme);
 assert(string(result.Uncertainty.Sides) == "both" ...
     && string(result.Uncertainty.Observation.Status) == "provided" ...
     && string(result.Uncertainty.Model.Status) == "provided" ...
@@ -364,6 +413,8 @@ assert(~contains(strjoin(string(result.Legend.Title.String), " "), "not provided
 options.UncertaintySides = "both";
 explicit = oi_plot_comparison(explicitAxes, observations, models, options);
 assert_color_roles(explicit);
+assert_legend_font(explicit, theme);
+assert_uncertainty_color(explicit, theme);
 assert(isequaln(explicit.Metrics, result.Metrics) ...
     && isequal(explicit.PairedMask, result.PairedMask) ...
     && isequaln(read_lines(explicit.UncertaintyGraphics), lines), ...

@@ -1,0 +1,8 @@
+{
+  "name": "ocean-codex-runtime-server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "parse5": "7.3.0"
+  }
+}

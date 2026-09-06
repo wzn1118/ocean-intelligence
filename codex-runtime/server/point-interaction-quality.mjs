@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { parseOceanEvidenceTime } from './ocean-evidence-time.mjs';
 
 export const POINT_INTERACTION_CHECK_IDS = Object.freeze([
   'html-readable',
@@ -467,8 +468,8 @@ function inspectScientificContext(html) {
     field,
     attribute,
   }]);
-  const start = Date.parse(context.timeStart);
-  const end = Date.parse(context.timeEnd);
+  const start = parseOceanEvidenceTime(context.timeStart, context.timezone);
+  const end = parseOceanEvidenceTime(context.timeEnd, context.timezone);
   if (context.timeStart && !Number.isFinite(start)) violations.push({ rule: 'scientific-time-invalid', field: 'timeStart' });
   if (context.timeEnd && !Number.isFinite(end)) violations.push({ rule: 'scientific-time-invalid', field: 'timeEnd' });
   if (Number.isFinite(start) && Number.isFinite(end) && end < start) violations.push({ rule: 'scientific-time-reversed' });

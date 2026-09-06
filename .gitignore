@@ -7,6 +7,7 @@ backend/**/__pycache__/
 backend/.pytest_cache/
 backend/.cache/
 frontend/node_modules/
+codex-runtime/server/node_modules/
 frontend/dist/
 frontend/output/
 frontend/test-results/

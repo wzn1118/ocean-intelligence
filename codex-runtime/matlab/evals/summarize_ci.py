@@ -27,14 +27,27 @@ DISPLAY_FILE = "display-comparison/display-rendering.json"
 DISPLAY_CASES = ("publication", "native-pdf-page-probe", "vector-text-alignment-probe")
 DISPLAY_STATUSES = ("running", "completed_pending_external_review", "completed_with_failures")
 DISPLAY_CASE_STATUSES = ("pending", "running", "export_checks_completed", "failed")
+CANVAS_REPORT = "canvas-extent-experiment/canvas-extent-experiment.json"
+CANVAS_FILES = {
+    "primary": "native-pdf-page-probe/" + CANVAS_REPORT,
+    "display": "display-comparison/native-pdf-page-probe/" + CANVAS_REPORT,
+}
+CANVAS_CANDIDATES = ("panel-canvas-inset-0pt", "panel-canvas-inset-3pt")
+CANVAS_GEOMETRY = ("geometry_before_pdf", "geometry_after_pdf", "geometry_after_png")
+CANVAS_MAX_BYTES = 4 * 1024 * 1024
+CANVAS_NOTICE = (
+    "仅转述固定路径 JSON 的本地声明并检查声明一致性，不重跑 MATLAB；"
+    "不读取逐候选文件，不独立核验文件哈希、字体、页面尺寸或视觉效果。"
+    "诊断失败不改变主状态、阶段分母、原始评分或视觉审核；缺失记 not_run。"
+)
 NOTICE = (
     "CI 状态为本地证据推断，未提供 GitHub 状态、未查询远端，不重新验真。"
     "已知后处理失败优先于缺少视觉审核的 pending。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
     "分数与视觉审核仅转述评分器，缺少证据为 pending。"
     "自动产物检查 passed 也不代表人工视觉审核通过。"
     "native-pdf-page-probe 的主阶段和 DISPLAY 回调只覆盖原三候选；"
-    "本汇总未读取 canvas-extent-experiment 的补充实验状态。"
-    "如有该实验，须另查其 canvas-extent-experiment.json、逐候选文件和错误日志；"
+    "canvas-extent-experiment 另表转述 primary/display 固定路径的补充实验声明。"
+    + CANVAS_NOTICE +
     "缺失、失败或不完整实验不能从主阶段 passed 推断成功。"
 )
 
@@ -432,6 +445,239 @@ def summarize_display_diagnostics(directory: Path, release: str) -> dict:
     return result
 
 
+def canvas_fields(record: Any, source: str, issues: list, strings: tuple,
+                  booleans: tuple = ()) -> dict:
+    if not isinstance(record, dict):
+        issue(issues, source, "ci_summary:InvalidCanvasDeclaration", "诊断记录必须为对象")
+        record = {}
+    result = {}
+    for keys, expected_type in ((strings, str), (booleans, bool)):
+        for key in keys:
+            value = record.get(key)
+            if type(value) is not expected_type:
+                issue(issues, source, "ci_summary:InvalidCanvasDeclaration", key + " 类型错误或缺失")
+                value = None
+            result[key] = first_line(value) if value is not None and (
+                key.startswith("error_") or key == "inspection_error") else value
+    return result
+
+
+def canvas_errors(record: dict, source: str, issues: list, failed: bool = False) -> None:
+    if failed or record.get("error_identifier") or record.get("error_message"):
+        issue(issues, source, record.get("error_identifier") or "ci_summary:CanvasReportedFailure",
+              record.get("error_message") or "本地声明失败，未提供错误消息")
+
+
+def summarize_canvas_geometry(record: Any, source: str, issues: list) -> dict:
+    if record == {}:
+        return {"status": "not_run", "reported_status": None,
+                "error_identifier": "", "error_message": ""}
+    before = len(issues)
+    result = canvas_fields(record, source, issues, ("status", "error_identifier", "error_message"))
+    result["reported_status"] = result["status"]
+    if result["status"] not in ("captured", "capture_failed"):
+        issue(issues, source, "ci_summary:InvalidCanvasGeometry", "无效几何采集声明状态")
+    canvas_errors(result, source, issues, result["status"] == "capture_failed")
+    if len(issues) > before:
+        result["status"] = "failed"
+    return result
+
+
+def summarize_canvas_artifact(record: Any, identifier: str, format_name: str,
+                              source: str, issues: list) -> dict:
+    before = len(issues)
+    result = canvas_fields(record, source, issues, (
+        "status", "file", "requested_api", "export_api", "export_object_class", "sha256",
+        "inspection_status", "inspection_error", "error_identifier", "error_message",
+    ), ("api_invoked", "export_call_succeeded", "file_exists", "pdf_header_present"))
+    result["reported_status"] = result["status"]
+    record = record if isinstance(record, dict) else {}
+    size = record.get("bytes")
+    result["bytes"] = size if type(size) is int and size >= 0 else None
+    pixels = record.get("png_pixels")
+    valid_pixels = (isinstance(pixels, list) and len(pixels) == 2
+                    and all(type(value) is int and value > 0 for value in pixels))
+    is_pdf = format_name == "pdf"
+    expected_api = "exportgraphics" if is_pdf else "print"
+    expected_file = identifier + ("/native.pdf" if is_pdf else "/native-reference.png")
+    expected_request = "exportgraphics(panel, ContentType=vector)" if is_pdf else "print(figure, -dpng, -r300)"
+    status = result["reported_status"]
+    attempted = status in ("exported", "failed")
+    dormant = status in ("not_attempted", "skipped", "not_attempted_setup_failed")
+    if (not (attempted or dormant) or result["file"] != expected_file
+            or result["requested_api"] != expected_request or result["bytes"] is None
+            or (pixels != [] and not valid_pixels)):
+        issue(issues, source, "ci_summary:InvalidCanvasArtifact", "无效产物状态、路径、调用声明或大小类型")
+    if attempted:
+        if (result["api_invoked"] is not True or result["export_api"] != expected_api
+                or not result["export_object_class"]):
+            issue(issues, source, "ci_summary:InconsistentCanvasArtifact", "已尝试状态与 API 调用声明不一致")
+        inspection = result["inspection_status"]
+        allowed_inspections = ("file_missing", "read_failed_external_check_required", *(
+            ("literal_values_only_external_check_required", "no_literal_mediabox_external_check_required")
+            if is_pdf else ("png_header_only_visual_check_required",)))
+        if (inspection not in allowed_inspections
+                or bool(result["inspection_error"]) != (inspection == "read_failed_external_check_required")
+                or (result["file_exists"] is False and (
+                    inspection != "file_missing" or result["bytes"] != 0 or result["sha256"]
+                    or result["pdf_header_present"] or pixels != []))
+                or (result["file_exists"] is True and inspection == "file_missing")):
+            issue(issues, source, "ci_summary:InconsistentCanvasArtifact", "文件存在性与本地读取声明不一致")
+        digest = result["sha256"]
+        complete = (result["export_call_succeeded"] is True and result["file_exists"] is True
+                    and result["bytes"] is not None and result["bytes"] > 0
+                    and isinstance(digest, str) and len(digest) == 64
+                    and all(character in "0123456789abcdefABCDEF" for character in digest)
+                    and not result["inspection_error"]
+                    and (result["pdf_header_present"] is True if is_pdf else valid_pixels))
+        if (status == "exported") != complete:
+            issue(issues, source, "ci_summary:InconsistentCanvasArtifact", "exported 与调用及文件声明不一致")
+    elif dormant:
+        if (any(result[key] is not False for key in (
+                "api_invoked", "export_call_succeeded", "file_exists", "pdf_header_present"))
+                or any(result[key] != "" for key in (
+                    "export_api", "export_object_class", "sha256", "inspection_error"))
+                or result["bytes"] != 0 or pixels != [] or result["inspection_status"] != "pending"):
+            issue(issues, source, "ci_summary:InconsistentCanvasArtifact", "未尝试状态却带有调用或文件完成声明")
+    canvas_errors(result, source, issues, status == "failed")
+    if result["inspection_error"]:
+        issue(issues, source, "ci_summary:CanvasInspectionError", result["inspection_error"])
+    if len(issues) > before:
+        result["status"] = "failed"
+    return result
+
+
+def summarize_canvas_candidate(record: dict, source: str, issues: list,
+                               skip_reason: str) -> dict:
+    before = len(issues)
+    result = canvas_fields(record, source, issues, (
+        "id", "status", "setup_status", "skip_reason", "error_identifier", "error_message"))
+    result["reported_status"] = result["status"]
+    for format_name in ("pdf", "png"):
+        result[format_name] = summarize_canvas_artifact(
+            record.get(format_name), result["id"], format_name, source + ":" + format_name, issues)
+    for key in CANVAS_GEOMETRY:
+        result[key] = summarize_canvas_geometry(record.get(key), source + ":" + key, issues)
+    artifact_statuses = [result[key]["reported_status"] for key in ("pdf", "png")]
+    geometry_statuses = [result[key]["reported_status"] for key in CANVAS_GEOMETRY]
+    status, setup = result["reported_status"], result["setup_status"]
+    if status in ("pending", "skipped"):
+        expected_artifact = "not_attempted" if status == "pending" else "skipped"
+        consistent = (setup == "pending" and artifact_statuses == [expected_artifact] * 2
+                      and geometry_statuses == [None] * 3
+                      and result["skip_reason"] == ("" if status == "pending" else skip_reason)
+                      and (status != "skipped" or bool(skip_reason)))
+    elif status in ("export_pair_completed", "failed"):
+        finished_geometry = ("captured", "capture_failed")
+        if setup == "failed":
+            consistent = (artifact_statuses == ["not_attempted_setup_failed"] * 2
+                          and geometry_statuses[0] in finished_geometry
+                          and geometry_statuses[1:] == [None] * 2)
+        else:
+            consistent = (setup == "created" and not skip_reason
+                          and all(value in ("exported", "failed") for value in artifact_statuses)
+                          and all(value in finished_geometry for value in geometry_statuses))
+        pair_completed = artifact_statuses == ["exported"] * 2 and geometry_statuses == ["captured"] * 3
+        consistent = consistent and (status == "export_pair_completed") == pair_completed and not result["skip_reason"]
+    else:
+        consistent = False
+    if not consistent:
+        issue(issues, source, "ci_summary:InconsistentCanvasCandidate", "候选状态与 setup、调用、几何采集或跳过原因不一致")
+    canvas_errors(result, source, issues, status == "failed" and len(issues) == before)
+    if len(issues) > before:
+        result["status"] = "failed"
+    return result
+
+
+def summarize_canvas_diagnostics(directory: Path, release: str, context: str) -> dict:
+    source = CANVAS_FILES[context]
+    issues: list = []
+    result = {"context": context, "source": source, "present": False, "status": "not_run",
+              "scope": "local_declarations_only", "counts_toward_stage": False,
+              "reported_status": None, "release": release, "reported_release": None,
+              "reported_summary": None, "candidates": [], "issues": issues}
+    try:
+        path = directory
+        for component in ("", *Path(source).parts):
+            path = path / component
+            if path.is_symlink():
+                raise ValueError("固定诊断路径不得含符号链接")
+        if not path.exists():
+            return result
+        result["present"] = True
+        if not path.is_file():
+            raise ValueError("固定诊断路径必须是普通文件")
+        with path.open("rb") as stream:
+            raw = stream.read(CANVAS_MAX_BYTES + 1)
+        if len(raw) > CANVAS_MAX_BYTES:
+            raise ValueError("补充诊断 JSON 超出大小限制")
+        payload = json.loads(raw.decode("utf-8"), parse_constant=reject_constant,
+                             object_pairs_hook=unique_json_object)
+        if not isinstance(payload, dict):
+            raise ValueError("补充诊断 JSON 顶层必须为对象")
+    except (OSError, UnicodeError, ValueError, RecursionError) as error:
+        result.update(present=True, status="failed")
+        issue(issues, source, "ci_summary:InvalidCanvasJSON", str(error))
+        return result
+    fields = canvas_fields(payload, source, issues, ("status", "release", "generated_at"),
+                           ("font_available", "exportgraphics_available"))
+    collect_errors(payload, source, issues)
+    result.update(reported_status=fields["status"], reported_release=fields["release"])
+    required = {"schema_version": 1, "release": release, "counts_toward_stage": False,
+                "directory": "canvas-extent-experiment", "report_file": CANVAS_REPORT,
+                "artifact_paths_relative_to": "experiment_directory",
+                "scope": "native canvas extent diagnostic; not a production export strategy",
+                "external_inspection_status": "pending", "exact_page_verified": False,
+                "font_embedding_verified": False, "cjk_visual_verified": False,
+                "text_extraction_verified": False, "layout_verified": False}
+    for key, expected in required.items():
+        if type(payload.get(key)) is not type(expected) or payload[key] != expected:
+            issue(issues, source, "ci_summary:InvalidCanvasDeclaration", key + " 与补充诊断契约不符")
+    if not fields["generated_at"]:
+        issue(issues, source, "ci_summary:InvalidCanvasDeclaration", "缺少 generated_at")
+    skip_reason = ("wenquanyi_not_confirmed_available" if fields["font_available"] is False
+                   else "exportgraphics_unavailable" if fields["exportgraphics_available"] is False else "")
+    records = payload.get("candidates")
+    if not isinstance(records, list):
+        issue(issues, source, "ci_summary:InvalidCanvasCandidates", "candidates 必须为两个候选的数组")
+        records = []
+    seen = set()
+    for record in records:
+        identifier = record.get("id") if isinstance(record, dict) else None
+        if not isinstance(identifier, str) or identifier not in CANVAS_CANDIDATES or identifier in seen:
+            issue(issues, source, "ci_summary:InvalidCanvasCandidates", "候选 id 未知、重复或缺失")
+            continue
+        seen.add(identifier)
+        result["candidates"].append(summarize_canvas_candidate(
+            record, source + ":" + identifier, issues, skip_reason))
+    if seen != set(CANVAS_CANDIDATES):
+        issue(issues, source, "ci_summary:InvalidCanvasCandidates", "未记录全部两个补充候选")
+    statuses = [candidate["reported_status"] for candidate in result["candidates"]]
+    status = fields["status"]
+    if status in ("completed_diagnostics_only", "incomplete"):
+        expected_counts = {"candidate_count": 2, "export_pairs_completed": statuses.count("export_pair_completed"),
+                           "failed": statuses.count("failed"), "skipped": statuses.count("skipped")}
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            result["reported_summary"] = {
+                key: value if type(value) in (int, bool, str) or (
+                    type(value) is float and math.isfinite(value)) else None
+                for key, value in ((key, summary.get(key)) for key in expected_counts)
+            }
+        if (not isinstance(summary, dict) or summary.keys() != expected_counts.keys()
+                or any(type(summary.get(key)) is not int or summary[key] != value
+                       for key, value in expected_counts.items())
+                or any(value not in ("export_pair_completed", "failed", "skipped") for value in statuses)
+                or (status == "completed_diagnostics_only") != (statuses == ["export_pair_completed"] * 2)):
+            issue(issues, source, "ci_summary:InconsistentCanvasCounts", "完成状态、summary counts 与两个候选状态不一致")
+        if not isinstance(payload.get("completed_at"), str) or not payload["completed_at"].strip():
+            issue(issues, source, "ci_summary:InvalidCanvasDeclaration", "完成状态缺少 completed_at")
+    elif status != "running" or any(key in payload for key in ("summary", "completed_at")):
+        issue(issues, source, "ci_summary:InconsistentCanvasStatus", "未知状态或 running 带最终完成字段")
+    result["status"] = "failed" if issues else ("pending" if status == "incomplete" else status)
+    return result
+
+
 def summarize(input_root: Path) -> dict:
     root = Path(input_root).resolve()
     if not root.is_dir():
@@ -474,6 +720,9 @@ def summarize(input_root: Path) -> dict:
         result["display_diagnostics"] = summarize_display_diagnostics(
             directories.get(result["release"], root / ("matlab-full100-" + result["release"])),
             result["release"])
+        result["canvas_diagnostics"] = [summarize_canvas_diagnostics(
+            directories.get(result["release"], root / ("matlab-full100-" + result["release"])),
+            result["release"], context) for context in CANVAS_FILES]
     statuses = [result["status"] for result in results]
     return {"schema_version": 1, "input_root": str(root), "status": combined_status(statuses),
             "status_source": "local_artifact_evidence", "github_status": None,
@@ -543,6 +792,41 @@ def markdown(summary: dict) -> str:
             for item in result["display_diagnostics"]["issues"]:
                 lines.append("- 独立诊断 " + " / ".join(escaped(value) for value in (
                     result["release"], item["source"], item["identifier"])) + ": " + escaped(item["message"]))
+    lines.extend(["", "## Canvas 补充独立诊断", "", CANVAS_NOTICE,
+                  "JSON 未生成不代表未尝试；running 可能是最后保存的部分记录。"
+                  "逐候选 candidate.json 和 stderr 不在本表读取范围内。", "",
+                  "| 版本 | context | 诊断状态 / 原始声明 | 候选 / 原始状态 / setup | PDF 本地声明 | PNG 本地声明 | 几何采集本地声明 |",
+                  "| --- | --- | --- | --- | --- | --- | --- |"])
+    for result in summary["releases"]:
+        for diagnostic in result["canvas_diagnostics"]:
+            prefix = [result["release"], diagnostic["context"],
+                      diagnostic["status"] + " / " + (diagnostic["reported_status"] or "未提供")]
+            if not diagnostic["candidates"]:
+                lines.append("| " + " | ".join(escaped(value) for value in [
+                    *prefix, "未提供两个候选记录", "未提供", "未提供", "未提供"]) + " |")
+            for candidate in diagnostic["candidates"]:
+                row = [*prefix, " / ".join(str(candidate[key]) for key in (
+                    "id", "reported_status", "setup_status"))]
+                for format_name in ("pdf", "png"):
+                    artifact = candidate[format_name]
+                    row.append(" / ".join(str(artifact[key]) for key in ("reported_status", "export_api"))
+                               + f"; invoked={artifact['api_invoked']}; call_succeeded={artifact['export_call_succeeded']}"
+                               + f"; file_exists={artifact['file_exists']}; bytes={artifact['bytes']}"
+                               + "; " + " / ".join(str(artifact[key] or "") for key in (
+                                   "inspection_status", "inspection_error", "error_identifier", "error_message")))
+                row.append("; ".join(key + "=" + str(candidate[key]["reported_status"] or candidate[key]["status"])
+                                     + " / " + str(candidate[key]["error_identifier"] or "")
+                                     + ": " + str(candidate[key]["error_message"] or "") for key in CANVAS_GEOMETRY))
+                if candidate["skip_reason"]:
+                    row[3] += " / " + candidate["skip_reason"]
+                lines.append("| " + " | ".join(escaped(value) for value in row) + " |")
+    lines.append("")
+    for result in summary["releases"]:
+        for diagnostic in result["canvas_diagnostics"]:
+            for item in diagnostic["issues"]:
+                lines.append("- Canvas 独立诊断 " + " / ".join(escaped(value) for value in (
+                    result["release"], diagnostic["context"], item["source"], item["identifier"]))
+                             + ": " + escaped(item["message"]))
     return "\n".join(lines) + "\n"
 
 

@@ -371,9 +371,14 @@ try
     end
     fontObjects = findall(figureHandle, "-property", "FontName");
     for fontIndex = 1:numel(fontObjects)
-        snapshot.fonts(fontIndex, 1) = graphics_properties(fontObjects(fontIndex), ...
+        fontRecord = graphics_properties(fontObjects(fontIndex), ...
             ["FontName" "FontSize" "FontUnits" "FontWeight" "FontAngle" ...
             "String" "Units" "Position" "Extent" "Visible" "Interpreter"]);
+        if isempty(snapshot.fonts)
+            snapshot.fonts = fontRecord;
+        else
+            snapshot.fonts(fontIndex, 1) = fontRecord;
+        end
     end
     snapshot.status = "captured";
 catch errorRecord

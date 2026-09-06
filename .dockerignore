@@ -9,6 +9,7 @@ backend/tests
 backend/*.log
 frontend/dist
 frontend/node_modules
+codex-runtime/server/node_modules
 frontend/output
 frontend/test-results
 output

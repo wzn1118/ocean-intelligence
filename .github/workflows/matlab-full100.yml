@@ -11,6 +11,10 @@ on:
       - "codex-runtime/server/point-**"
       - "codex-runtime/server/illustrated-report-**"
       - "codex-runtime/server/ocean-report-**"
+      - "codex-runtime/server/ocean-evidence-time.*"
+      - "codex-runtime/server/professional-visualization-**"
+      - "codex-runtime/server/package*.json"
+      - "deploy/Dockerfile.codex-runtime"
       - "scripts/matlab-**"
       - "scripts/full-matlab-**"
       - ".codex-evals/matlab-100-20260905/**"
@@ -22,6 +26,10 @@ on:
       - "codex-runtime/server/point-**"
       - "codex-runtime/server/illustrated-report-**"
       - "codex-runtime/server/ocean-report-**"
+      - "codex-runtime/server/ocean-evidence-time.*"
+      - "codex-runtime/server/professional-visualization-**"
+      - "codex-runtime/server/package*.json"
+      - "deploy/Dockerfile.codex-runtime"
       - "scripts/matlab-**"
       - "scripts/full-matlab-**"
       - ".codex-evals/matlab-100-20260905/**"
@@ -47,7 +55,9 @@ jobs:
         run: python3 -m pip install -r codex-runtime/matlab/evals/requirements.txt
       - name: MATLAB syntax at oldest runtime boundary
         run: mh_lint --brief --input-encoding utf-8 --matlab 2021a codex-runtime/matlab/assets codex-runtime/matlab/tests codex-runtime/matlab/evals
-      - name: Node contracts
+      - name: Install report parser dependency
+        run: npm ci --prefix codex-runtime/server --ignore-scripts --no-audit --no-fund
+      - name: Run Node contracts
         run: node --test codex-runtime/server/*.test.mjs
       - name: Generated router smoke preparation contracts
         run: node --test codex-runtime/matlab/tests/generate_router_smoke.test.mjs

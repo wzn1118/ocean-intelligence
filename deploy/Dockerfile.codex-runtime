@@ -25,7 +25,11 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends librsvg2-bin \
     && rm -rf /var/lib/apt/lists/*
 
-ENV LANG=C.UTF-8 \
+COPY codex-runtime/server/package.json codex-runtime/server/package-lock.json /opt/ocean-codex-server/
+RUN npm ci --prefix /opt/ocean-codex-server --omit=dev --ignore-scripts --no-audit --no-fund
+
+ENV NODE_PATH=/opt/ocean-codex-server/node_modules \
+    LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     OCEAN_MATLAB_RUNTIME=external-mathworks-only \
     OCEAN_MATLAB_EVIDENCE_DIR=/workspace/.runtime/matlab-ci

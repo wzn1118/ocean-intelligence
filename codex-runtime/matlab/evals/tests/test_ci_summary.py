@@ -87,6 +87,80 @@ DISPLAY_DIAGNOSTICS_FIXTURE = {
 }
 
 
+def canvas_fixture(release: str = "R2021a") -> dict:
+    """Synthetic producer-shaped declarations only; no MATLAB or artifact verification."""
+    payload = {
+        "schema_version": 1, "status": "completed_diagnostics_only",
+        "generated_at": "2026-09-05T19:00:00Z", "release": release,
+        "counts_toward_stage": False, "directory": "canvas-extent-experiment",
+        "report_file": "canvas-extent-experiment/canvas-extent-experiment.json",
+        "artifact_paths_relative_to": "experiment_directory",
+        "scope": "native canvas extent diagnostic; not a production export strategy",
+        "background_role": "visible white rectangle face, not data or hidden text",
+        "target_page_points": [576, 360], "target_page_inches": [8, 5],
+        "font_name": "WenQuanYi Zen Hei", "font_available": True, "exportgraphics_available": True,
+        "screen_pixels_per_inch": 72,
+        "expected_text": ["unit-only title", "unit-only ylabel", "Time (h)", "Observed 20.125", "Model 21.50"],
+        "data_source": "same synthetic panel diagnostic as panel-fullpage",
+        "export_order": ["exportgraphics(panel) PDF first", "print(figure) PNG second"],
+        "pdf_options": {"ContentType": "vector", "BackgroundColor": "white"},
+        "png_options": {"device": "-dpng", "resolution": 300},
+        "verification_scope": "native calls, raw files, geometry snapshots and hash only",
+        "geometry_read_scope": "literal PDF dictionary scan, not a full PDF parser",
+        "font_name_evidence": "graphics properties, not rendered font identity",
+        "external_inspection_status": "pending", "exact_page_verified": False,
+        "font_embedding_verified": False, "cjk_visual_verified": False,
+        "text_extraction_verified": False, "layout_verified": False,
+        "api_documentation": ["https://www.mathworks.com/help/releases/R2021a/matlab/ref/exportgraphics.html"],
+        "candidates": [],
+        "summary": {"candidate_count": 2, "export_pairs_completed": 2, "failed": 0, "skipped": 0},
+        "completed_at": "2026-09-05T19:02:00Z",
+    }
+    for inset in (0, 3):
+        identifier = f"panel-canvas-inset-{inset}pt"
+        candidate = {
+            "id": identifier, "status": "export_pair_completed", "skip_reason": "",
+            "inset_points": inset, "requested_rectangle_points": [inset, inset, 576 - 2 * inset, 360 - 2 * inset],
+            "setup_status": "created", "error_identifier": "", "error_message": "",
+        }
+        for key in ("geometry_before_pdf", "geometry_after_pdf", "geometry_after_png"):
+            candidate[key] = {
+                "status": "captured", "figure": {}, "panel": {}, "data_axes": {},
+                "background_axes": {}, "rectangle": {}, "rectangle_panel_points": [0, 0, 576, 360],
+                "panel_children_front_to_back": [], "fonts": [], "error_identifier": "", "error_message": "",
+            }
+        for format_name in ("pdf", "png"):
+            is_pdf = format_name == "pdf"
+            candidate[format_name] = {
+                "file": identifier + ("/native.pdf" if is_pdf else "/native-reference.png"),
+                "status": "exported",
+                "requested_api": "exportgraphics(panel, ContentType=vector)" if is_pdf else "print(figure, -dpng, -r300)",
+                "export_api": "exportgraphics" if is_pdf else "print", "api_invoked": True,
+                "export_call_succeeded": True, "export_object_class": "unit-only class",
+                "file_exists": True, "bytes": 1200, "sha256": "a" * 64,
+                "pdf_header_present": is_pdf, "media_box_literals": [0, 0, 570, 357] if is_pdf else [],
+                "crop_box_literals": [], "png_pixels": [] if is_pdf else [2400, 1500],
+                "inspection_status": ("literal_values_only_external_check_required" if is_pdf
+                                      else "png_header_only_visual_check_required"),
+                "inspection_error": "", "error_identifier": "", "error_message": "",
+            }
+        payload["candidates"].append(candidate)
+    return payload
+
+
+def dormant_canvas_candidate(candidate: dict, status: str = "pending") -> None:
+    candidate.update(status=status, setup_status="pending", skip_reason="")
+    for key in ("geometry_before_pdf", "geometry_after_pdf", "geometry_after_png"):
+        candidate[key] = {}
+    for format_name in ("pdf", "png"):
+        candidate[format_name].update(
+            status="skipped" if status == "skipped" else "not_attempted", export_api="", api_invoked=False,
+            export_call_succeeded=False, export_object_class="", file_exists=False, bytes=0, sha256="",
+            pdf_header_present=False, media_box_literals=[], crop_box_literals=[], png_pixels=[],
+            inspection_status="pending", inspection_error="", error_identifier="", error_message="",
+        )
+
+
 class SummaryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -214,20 +288,350 @@ class SummaryTests(unittest.TestCase):
         result = copy.deepcopy(summary)
         for release in result["releases"]:
             release.pop("display_diagnostics", None)
+            release.pop("canvas_diagnostics", None)
         return result
 
-    def test_canvas_diagnostics_are_explicitly_outside_summary_scope(self) -> None:
+    def canvas_diagnostics(self, release: str = "R2021a", context: str = "primary",
+                           payload: dict | None = None) -> dict:
+        self.write_json(release, ci_summary.CANVAS_FILES[context],
+                        canvas_fixture(release) if payload is None else payload)
+        return next(item for item in self.release_result(release)["canvas_diagnostics"] if item["context"] == context)
+
+    def test_canvas_missing_old_packages_do_not_inherit_three_candidate_passes(self) -> None:
         self.complete_runtime()
-        baseline = ci_summary.summarize(self.root)
-        for status in ["failed", "running", "completed_diagnostics_only"]:
-            for prefix in ["native-pdf-page-probe", "display-comparison/native-pdf-page-probe"]:
-                self.write_json("R2021a", prefix + "/canvas-extent-experiment/canvas-extent-experiment.json", {
-                    "status": status, "counts_toward_stage": False, "visual_verified": False,
-                })
-            summary = ci_summary.summarize(self.root)
-            self.assertEqual(summary, baseline)
-            self.assertIn("未读取 canvas-extent-experiment", summary["notice"])
-            self.assertIn("不能从主阶段 passed 推断成功", ci_summary.markdown(summary))
+        self.display_diagnostics("R2021a")
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for prefix in ("native-pdf-page-probe", "display-comparison/native-pdf-page-probe"):
+            self.write_json("R2021a", prefix + "/native-pdf-page-probe.json", {
+                "status": "completed", "summary": {"candidate_count": 3, "exports_succeeded": 3},
+                "supplementary_report": "canvas-extent-experiment/canvas-extent-experiment.json",
+            })
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(self.main_summary(summary), before)
+        for result in summary["releases"]:
+            for diagnostic in result["canvas_diagnostics"]:
+                self.assertEqual(diagnostic["status"], "not_run")
+                self.assertFalse(diagnostic["present"])
+                self.assertEqual(diagnostic["issues"], [])
+                self.assertEqual(diagnostic["candidates"], [])
+        report = ci_summary.markdown(summary)
+        self.assertIn("Canvas 补充独立诊断", report)
+        self.assertIn("不能从主阶段 passed 推断成功", report)
+        self.assertIn("不读取逐候选文件，不独立核验文件哈希", report)
+        self.assertNotIn("未读取 canvas-extent-experiment", report)
+
+    def test_canvas_complete_primary_and_display_are_declarations_not_artifact_checks(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for release in ci_summary.RELEASES:
+            for context in ("primary", "display"):
+                diagnostic = self.canvas_diagnostics(release, context)
+                self.assertEqual(diagnostic["status"], "completed_diagnostics_only")
+                self.assertEqual(diagnostic["reported_status"], "completed_diagnostics_only")
+                self.assertEqual(diagnostic["reported_release"], release)
+                self.assertEqual(diagnostic["reported_summary"]["candidate_count"], 2)
+                self.assertEqual(diagnostic["scope"], "local_declarations_only")
+                self.assertIs(diagnostic["counts_toward_stage"], False)
+                self.assertEqual(diagnostic["issues"], [])
+                self.assertEqual([item["reported_status"] for item in diagnostic["candidates"]],
+                                 ["export_pair_completed"] * 2)
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(self.main_summary(summary), before)
+        self.assertEqual(list(self.root.rglob("*.pdf")), [])
+        self.assertEqual(list(self.root.rglob("*.png")), [])
+        report = ci_summary.markdown(summary)
+        self.assertIn("| R2021a | primary | completed_diagnostics_only", report)
+        self.assertIn("| R2026a | display | completed_diagnostics_only", report)
+        self.assertIn("invoked=True; call_succeeded=True", report)
+        self.assertIn("不重跑 MATLAB", report)
+
+    def test_canvas_partial_checkpoints_remain_running_not_complete(self) -> None:
+        for completed_count in (0, 1, 2):
+            with self.subTest(completed_count=completed_count):
+                payload = canvas_fixture()
+                payload["status"] = "running"
+                del payload["summary"], payload["completed_at"]
+                for candidate in payload["candidates"][completed_count:]:
+                    dormant_canvas_candidate(candidate)
+                diagnostic = self.canvas_diagnostics(payload=payload)
+                self.assertEqual(diagnostic["status"], "running")
+                self.assertIsNone(diagnostic["reported_summary"])
+                self.assertEqual(diagnostic["issues"], [])
+                self.assertEqual([item["reported_status"] for item in diagnostic["candidates"]],
+                                 ["export_pair_completed"] * completed_count + ["pending"] * (2 - completed_count))
+        self.assertEqual(self.release_result()["canvas_diagnostics"][1]["status"], "not_run")
+
+    def test_canvas_skipped_unavailable_dependencies_are_pending(self) -> None:
+        for dependency, reason in (("font_available", "wenquanyi_not_confirmed_available"),
+                                   ("exportgraphics_available", "exportgraphics_unavailable")):
+            payload = canvas_fixture()
+            payload.update(status="incomplete", **{dependency: False})
+            payload["summary"].update(export_pairs_completed=0, skipped=2)
+            for candidate in payload["candidates"]:
+                dormant_canvas_candidate(candidate, "skipped")
+                candidate["skip_reason"] = reason
+            diagnostic = self.canvas_diagnostics(payload=payload)
+            self.assertEqual(diagnostic["status"], "pending")
+            self.assertEqual(diagnostic["reported_status"], "incomplete")
+            self.assertEqual(diagnostic["issues"], [])
+            self.assertIn(reason, ci_summary.markdown(ci_summary.summarize(self.root)))
+
+    def test_canvas_export_setup_geometry_and_partial_file_failures_are_visible(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for failure in ("export", "missing_file", "inspection", "geometry", "setup"):
+            with self.subTest(failure=failure):
+                payload = canvas_fixture()
+                payload["status"] = "incomplete"
+                payload["summary"].update(export_pairs_completed=1, failed=1)
+                candidate = payload["candidates"][0]
+                candidate["status"] = "failed"
+                error = {"error_identifier": "unit:Canvas|Failure", "error_message": "<unit failure>\nsecond line"}
+                if failure == "geometry":
+                    candidate["geometry_after_pdf"].update(status="capture_failed", **error)
+                elif failure == "setup":
+                    dormant_canvas_candidate(candidate)
+                    candidate.update(status="failed", setup_status="failed", **error)
+                    candidate["geometry_before_pdf"] = {"status": "capture_failed", **error}
+                    for format_name in ("pdf", "png"):
+                        candidate[format_name]["status"] = "not_attempted_setup_failed"
+                else:
+                    candidate["pdf"].update(status="failed", **error)
+                    if failure == "export":
+                        candidate["pdf"]["export_call_succeeded"] = False
+                    elif failure == "missing_file":
+                        candidate["pdf"].update(file_exists=False, bytes=0, sha256="", pdf_header_present=False,
+                                                media_box_literals=[], inspection_status="file_missing")
+                    else:
+                        candidate["pdf"].update(inspection_status="read_failed_external_check_required",
+                                                inspection_error="unit:ReadFailure: partial read\nsecond line")
+                diagnostic = self.canvas_diagnostics(payload=payload)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertEqual(diagnostic["reported_status"], "incomplete")
+                self.assertEqual(diagnostic["candidates"][0]["reported_status"], "failed")
+                self.assertTrue(any(item["identifier"] == "unit:Canvas|Failure" for item in diagnostic["issues"]))
+                self.assertFalse(any("Inconsistent" in item["identifier"] for item in diagnostic["issues"]))
+                if failure == "export":
+                    artifact = diagnostic["candidates"][0]["pdf"]
+                    self.assertIs(artifact["api_invoked"], True)
+                    self.assertIs(artifact["export_call_succeeded"], False)
+                    self.assertIs(artifact["file_exists"], True)
+                    self.assertEqual(artifact["bytes"], 1200)
+                report = ci_summary.markdown(ci_summary.summarize(self.root))
+                self.assertIn("unit:Canvas&#124;Failure", report)
+                self.assertIn("&lt;unit failure&gt;", report)
+                self.assertNotIn("second line", report)
+                self.assertEqual(self.main_summary(ci_summary.summarize(self.root)), before)
+                canvas_table = report.split("## Canvas 补充独立诊断", 1)[1].split("\n- Canvas 独立诊断", 1)[0]
+                self.assertIn("| R2026a | display | not_run", canvas_table)
+                payload["status"] = "running"
+                del payload["summary"], payload["completed_at"]
+                diagnostic = self.canvas_diagnostics(payload=payload)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertEqual(diagnostic["reported_status"], "running")
+
+    def test_canvas_malformed_duplicate_keys_and_oversized_json_fail_only_diagnostics(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        path = self.write_json("R2021a", ci_summary.CANVAS_FILES["primary"], {})
+        for raw in ("{", "[]", "null", '{"status":"running","status":"completed_diagnostics_only"}',
+                    '{"candidates":[{"id":"one","id":"two"}]}', '{"schema_version":NaN}',
+                    "[" * 1100 + "0" + "]" * 1100, " " * (ci_summary.CANVAS_MAX_BYTES + 1)):
+            with self.subTest(prefix=raw[:80]):
+                path.write_text(raw, encoding="utf-8")
+                summary = ci_summary.summarize(self.root)
+                diagnostic = summary["releases"][0]["canvas_diagnostics"][0]
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertTrue(diagnostic["present"])
+                self.assertEqual(diagnostic["issues"][0]["identifier"], "ci_summary:InvalidCanvasJSON")
+                self.assertEqual(self.main_summary(summary), before)
+
+    def test_canvas_r19_declared_exports_never_hide_both_candidates_geometry_failure(self) -> None:
+        """Unit reconstruction of R19 declarations, not re-execution of that run."""
+        for release in ("R2021a", "R2024b"):
+            stages = self.stages(release)
+            stages["stages"].append({"id": "native-pdf-page-probe", "status": "passed"})
+            self.write_json(release, "ci-stage-status.json", stages)
+            self.probe(release)
+            self.evaluator(release)
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for release in ("R2021a", "R2024b"):
+            for context in ("primary", "display"):
+                payload = canvas_fixture(release)
+                payload["status"] = "incomplete"
+                payload["summary"].update(export_pairs_completed=0, failed=2)
+                for candidate, box in zip(payload["candidates"], ([0, 0, 576, 360], [0, 0, 571, 355])):
+                    candidate["status"] = "failed"
+                    candidate["pdf"]["media_box_literals"] = box
+                    for key in ("geometry_before_pdf", "geometry_after_pdf", "geometry_after_png"):
+                        candidate[key].update(status="capture_failed",
+                                              error_identifier="MATLAB:heterogeneousStrucAssignment",
+                                              error_message="Subscripted assignment between dissimilar structures.")
+                diagnostic = self.canvas_diagnostics(release, context, payload)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertEqual(diagnostic["reported_status"], "incomplete")
+                self.assertEqual(diagnostic["reported_summary"], payload["summary"])
+                self.assertEqual(len(diagnostic["issues"]), 6)
+                self.assertTrue(all(item["identifier"] == "MATLAB:heterogeneousStrucAssignment"
+                                    for item in diagnostic["issues"]))
+                for candidate in diagnostic["candidates"]:
+                    self.assertEqual(candidate["status"], "failed")
+                    self.assertEqual(candidate["reported_status"], "failed")
+                    self.assertEqual(candidate["pdf"]["reported_status"], "exported")
+                    self.assertEqual(candidate["png"]["reported_status"], "exported")
+                    for key in ("exact_page_verified", "font_embedding_verified", "cjk_visual_verified"):
+                        self.assertNotIn(key, candidate)
+                        self.assertNotIn(key, diagnostic)
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(self.main_summary(summary), before)
+        self.assertEqual([item["status"] for item in summary["releases"][2]["canvas_diagnostics"]], ["not_run"] * 2)
+        self.assertIsNone(summary["releases"][2]["evaluator"]["reported_score"])
+        report = ci_summary.markdown(summary)
+        self.assertIn("| R2021a | primary | failed / incomplete", report)
+        self.assertIn("| R2024b | display | failed / incomplete", report)
+        self.assertIn("geometry_before_pdf=capture_failed / MATLAB:heterogeneousStrucAssignment", report)
+
+    def test_canvas_wrong_release_schema_and_verification_claims_fail_closed(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        for override in ({"release": "R2024b"}, {"release": None}, {"schema_version": True},
+                         {"schema_version": 2}, {"counts_toward_stage": True}, {"scope": "passed"},
+                         {"font_available": 1}, {"exportgraphics_available": "true"}, {"generated_at": None},
+                         {"status": "passed"}, {"status": {}}, {"exact_page_verified": True},
+                         {"cjk_visual_verified": True}, {"font_embedding_verified": True},
+                         {"text_extraction_verified": True}, {"layout_verified": True},
+                         {"error_identifier": "unit:RootFailure", "error_message": "root failed"},
+                         {"external_inspection_status": "passed"}):
+            with self.subTest(override=override):
+                payload = canvas_fixture()
+                payload.update(override)
+                diagnostic = self.canvas_diagnostics(payload=payload)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertTrue(diagnostic["issues"])
+                self.assertEqual(self.main_summary(ci_summary.summarize(self.root)), before)
+
+    def test_canvas_bad_candidate_shapes_duplicates_and_legacy_three_are_rejected(self) -> None:
+        valid = canvas_fixture()["candidates"]
+        for records in (None, {}, [], valid[:1], valid + valid[:1], [valid[0], valid[0]],
+                        [True, None], [{"id": []}, valid[1]],
+                        [{"id": identifier, "status": "exported"} for identifier in (
+                            "axes-outerposition", "tiledlayout-loose", "panel-fullpage")]):
+            with self.subTest(records=records):
+                payload = canvas_fixture()
+                payload["candidates"] = records
+                diagnostic = self.canvas_diagnostics(payload=payload)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertTrue(any(item["identifier"] == "ci_summary:InvalidCanvasCandidates"
+                                    for item in diagnostic["issues"]))
+
+    def test_canvas_contradictory_counts_and_completion_are_rejected(self) -> None:
+        overrides = [
+            {"summary": None}, {"summary": {"candidate_count": 3, "exports_succeeded": 3}},
+            {"status": "incomplete"}, {"status": "running"}, {"completed_at": ""},
+        ]
+        for key, value in (("candidate_count", 3), ("candidate_count", 2.0), ("export_pairs_completed", True),
+                           ("export_pairs_completed", 1), ("failed", 1), ("skipped", -1), ("extra", 0)):
+            counts = canvas_fixture()["summary"]
+            counts[key] = value
+            overrides.append({"summary": counts})
+        for override in overrides:
+            with self.subTest(override=override):
+                payload = canvas_fixture()
+                payload.update(override)
+                diagnostic = self.canvas_diagnostics(payload=payload)
+                self.assertEqual(diagnostic["status"], "failed")
+                self.assertTrue(diagnostic["issues"])
+                if isinstance(override.get("summary"), dict):
+                    self.assertEqual(diagnostic["reported_summary"]["candidate_count"],
+                                     override["summary"].get("candidate_count"))
+        for state in ("pending", "failed"):
+            payload = canvas_fixture()
+            payload["candidates"][0]["status"] = state
+            self.assertEqual(self.canvas_diagnostics(payload=payload)["status"], "failed")
+
+    def test_canvas_contradictory_calls_geometry_and_types_are_rejected(self) -> None:
+        mutations = [
+            ("pdf", "api_invoked", False), ("pdf", "api_invoked", 1),
+            ("png", "export_call_succeeded", "true"), ("png", "export_call_succeeded", False),
+            ("pdf", "export_api", "print"), ("pdf", "file_exists", False),
+            ("pdf", "bytes", True), ("pdf", "bytes", 0), ("pdf", "sha256", "wrong"),
+            ("pdf", "status", {}), ("pdf", "pdf_header_present", False),
+            ("png", "png_pixels", [True, 1500]), ("png", "png_pixels", [2400]),
+            ("png", "inspection_status", "pending"), ("pdf", "error_message", {"bad": "shape"}),
+            ("geometry_before_pdf", "status", "pending"), ("geometry_after_pdf", "status", "capture_failed"),
+            ("geometry_after_png", "error_identifier", "unit:Contradiction"),
+        ]
+        for section, key, value in mutations:
+            with self.subTest(section=section, key=key, value=value):
+                payload = canvas_fixture()
+                payload["candidates"][0][section][key] = value
+                self.assertEqual(self.canvas_diagnostics(payload=payload)["status"], "failed")
+        for section in ("pdf", "png", "geometry_before_pdf"):
+            for value in (None, [], {}, True):
+                payload = canvas_fixture()
+                payload["candidates"][0][section] = value
+                self.assertEqual(self.canvas_diagnostics(payload=payload)["status"], "failed")
+
+    def test_canvas_fixed_paths_never_follow_payload_paths_or_borrow_context(self) -> None:
+        self.canvas_diagnostics("R2024b", "display")
+        self.write_json("R2021a", "native-pdf-page-probe/native-pdf-page-probe.json", {
+            "status": "completed", "supplementary_report": "../../matlab-full100-R2024b/"
+            + ci_summary.CANVAS_FILES["display"],
+        })
+        self.assertEqual([item["status"] for item in self.release_result()["canvas_diagnostics"]], ["not_run"] * 2)
+        self.assertEqual(self.release_result("R2024b")["canvas_diagnostics"][0]["status"], "not_run")
+        for field, path in (("report_file", "/tmp/elsewhere.json"), ("report_file", "../../old-run/report.json"),
+                            ("directory", "../display-comparison"), ("artifact_paths_relative_to", "input_root")):
+            payload = canvas_fixture()
+            payload[field] = path
+            self.assertEqual(self.canvas_diagnostics(payload=payload)["status"], "failed")
+        payload = canvas_fixture()
+        payload["candidates"][0]["pdf"]["file"] = "../../other-release/native.pdf"
+        self.assertEqual(self.canvas_diagnostics(payload=payload)["status"], "failed")
+
+    def test_canvas_fixed_path_symlinks_and_nonfiles_fail_only_diagnostics(self) -> None:
+        self.complete_runtime()
+        before = self.main_summary(ci_summary.summarize(self.root))
+        target = self.write_json("R2024b", ci_summary.CANVAS_FILES["primary"], canvas_fixture("R2024b"))
+        path = self.root / "matlab-full100-R2021a" / ci_summary.CANVAS_FILES["primary"]
+        path.parent.mkdir(parents=True)
+        for target_path in (target, target.parent / "nonexistent.json"):
+            path.symlink_to(target_path)
+            self.assertEqual(self.release_result()["canvas_diagnostics"][0]["status"], "failed")
+            path.unlink()
+        path.mkdir()
+        self.assertEqual(self.release_result()["canvas_diagnostics"][0]["status"], "failed")
+        path.rmdir()
+        path.parent.rmdir()
+        path.parent.symlink_to(target.parent, target_is_directory=True)
+        self.assertEqual(self.release_result()["canvas_diagnostics"][0]["status"], "failed")
+        self.assertEqual(self.main_summary(ci_summary.summarize(self.root)), before)
+
+    def test_canvas_never_changes_any_main_outcome_or_dynamic_denominator(self) -> None:
+        self.complete_runtime()
+        for release in ci_summary.RELEASES:
+            self.evaluator(release, status="passed", score=100, visual_audit={"status": "passed"},
+                           gates=[{"id": "artifact_visual_audit", "status": "passed"}])
+            stages = self.stages(release)
+            stages["stages"].append({"id": "native-pdf-page-probe", "status": "passed"})
+            self.write_json(release, "ci-stage-status.json", stages)
+        for stage_status in ("passed", "pending", "running", "failed"):
+            payload = self.stages("R2021a")
+            payload["stages"].append({"id": "native-pdf-page-probe", "status": stage_status})
+            self.write_json("R2021a", "ci-stage-status.json", payload)
+            before = self.main_summary(ci_summary.summarize(self.root))
+            for context in ("primary", "display"):
+                for complete in (True, False):
+                    payload = canvas_fixture()
+                    if not complete:
+                        payload["summary"]["candidate_count"] = 3
+                    self.canvas_diagnostics(context=context, payload=payload)
+                    summary = ci_summary.summarize(self.root)
+                    self.assertEqual(self.main_summary(summary), before)
+                    self.assertEqual(summary["status"], stage_status)
+                    self.assertEqual(summary["stage_counts"]["total"], 24)
+                    self.assertNotIn("canvas-extent-experiment", summary["expected_stages"])
+                    self.assertIn("历史必需阶段与本次产物阶段 ID 的并集", summary["stage_policy"])
 
     def test_display_missing_old_packages_are_not_run_and_have_no_table(self) -> None:
         self.complete_runtime()
@@ -923,6 +1327,8 @@ class SummaryTests(unittest.TestCase):
     def test_cli_writes_both_formats_outside_input_without_modifying_sources(self) -> None:
         self.complete_runtime()
         self.postprocessing("R2021a")
+        self.canvas_diagnostics()
+        self.canvas_diagnostics("R2024b", "display", {"status": "completed_diagnostics_only"})
         before = self.fingerprint()
         output = Path(self.temporary.name) / "summary"
         process = self.run_cli("--output-dir", str(output), "--format", "json")
@@ -931,6 +1337,8 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(summary["status"], "failed")
         self.assertEqual(summary["status_source"], "local_artifact_evidence")
         self.assertIsNone(summary["github_status"])
+        self.assertEqual(summary["releases"][0]["canvas_diagnostics"][0]["status"], "completed_diagnostics_only")
+        self.assertEqual(summary["releases"][1]["canvas_diagnostics"][1]["status"], "failed")
         self.assertEqual(json.loads((output / "summary.json").read_text(encoding="utf-8")), summary)
         self.assertEqual((output / "summary.md").read_text(encoding="utf-8"), ci_summary.markdown(summary))
         self.assertEqual(before, self.fingerprint())

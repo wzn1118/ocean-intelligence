@@ -99,8 +99,8 @@ assert_same_evidence(reader, result, baseline, 'edge-only-numeric-alpha');
 clear paintCleanup;
 assert_same_evidence(reader, result, baseline, 'restored-numeric-alpha');
 
-originalAutoUpdate = result.Legend.AutoUpdate;
-legendCleanup = onCleanup(@() set(result.Legend, 'AutoUpdate', originalAutoUpdate));
+legendState = property_state(result.Legend, {'AutoUpdate'});
+legendCleanup = onCleanup(@() restore_properties(result.Legend, legendState));
 result.Legend.AutoUpdate = 'off';
 otherFigure = figure('Visible', 'off', 'Tag', 'adversarial-test-wrong-parent');
 otherFigureCleanup = onCleanup(@() close_if_valid(otherFigure));
@@ -128,7 +128,7 @@ propertyCases = {
     'scatter-id', scatterHandle, {'UserData'}, {changedID}, 'ComparisonProofScatter';
     'scatter-source-row', scatterHandle, {'UserData'}, {changedRow}, 'ComparisonProofScatter';
     'scatter-hidden', scatterHandle, {'Visible'}, {'off'}, 'ComparisonProofHandles';
-    'scatter-zero-size', scatterHandle, {'SizeData'}, {0}, 'ComparisonProofHandles';
+    'scatter-nan-size', scatterHandle, {'SizeData'}, {NaN}, 'ComparisonProofHandles';
     'scatter-unpainted', scatterHandle, {'MarkerFaceColor', 'MarkerEdgeAlpha'}, {'none', 0}, 'ComparisonProofHandles';
     'scatter-face-flat-alpha', scatterHandle, {'MarkerFaceAlpha'}, {'flat'}, 'ComparisonProofHandles';
     'scatter-edge-flat-alpha', scatterHandle, {'MarkerEdgeAlpha'}, {'flat'}, 'ComparisonProofHandles';
@@ -360,6 +360,9 @@ end
 end
 
 function restore_properties(target, state)
+if isa(target, 'handle') && ~isvalid(target)
+    return;
+end
 for propertyIndex = 1:size(state, 1)
     set(target, state{propertyIndex, 1}, state{propertyIndex, 2});
 end

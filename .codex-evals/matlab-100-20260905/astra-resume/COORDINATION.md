@@ -241,3 +241,17 @@
 - 十项已全部收齐。`comparison-visual-review-round19.md`逐一查看18件图件，定位旧版主标题裁切和图例遮挡，27个审查原件未改。`report-time-review-round19.md`和`report-uncertainty-review-round19.md`实际复现时间解析/交互窗口脱节及自由说明串否定碰撞，下一轮按明确机器字段修复；这不是现有真实海区数据错误的证据。
 - `canvas-probe-contract-review-round19.md`指出补充实验不在汇总中，以及补充写盘可能破坏原报告。主线程已去掉实验后的原报告重写，原报告预先保存独立子报告路径，实验错误仍写stderr/独立记录；汇总JSON和Markdown均显式声明未读取canvas实验、不许由主阶段passed推断成功。新增缺失/失败/运行中/完成的隔离回归通过，未改旧分母或分数。尚未做MATLAB I/O故障注入。
 - 推送前282项Python、全部已跟踪服务器Node、8项生成器smoke、资产/技能/Family B/导出静态检查通过；61个MATLAB文件通过R2021a语法检查，修改后的探针再独立通过。29文件冻结与workflow YAML复核通过，完整静态评分70/100、runtime_pending。新标签正负例、原生篡改及canvas候选仍待新licensed CI，不预称20/20、字体或视觉成功。
+
+## 第二十批接续
+
+- 第十九批本地提交 `ef30a40`，远端 `85ab9d20b9fcdecff39e7b2632a1250da6195a6d`，运行 [33999054663](https://github.com/wzn1118/ocean-intelligence/actions/runs/33999054663) 已结束。三版各19/20、合计57/60，原始90/100，整体失败。原件 `/tmp/matlab-run-33999054663`，新汇总 `/tmp/matlab-ci-summary-33999054663/summary.md`。三个job最终门禁均退出1；`continue-on-error`把单步conclusion显示为success，不能当执行通过。以原始stage状态、日志和step outcome为准，见 `ci-step-outcome-review-round20.md`。
+- 标签metadata正负例已在三版完成，原生v3篡改套件首次进入。四类正例及5/36个reader负例完成，第六项 `Scatter.SizeData=0` 被MATLAB setter拒绝，reader尚未调用。主线程改为MATLAB允许但reader应拒绝的NaN；不计setter异常为负例成功。异常清理增加已删除handle存活检查，正常恢复顺序、baseline相等及原件hash断言不变。剩余31项须新CI执行，见 `native-mutation-review-round20.md`。
+- 比较图候选将观测U线颜色由浅GridColor改为TextColor，先应用axes主题再显式设置Legend字体和字号，避免字体自动继承随导出改变。新增默认/非默认主题、导出前后真实属性与数据/统计不变断言；不是已证实修复R21遮挡或旧版PDF。字符矩阵标题正例的18份真实图件审阅见 `native-char-title-visual-review-round20.md`；两行保留、点颜色/alpha确实改变，旧版裁切和越界仍存在。
+- 原生canvas实验三版均被字体结构数组首次赋值错误阻断完整几何记录。窄修复只改变首次赋值方式，保留before PDF/after PDF/after PNG三次几何必需和原报告IO隔离。R26还真实缺少四PNG，print拒绝UI组件；未隐藏错误或更换API。两旧版四个0pt原生PDF独立测得576x360pt、WenQuanYi嵌入及本合成图全部预期文字，R26则578x362pt不精确；不是生产替换或trusted visual。12PDF、8PNG实际审阅及44原件hash见 `canvas-native-review-round20.md`。
+- 汇总新增固定路径primary/display canvas独立表，校验声明类型、状态和计数一致性，拒绝重复JSON key、非有限数、符号链接及过大文件。缺失记not_run，失败不改变主阶段分母或原始评分；只读取实验JSON，不冒充独立哈希、字体、页面或视觉核验，也不读取逐候选文件。新增13项测试，汇总测试共57项通过。
+- 海区报告和交互顶层coverage改用同一严格时间解析器：真实日期、秒、最多三位小数和合法数值offset，无后缀按声明UTC解释，拒绝日期溢出、24点、过量精度和逆序。交互产物端点必须与所属figure代表相同时刻，主HTML仍按声明文本对应；请求窗口、有效窗口和逐图窗口不强制相同。未新增逐点timestamp真实性认证，时区切换子进程测试通过。
+- 不确定度改为明确 `data-uncertainty-status` 和 `data-uncertainty-method` 与manifest精确绑定，仅对称trim，不再以自由说明串includes充当机器字段。保留非空说明，但不声称机器字段一致即自然语言没有矛盾。新增合成负例覆盖否定串、混淆方法名、状态及缺失字段；不是现实海区结论验收。
+- 独立77例及浏览器审查进一步复现重复HTML属性和实体解码漏洞，见 `report-machine-fields-review-round20.md`。主报告检查改用锁定parse5 7.3.0的HTML树，实体解码一次，大小写/无引号遵循浏览器，任何duplicate-attribute令整体拒绝；从真实caption文本读取并排除script/style/template/noscript/comments伪造证据。新增53项公开入口回归及6项解析/部署回归。点交互检查器其他HTML读取仍有其独立范围，本次不宣称全部HTML消费者均已迁移。
+- 新依赖以server独立package/lock纳入CI npm ci，镜像安装在源目录挂载之外并以NODE_PATH加载；测试实际从隔离目录加载同一模块，当前容器单独Node进程也确认合法输入通过、重复属性拒绝。不是重建镜像或刷新常驻服务的证明。Dockerfile用户原有CLI版本/安装改动继续单独保留；CI触发范围补齐时间/parser/package/专业绘图提示及镜像文件。
+- 十个原代理本轮已分批续派并交付：时间解析、报告时间/机器字段、原生属性回归、诊断汇总、canvas修复与审阅、reader原生负例审阅与cleanup、真实字符标题视觉、CI outcome审计、HTML机器字段审阅及回归、提示文档同步。部分有第二项接续，峰值并发六；不冒充十个桌面侧边栏会话同时活跃。主线程负责标准解析器、集成、依赖、CI和原件回收。
+- 推送前295项Python、全部已跟踪服务器Node、61个MATLAB文件R2021a语法、资产/技能/Family B/导出静态检查、8项生成器smoke及新增时间/解析器16项通过。文档同步、标准npm ci、workflow YAML/触发范围、29文件冻结复核通过；完整静态评分70/100、runtime_pending，新增原生修复仍待本轮licensed CI。最后评测README同步后另复核冻结和说明测试，不借历史90分称本轮已通过。
