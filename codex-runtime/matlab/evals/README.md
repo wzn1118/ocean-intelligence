@@ -7,12 +7,12 @@ depth therefore form a crossed design instead of a one-to-one confounded axis.
 
 ## Current Evidence
 
-Round-22 run 34002693563 (remote commit `0f677978`) is `completed/failure`.
-R2021a/R2024b each passed 19/20 primary stages and R2026a passed 20/20, 58/60 in
-total. `evaluator-runtime` passed on all three. Each original evaluator result
+Round-23 run 34004200751 (remote commit `9593a0cd`) is `completed/failure`.
+R2021a/R2024b/R2026a each passed 20/20 primary stages, 60/60 in total.
+`evaluator-runtime` passed on all three. Each original evaluator result
 remains score 90 with `runtime_pending`; full visual approval is absent.
-The two older `family-b-runtime` failures are `astra_comparison_trial:FontUnavailable`
-at original model-source line 118, an extra listfonts enumeration assertion,
+The revised model source now completes on all three releases. Round-22's two
+older `astra_comparison_trial:FontUnavailable` failures remain historical evidence,
 not evidence of a missing system font. All three evaluator reports still retain
 4/4 input-bound declarations, separate from the model trial and four-positive,
 36/36 synthetic native reader suite. These layers do not certify real-sea analysis.
@@ -23,7 +23,7 @@ success and report construction do not clear these failures or grant a CI pass.
 ### Model-Generated Trial
 
 The unchanged first model-generated `.m` in `../tests/model-generated-round22/`
-was executed for the first time in this run. On R2026a, the trial records
+was executed for the first time in round-22 run 34002693563. On R2026a, the trial records
 `matlab_call_completed=true`, `native_proof_status=passed_before_and_after_export`,
 `export_status=completed` and `manifest_status=passed`: full v3 is read from the
 same figure before/after native PNG/PDF/SVG export. The original model-selected
@@ -35,7 +35,7 @@ granting full visual approval;
 `visual_verified=false`, `desktop_interaction_verified=false` and synthetic
 input limits remain. R2021a/R2024b stopped at construction: native proof,
 exports and manifest were `not_run`. Retain both older failures and the R2026a
-success; neither the pending revision nor evaluator success overwrites them.
+success; neither a later revision nor evaluator success overwrites them.
 
 Faraday viewed the original PNG and independently rendered PDF/SVG, including
 title/statistics, legend and data-region details. Titles, axis labels and legends
@@ -54,8 +54,13 @@ The same original Astra thread completed two revision turns with recorded
 `../tests/model-generated-round23/astra_comparison_trial.m` is 9405 bytes,
 SHA-256 `3faec2ab0fd5d7a2e5fcf43a211f3848f399e6a28eae2618566ba3ec6f4021f0`.
 It only adds the existing `oi_font_available` dependency and replaces the extra
-enumeration assertion with that repository API. The revised source has not run
-in MATLAB. The original 9303-byte source remains unchanged, SHA-256
+enumeration assertion with that repository API. Round-23 now records successful
+calls, same-figure complete v3 before/after export and PNG/PDF/SVG manifests on
+all three releases. Independent physical checks pass 2/3, 2/3 and 3/3 artifacts
+respectively; the two old-release PDFs still fail Courier embedding. Actual
+PNG/PDF inspection finds old-release legend overflow and modern-release
+statistics/tick crowding. It does not grant full visual approval or CJK coverage.
+The original 9303-byte source remains unchanged, SHA-256
 `508a8c8430c6d0d28797df1bc4256c1eca24eafe7fb816c8b77f686aa121e665`.
 Font enumeration, exact family availability and actual glyph rendering are
 different evidence. `oi_font_available` accepts an exact family match from

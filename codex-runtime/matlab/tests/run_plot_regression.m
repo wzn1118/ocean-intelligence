@@ -280,6 +280,13 @@ assert(valid_count + missing_count == total_count, ...
 contract.missing.total_count = total_count;
 contract.missing.valid_count = valid_count;
 contract.missing.missing_count = missing_count;
+contract.shape = num2cell(contract.shape);
+encoded_shape = jsonencode(contract.shape);
+decoded_shape = jsondecode(encoded_shape);
+assert(startsWith(encoded_shape, "[") && endsWith(encoded_shape, "]") ...
+    && isequal(double(decoded_shape(:))', cell2mat(contract.shape)), ...
+    "run_plot_regression:ScienceShapeSerialization", ...
+    "Scientific shape must remain an array of dimension sizes in JSON");
 end
 
 function contract = with_qc(contract, variable, alignment, flag_meanings)

@@ -296,3 +296,16 @@
 - 追加交互破坏反例已覆盖先绑定后解绑、移除/替换点、清空父节点及不确定分支，仍保留无关tooltip/style更新；依赖隔离测试确认acorn/css-select/parse5从指定NODE_PATH解析。相关524项及全部已跟踪服务器加新三测试文件1067项通过，未运行用户另有的未跟踪browser-service测试。独立修订科学审查57项声明与原fixture重算一致，没有借用首版R26给新版补签。
 - 推送前351项Python、8项router smoke、资产/技能/Family B/导出静态检查、shell语法和workflow YAML/报告触发范围复核通过；67个MATLAB文件通过UTF-8/R2021a语法检查，前端TypeScript/Vite构建通过。冻结33文件重新生成并核对，只有本轮检查器/测试/评测说明三份内容hash改变。复杂canvas旧包独立回放确实拒绝12张白图，R24 DISPLAY仅声明及有限像素一致，R26仍不适用。
 - 标准server npm ci完成；完整静态评测再次通过351项框架测试，结果 `/tmp/matlab-twentythird-static-evaluation.json` 为70/100、runtime_pending，不混同上一轮原生90分。实际修订图、新图例A/B及报告入口候选均仍待各自原生/产品实跑，不把本地测试、既有模型生成或源码挂载说成生产热更新。用户原有README、Astra/CLI部署、browser-service、Copernicus及Octave改动不随本批提交。
+
+## 第二十四批接续
+
+- 第二十三批本地 `3fdbdf559f396a5f07056304fa67f46755b007e2`、远端 `9593a0cd9ec44971cb4c3df7fa7aa77c01209949`，run34004200751 已经 GitHub API 确认 completed/failure。三版各20/20，共60/60；原始 evaluator 仍90/runtime_pending。修订 Astra source 三版均完成原生调用、完整同图 v3 导出前后核对与三格式 manifest；独立模型产物外检为2/3、2/3、3/3，旧两版 Courier 和实图缺陷仍保留。具体见 `native-ci-review-round24.md`，不是100分或真实海区通过。
+- 图例 A/B 独立审阅支持仅在固定比较 fixture 的 R2021a 调用处保留 axes 外置图例，消除已经复现的 xlabel 遮挡；其他版本、默认 builder、数据和门槛不改。六个一维 regression shape 在三版都被 JSON 编成标量，生产端改为 cell 数组并断言数组及数值往返；消费者仍拒绝标量。两项正式调用修复待下一次原生 CI。
+- 新四候选温度 fixture 恢复诊断区分 baseline、skip-reference-pdf、skip-canvas-pdf、draw-before-delete，保留真实 terminal PNG、每阶段 renderer/原对象状态与失败。每候选自有新 figure，但同一 MATLAB 进程，不能称为全新进程隔离；仅旧两版适用。固定子路径独立 try/catch，不增加主三候选、20阶段或分数，也不声称纯白已修复。
+- 报告新函数源码固定在服务绑定的 `<reportId>-matlab/` 直属目录，允许与函数同名的合法 ASCII `.m` basename，旧 root 前缀脚本兼容。新路径拒绝层级、链接、超长名称和关键字，不能由查询参数改成其他报告目录；命名通过不证明语法、函数归属或 MATLAB 执行。62项直接合同测试及新增真实 HTTP/fake Codex 范围测试保留完整报告失败，二次读取的 TOCTOU 仍须稳定文件树。
+- 十个原线程本批均已分派具体工作：Dirac 原始 Argo 归一化；Confucius 报告组件及交互修复；Heisenberg 隔离实跑环境；Hume 全量浏览器验收；Aristotle 源目录合同；Huygens 原生图例 A/B；Laplace T-S 原生 reader/实际接口；Boole canvas 恢复诊断；Faraday 模型图物理与视觉审阅；Euler 中文任务相关提示/技能与文档。峰值六并发，不冒充十个桌面侧边栏会话或定时自动化。
+- 原始 Argo 本地档案58061字节，SHA-256 `33959a0d9296cf3d0739375d0d551550d493dddbe3aa8cc3606b67ac7df0b7fa`，1平台、3次非连续剖面、1785层。Dirac 的15项独立静态测试与全部值/QC投影通过，仅在临时目录，不等于来源认证或 MATLAB。压力仍为 decibar，不补深度或未提供的不确定度。
+- Hume 首次全量手写组件验收7140次 hover/Tab 失败，包含错误行、tooltip 离屏、手机116px布局位移及触摸详情清空。Confucius 新候选固定详情区与输入状态，224项定向真实输入、15项静态测试通过；旧8原件不变，Hume 新一轮独立全量尚在进行。此组件不是 Astra 模型输出，也没有 native PNG/PDF 或完整报告通过。
+- 新内置 Astra 实跑使用183文件只读 Git 快照、独立输出/home/SQLite、原认证只读挂载、MCP关闭和真实 gpt-6-astra/high/never/danger-full-access。初次默认 bridge 网络不通；仅改自有容器网络后 HEAD200但原请求超时。第二次 private 网络 HEAD200，native CLI仍持续 responseStreamDisconnected，0工具产出后超时；11条实际服务错误已归档。两次只清理自有容器，原件和生产身份/启动时间不变。
+- 实际运行镜像没有系统 CA bundle，Node 自带证书使 HEAD 成功不能代表 Rust CLI成功；owned 容器 apt-get update 因受限setgroups返回100，没有安装或提权。第三次 `round24-r24c` 只读挂载系统 CA 到标准路径，保留 TLS 验证。其真实线程 `01a0747b-ae57-74e2-a5d1-1e23a7176d7d` 已出现工具调用与 `astra_argo_trial.m`，报告生成仍在进行；旧失败不抹去。此时未生成原生 MATLAB 图件，也不把实际启动写成完整验收。
+- 推送前本地351项框架测试、68份 MATLAB R2021a 语法、8项router smoke、资产检查及shell语法通过；完整静态评分70/runtime_pending。冻结33文件仅更新本批evals说明及固定比较调用的两个hash。文档定向复核36项及全部服务器回归再次通过，TAP记录在 `/tmp/matlab-round24-server-tests.tap`，排除用户另有的未跟踪browser-service测试。原生运行及实际模型结果在后续记录，不提前记完成。

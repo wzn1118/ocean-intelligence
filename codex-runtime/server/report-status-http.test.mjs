@@ -333,6 +333,32 @@ test('synthetic HTTP does not borrow the generic manifest or another report MATL
   assert.ok(!harness.reads().some((entry) => /\/(?:figures\.json|other-report-source\.m)$/u.test(entry.relative)), JSON.stringify(harness.reads()));
 });
 
+test('synthetic HTTP binds callable MATLAB basenames inside the fixed report source directory', async (context) => {
+  const harness = await createHarness(context);
+  const threadId = await harness.thread();
+  assert.equal((await harness.turn(threadId)).status, 202);
+  writeIncompleteSyntheticReport(harness);
+  const directory = harness.generatedRoot();
+  const sourceDirectory = path.join(directory, `${REPORT_ID}-matlab`);
+  mkdirSync(sourceDirectory);
+  const sourcePath = path.join(sourceDirectory, 'ocean_trial.m');
+  writeFileSync(sourcePath, 'function result = ocean_trial()\nresult = [];\nend\n');
+  const foreignDirectory = path.join(directory, 'another-report-matlab');
+  mkdirSync(foreignDirectory);
+  writeFileSync(path.join(foreignDirectory, 'foreign_trial.m'), 'function result = foreign_trial()\nresult = [];\nend\n');
+  harness.clearReads();
+  const body = assertEvidenceFailed(await harness.status(threadId,
+    '&sourceDirectory=another-report-matlab&sourcePaths=another-report-matlab/foreign_trial.m'),
+  ['report-illustrated-evidence-failed']);
+  assert.ok(!body.reportEvidenceQuality.violations.includes('report-matlab-sources-missing'));
+  assert.equal(body.illustratedReportEvidence.pathsOk, true);
+  assert.equal(body.matlabPlotQuality.sourceFilesPresent, true);
+  assert.ok(harness.reads().some((entry) => entry.relative.endsWith(
+    `/generated/${REPORT_ID}-matlab/ocean_trial.m`)));
+  assert.ok(!harness.reads().some((entry) => entry.relative.includes('another-report-matlab')));
+  assert.equal(body.complete, false);
+});
+
 test('synthetic HTTP reports missing historical policy without reading generated evidence or legacy prose', async (context) => {
   const harness = await createHarness(context);
   const threadId = await harness.thread();

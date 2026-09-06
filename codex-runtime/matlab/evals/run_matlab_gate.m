@@ -322,7 +322,10 @@ assert(result.ValidCount + result.MissingCount == prod(contract.shape), ...
 oi_apply_axes(axes_handle, theme);
 if isfield(result, "Legend") && isscalar(result.Legend) && isgraphics(result.Legend)
     legend_location = string(result.Legend.Location);
-    if any(legend_location == ["northoutside" "southoutside" "eastoutside" "westoutside"])
+    retain_axes_legend = string(identifier) == "paired-observation-model" ...
+        && string(version('-release')) == "2021a";
+    if any(legend_location == ["northoutside" "southoutside" "eastoutside" "westoutside"]) ...
+            && ~retain_axes_legend
         result.Legend.Layout.Tile = erase(legend_location, "outside");
     end
 end

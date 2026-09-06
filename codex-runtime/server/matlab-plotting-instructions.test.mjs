@@ -513,15 +513,14 @@ test('binds explicit rendered audit declarations and never hides known older PDF
   }
 });
 
-test('repository documents preserve original model outcomes and separate unexecuted revision and canvas defects', () => {
+test('repository documents separate executed revision, scoped audits and historical failures', () => {
   for (const [name, document] of [['SKILL', repositorySkill], ['README', repositoryReadme],
     ['evals README', evaluationReadme]]) {
-    for (const term of ['34002693563', '0f677978', '19/20', '20/20', '58/60', '90', 'runtime_pending',
-      'completed/failure', 'SampleLabels', 'cellstr',
+    for (const term of ['SampleLabels', 'cellstr',
       'test_comparison_native_evidence', 'test_comparison_uncertainty', '3/4', '4/4',
       'schema_version=3', 'runtime_evidence.figures', 'runtime_declaration_verified',
       'not_provided', '12/12', 'pdf_font_embedding', 'oi_annotate_svg:UnsupportedNormalization']) {
-      assert.ok(document.includes(term), `${name} missing current evidence boundary: ${term}`);
+      assert.ok(document.includes(term), `${name} missing scientific or artifact evidence boundary: ${term}`);
     }
     assert.doesNotMatch(document, /still awaits round-18 licensed CI|仍待第18轮 CI|successful end-to-end evidence is still absent/u);
   }
@@ -541,7 +540,6 @@ test('repository documents preserve original model outcomes and separate unexecu
   assert.match(repositorySkill, /earlier archived reports retain 3\/4 native-proof coverage/u);
   for (const document of [repositorySkill, evaluationReadme]) {
     assert.match(document, /four positive cases and 36\/36 reader-negative cases per release/u);
-    assert.match(document, /has not run\s+in MATLAB/u);
     assert.match(document, /nonempty ones (?:still require rejection|must be rejected)/u);
     assert.match(document, /original\s+three-candidate native PDF probe stage, score, or promoted report artifacts/u);
     assert.match(document, /not (?:a trusted visual audit or )?overall CI (?:pass|or visual approval)/u);
@@ -558,11 +556,59 @@ test('repository documents preserve original model outcomes and separate unexecu
     assert.match(document, /(?:vector spacing is tight with smaller text|PDF\/SVG also have tight\s+spacing, smaller statistical text)/u);
   }
   assert.match(repositoryReadme, /每版完成 4 个正例及 36\/36 个 reader 负例/u);
-  assert.match(repositoryReadme, /修订源尚未 MATLAB 执行/u);
+  for (const document of [repositorySkill, repositoryReadme]) {
+    for (const term of ['34004200751', '9593a0c', '60/60', 'family-b/astra-comparison-trial',
+      '2/3', 'pdf_font_embedding=failed', 'native-ci-review-round24.md']) assert.ok(document.includes(term), term);
+    assert.doesNotMatch(document, /has not run\s+in MATLAB|修订源尚未 MATLAB 执行/u);
+    assert.doesNotMatch(document, /Argo R2024b|round24-r24[bc]/u);
+  }
+  const currentSkill = repositorySkill.split('Current evidence:')[1].split('\n\n')[0];
+  const currentReadme = repositoryReadme.split('当前第23轮')[1].split('\n\n')[0];
+  const currentEvaluation = evaluationReadme.split('## Current Evidence\n\n')[1].split('\n\n')[0];
+  for (const [name, currentEvidence] of [['SKILL', currentSkill], ['README', currentReadme],
+    ['evals README', currentEvaluation]]) {
+    for (const term of ['34004200751', '9593a0c', '20/20', '60/60', '90', 'runtime_pending', 'completed/failure']) {
+      assert.ok(currentEvidence.includes(term), `${name} missing current evidence boundary: ${term}`);
+    }
+  }
+  assert.match(currentSkill, /R2021a\/R2024b\/R2026a each passed 20\/20 primary stages, 60\/60 in total/u);
+  assert.match(currentSkill, /score 90 with `runtime_pending`/u);
+  assert.match(currentSkill, /postprocessing failed and full visual approval is absent/u);
+  assert.match(currentSkill, /completed native calls, full same-figure v3 before\/after export, native PNG\/PDF\/SVG and manifest validation on all three releases/u);
+  assert.match(currentSkill, /2\/3 on R2021a, 2\/3 on R2024b and 3\/3 on R2026a/u);
+  assert.match(currentSkill, /both older PDFs retain `pdf_font_embedding=failed` and unembedded Courier/u);
+  assert.match(currentSkill, /Faraday inspected three PNGs and three PDF renders/u);
+  assert.match(currentSkill, /three SVGs received physical\/structural checks only/u);
+  assert.match(currentSkill, /legend-title overflow and dashed samples crowding text/u);
+  assert.match(currentSkill, /R2026a statistics crowd the top ticks and reference lines still cross points/u);
+  assert.match(currentSkill, /does not grant full visual or CJK approval/u);
+  assert.match(currentReadme, /R2021a\/R2024b\/R2026a 各 20\/20，合计 60\/60/u);
+  assert.match(currentReadme, /原始评分仍为 90、状态仍为 `runtime_pending`/u);
+  assert.match(currentReadme, /已在三版完成原生调用、同图导出前后完整 v3、PNG\/PDF\/SVG 原生导出及 manifest 验证/u);
+  assert.match(currentReadme, /R2021a 为 2\/3、R2024b 为 2\/3、R2026a 为 3\/3/u);
+  assert.match(currentReadme, /两旧版 PDF 仍为 `pdf_font_embedding=failed`/u);
+  assert.match(currentReadme, /Faraday 已查看三份 PNG 和三份 PDF 渲染，三份 SVG 仅做物理\/结构检查/u);
+  assert.match(currentReadme, /旧版 PDF 图例标题越框、虚线样例压字/u);
+  assert.match(currentReadme, /R2026a 统计贴近顶刻度、参考线仍穿点/u);
+  assert.match(currentReadme, /不批准全量视觉或 CJK/u);
+  for (const currentEvidence of [currentSkill, currentReadme]) {
+    assert.doesNotMatch(currentEvidence, /under Faraday review|仍由 Faraday 审计|不预填结果/u);
+  }
+  assert.match(currentEvaluation, /R2021a\/R2024b\/R2026a each passed 20\/20 primary stages, 60\/60 in total/u);
+  assert.match(currentEvaluation, /score 90 with `runtime_pending`; full visual approval is absent/u);
+  assert.match(currentEvaluation, /Round-22's two\s+older `astra_comparison_trial:FontUnavailable` failures remain historical evidence/u);
+  assert.match(currentEvaluation, /R2021a\/R2024b each retain\s+four `pdf_font_embedding` failures/u);
+  assert.match(currentEvaluation, /do not clear these failures or grant a CI pass/u);
+  assert.match(repositorySkill, /Historical round 22, run 34002693563/u);
+  assert.match(repositoryReadme, /历史第22轮 run34002693563/u);
+  assert.match(evaluationReadme, /was executed for the first time in round-22 run 34002693563/u);
+  assert.match(evaluationReadme, /R2021a\/R2024b stopped at construction: native proof,\s+exports and manifest were `not_run`/u);
+  assert.match(repositorySkill, /A local projection without native PNG\/PDF remains `complete=false`/u);
+  assert.match(repositoryReadme, /无原生 PNG\/PDF 的投影保持 `complete=false`/u);
   assert.match(repositoryReadme, /严格空 AnnotationPane（非空拒绝）/u);
   assert.match(repositoryReadme, /`not_applicable`，不是 pass/u);
   assert.match(repositoryReadme, /均不计入原三 candidate 的 native PDF probe stage、评分或正式报告产物/u);
-  assert.match(repositoryReadme, /整体 CI 失败，视觉未验证/u);
+  assert.match(currentReadme, /后处理失败，全量视觉仍未通过/u);
   assert.match(repositoryReadme, /共 12 张恢复 PNG 全白/u);
   assert.match(repositoryReadme, /Faraday 已实际查看三格式/u);
   assert.match(repositoryReadme, /标题、轴标签与图例完整，PDF 字体嵌入/u);

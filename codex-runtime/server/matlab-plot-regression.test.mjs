@@ -1114,6 +1114,30 @@ test('accepts a complete scientific data contract in strict mode', () => {
   assert.deepEqual(result.figures[0].scienceSemantics.dimensions.shape, [2, 2]);
 });
 
+test('requires a JSON array for a rank-one native scientific shape', () => {
+  const fixture = createFixture();
+  const science = scienceContract();
+  delete science.dimensions;
+  Object.assign(science, {
+    shape: [4],
+    rank: 1,
+    dimensionOrder: ['sample'],
+    coordinates: { sample: { count: 4, unit: '1', direction: 'increasing' } },
+    units: { sample: '1', value: 'degC' },
+  });
+  fixture.manifest.figures[0].scientific_data_contract = science;
+  writeManifest(fixture);
+  const valid = inspect(fixture, { requireScienceContract: true });
+  assert.equal(valid.scienceSemanticsOk, true);
+  assert.deepEqual(valid.figures[0].scienceSemantics.dimensions.shape, [4]);
+
+  science.shape = 4;
+  writeManifest(fixture);
+  const scalar = inspect(fixture, { requireScienceContract: true });
+  assert.equal(scalar.scienceSemanticsOk, false);
+  assert.ok(scalar.figures[0].scienceSemantics.violations.includes('dimensions.shape'));
+});
+
 test('reports an explicit not-provided status for legacy manifests and fails strict mode', () => {
   const fixture = createFixture();
   const compatible = inspect(fixture);

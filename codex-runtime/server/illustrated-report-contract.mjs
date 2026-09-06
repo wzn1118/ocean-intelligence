@@ -16,6 +16,11 @@ import { parseOceanEvidenceTime } from './ocean-evidence-time.mjs';
 import { parseOceanReportHtml } from './ocean-report-html-parser.mjs';
 
 const REPORT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{7,79}$/u;
+const MATLAB_COMPATIBLE_SOURCE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,62}\.m$/u;
+const MATLAB_KEYWORDS = new Set([
+  'break', 'case', 'catch', 'classdef', 'continue', 'else', 'elseif', 'end', 'for', 'function',
+  'global', 'if', 'otherwise', 'parfor', 'persistent', 'return', 'spmd', 'switch', 'try', 'while',
+]);
 export const MINIMUM_REPORT_VISUALS = 20;
 export const MINIMUM_REPORT_HEADINGS = 28;
 export const MINIMUM_MARKDOWN_BYTES = 18_000;
@@ -286,6 +291,12 @@ export function inspectReportMatlabSources({ outputDirectory: directory, expecte
     try {
       const entries = readdirSync(outputDirectory.directory, { withFileTypes: true });
       for (const entry of entries) {
+        if (entry.name === `${expectedReportId}-matlab`) {
+          const scoped = inspectDirectMatlabSourceDirectory(entry.name, outputDirectory);
+          sourcePaths.push(...scoped.sourcePaths);
+          violations.push(...scoped.violations);
+          continue;
+        }
         if (!entry.name.startsWith(`${expectedReportId}-`) || !/\.m$/iu.test(entry.name)) continue;
         const location = inspectEvidencePath(entry.name, outputDirectory, true);
         if (!location.ok || readEvidence(location) === undefined) {
@@ -298,6 +309,47 @@ export function inspectReportMatlabSources({ outputDirectory: directory, expecte
   }
   if (sourcePaths.length === 0) violations.push('missing');
   return { ok: violations.length === 0, sourcePaths: sourcePaths.sort(), violations };
+}
+
+function inspectDirectMatlabSourceDirectory(relativeDirectory, outputDirectory) {
+  const sourcePaths = [];
+  const violations = [];
+  const directory = inspectOutputDirectory(path.join(outputDirectory.directory, relativeDirectory));
+  if (!directory.ok) {
+    return { sourcePaths, violations: directory.violations.map(violation => `${relativeDirectory}.${violation}`) };
+  }
+  const unchanged = () => {
+    const current = inspectOutputDirectory(directory.directory);
+    return current.ok && current.realDirectory === directory.realDirectory
+      && pathInside(outputDirectory.realDirectory, current.realDirectory)
+      && sameFileIdentity(current.identity, directory.identity);
+  };
+  try {
+    const entries = readdirSync(directory.directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!unchanged()) {
+        violations.push(`${relativeDirectory}.directory_changed`);
+        break;
+      }
+      const relative = `${relativeDirectory}/${entry.name}`;
+      if (!MATLAB_COMPATIBLE_SOURCE_NAME.test(entry.name) || MATLAB_KEYWORDS.has(entry.name.slice(0, -2))) {
+        violations.push(`${relative}.invalid_source_name`);
+        continue;
+      }
+      const location = inspectEvidencePath(relative, outputDirectory, true);
+      if (location.ok && location.identity.nlink !== 1) {
+        violations.push(`${relative}.hardlink`);
+      } else if (!location.ok || readEvidence(location) === undefined) {
+        violations.push(`${relative}.${location.violations.join('.') || 'unreadable'}`);
+      } else sourcePaths.push(location.file);
+    }
+    if (!unchanged() && !violations.includes(`${relativeDirectory}.directory_changed`)) {
+      violations.push(`${relativeDirectory}.directory_changed`);
+    }
+  } catch {
+    violations.push(`${relativeDirectory}.unavailable`);
+  }
+  return { sourcePaths, violations };
 }
 
 function validReportId(value) {
