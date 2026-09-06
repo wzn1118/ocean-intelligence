@@ -309,3 +309,16 @@
 - 新内置 Astra 实跑使用183文件只读 Git 快照、独立输出/home/SQLite、原认证只读挂载、MCP关闭和真实 gpt-6-astra/high/never/danger-full-access。初次默认 bridge 网络不通；仅改自有容器网络后 HEAD200但原请求超时。第二次 private 网络 HEAD200，native CLI仍持续 responseStreamDisconnected，0工具产出后超时；11条实际服务错误已归档。两次只清理自有容器，原件和生产身份/启动时间不变。
 - 实际运行镜像没有系统 CA bundle，Node 自带证书使 HEAD 成功不能代表 Rust CLI成功；owned 容器 apt-get update 因受限setgroups返回100，没有安装或提权。第三次 `round24-r24c` 只读挂载系统 CA 到标准路径，保留 TLS 验证。其真实线程 `01a0747b-ae57-74e2-a5d1-1e23a7176d7d` 已出现工具调用与 `astra_argo_trial.m`，报告生成仍在进行；旧失败不抹去。此时未生成原生 MATLAB 图件，也不把实际启动写成完整验收。
 - 推送前本地351项框架测试、68份 MATLAB R2021a 语法、8项router smoke、资产检查及shell语法通过；完整静态评分70/runtime_pending。冻结33文件仅更新本批evals说明及固定比较调用的两个hash。文档定向复核36项及全部服务器回归再次通过，TAP记录在 `/tmp/matlab-round24-server-tests.tap`，排除用户另有的未跟踪browser-service测试。原生运行及实际模型结果在后续记录，不提前记完成。
+- 本批实际提交本地 `ce41643`、远端 `8ef3d8ef71a61241a27401b50616d21ba993d6a3`，启动run34006193164。后续继续读实际三版产物；静态阶段通过不替代MATLAB或内容门禁。
+- 第三次真实模型生成产生六文件后被协调器9分钟限时中断，原生成仍incomplete。主线程用字节一致的自有SQLite与rollout恢复同一真实线程，R24d只读复核completed，原rollout完整前缀及六原件不变；实际上下文仍astra/high/never/danger-full-access，生产未刷新。详见 `runtime-generation-result-round24.md`，不是native或完整报告通过。
+- Hume独立手写组件复查完成：7140/7140全量hover/Tab、130/130有效冲突补测、2/2附加小视口；52张截图与70个受保护文件hash复核。初次补测72条焦点前提错误原记录保留，重新建立真实焦点后独立执行，不把无效测试计通过。组件不是Astra输出，也没有原生图件或完整报告通过。
+
+## 第二十五批准备
+
+- 归档原Astra Argo源码、Markdown、输入及两提示，锁定原始生成incomplete与复核completed事实，准备独立三版原生入口；不改生成源码字节、不混入旧comparison-v3或旧60阶段分母。原R2021a实际无JVM，驱动须沿用既有无JVM路径及哈希支持，不能在调用源码前强制JVM。
+- 主线程复现原交互HTML机器字段、1基点索引、异常状态枚举与有限绑定不兼容；补齐报告提示、技能和交互规范的canonical字段、0基DOM索引与1基来源行区别，并增加合同正反例。校验器不放宽；HTML/浏览器通过不得给MATLAB或视觉补签。
+- 原代理继续分批复用：Heisenberg跟踪本轮CI与原生恢复阶段；Laplace完善独立Argo driver/adapter/reader；Aristotle核对实际报告全部科学断言；Boole实际浏览器检查Astra HTML；Faraday补归档哈希及状态合同测试。Hume完成手写组件独立全量验收后释放槽位。保持最多六并发，不声称十个侧边栏会话同时活跃。
+- Aristotle独立217项数值、来源和跨格式对照一致，没有认证原生图件；主报告无图、manifest无完整机器证据，统计复核不使complete=true。Boole真实浏览器检查79/93通过、14项失败；1785条键盘详情对齐，但手机整页宽662px、交互后详情离屏、密集触点重复误选、原时间/位置QC未进入点模型。缺两个压力视图及完整记录入口是能力缺项，原最小T-S生成提示并未要求这两张新图，不能冒充违背原提示的回归。20截图与原件hash均留存，主线程已查看桌面/手机原截图。
+- Faraday新增18项归档合同通过；全体已跟踪server测试及新bundle测试1160/1160通过，记录 `/tmp/matlab-round25-server-tests.tap`。新独立stage将使当前每版21阶段、三版63阶段，历史60/60分母不改，也不增加静态或原生评分。
+- 原生入口推送前351项完整框架测试通过，记录 `/tmp/matlab-twentyfifth-static-evaluation.json`；73份MATLAB源码通过R2021a语法检查，27项阶段账本与8项router测试通过。新Argo源码尚未在MATLAB执行，不能由这些静态结果补签。
+- 用户续跑要求新增MCP接口、分析和报告美观度：Dirac修复统计参数与非有限数边界，Euler修复MCP调用参数/输出序列化，Confucius将已验证的逐点组件做成可复用离线附录。保持原始Astra输出不变，新的手写组件与Python分析均不冒充MATLAB执行。

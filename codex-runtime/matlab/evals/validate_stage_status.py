@@ -28,6 +28,7 @@ REQUIRED_STAGES = (
     "hovmoller-time-axis",
     "family-a-contracts",
     "family-b-runtime",
+    "astra-argo-native",
     "family-c-contracts",
     "export-metadata",
     "manifest-evidence-integrity",

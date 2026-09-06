@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "scope": "isolated_builtin_codex_argo_candidate_incomplete_generation_and_completed_read_only_review",
+  "generated_source_edited": false,
+  "source": {
+    "file": "astra_argo_trial.m",
+    "bytes": 22579,
+    "sha256": "aaed9d3606d52f43bdefbfe220a6a187e311a4c78109f1191ca3b2c2ad548df0"
+  },
+  "report": {
+    "file": "astra-argo-round24.md",
+    "bytes": 9819,
+    "sha256": "b2baec1748545efa399c2458a368c378de678be740679baabcedfafdf4c12099"
+  },
+  "input": {
+    "file": "argo-4903822-30d.json",
+    "bytes": 58061,
+    "sha256": "33959a0d9296cf3d0739375d0d551550d493dddbe3aa8cc3606b67ac7df0b7fa",
+    "synthetic": false,
+    "upstream_authenticity": "not_independently_verified",
+    "platform_count": 1,
+    "profile_count": 3,
+    "layer_count": 1785,
+    "pressure_unit": "decibar",
+    "uncertainty": "not_provided"
+  },
+  "prompts": [
+    {
+      "file": "generation-prompt.zh.txt",
+      "bytes": 4104,
+      "sha256": "2b2c3c4fc182b0caff4a81e7efee0c9d43e86698dcdc3ae7ed8fb54ccf9f7d52"
+    },
+    {
+      "file": "review-prompt.zh.txt",
+      "bytes": 1948,
+      "sha256": "19dada738708de3e5ea9d6d912daf5c4756d6a6d254b570c3c42f22c188cb6b2"
+    }
+  ],
+  "generation": {
+    "thread_id": "01a0747b-ae57-74e2-a5d1-1e23a7176d7d",
+    "cli_version": "0.153.4",
+    "provider_id_from_session_meta": "OpenAI",
+    "model_from_both_turn_contexts": "gpt-6-astra",
+    "effort": "high",
+    "approval_policy": "never",
+    "sandbox_policy": "danger-full-access",
+    "model_identity_scope": "Recorded runtime identifiers, not independent model architecture attestation.",
+    "generation_status": "incomplete",
+    "reason": "turn_1_deadline_no_retry",
+    "turns": [
+      {
+        "id": "01a0747b-ae88-7eb2-845f-76d14aba3fe5",
+        "output_mode": "conversation",
+        "started_at": "2026-09-06T02:10:57.784Z",
+        "coordinator_interrupted_at": "2026-09-06T02:19:58.679Z",
+        "status": "interrupted",
+        "coordinator_result": "incomplete_no_model_retry",
+        "custom_tool_call_count": 8
+      },
+      {
+        "id": "01a07489-b34c-7e10-8d01-55a38eb5059f",
+        "output_mode": "illustrated_report",
+        "started_at": "2026-09-06T02:26:16.504Z",
+        "completed_at": "2026-09-06T02:28:07.313Z",
+        "status": "completed",
+        "scope": "read_only_review_only_no_generation_completion",
+        "custom_tool_call_count": 3
+      }
+    ],
+    "contexts": [
+      {
+        "turn_id": "01a0747b-ae88-7eb2-845f-76d14aba3fe5",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "approval_policy": "never",
+        "sandbox": "danger-full-access",
+        "cwd": "/workspace/.runtime/matlab-capability-round24/workspace/.runtime/codex-users/61f8903b86177271dd36cf69806b1ba0",
+        "timestamp": "2026-09-06T02:10:57.853Z"
+      },
+      {
+        "turn_id": "01a07489-b34c-7e10-8d01-55a38eb5059f",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "approval_policy": "never",
+        "sandbox": "danger-full-access",
+        "cwd": "/workspace/.runtime/matlab-capability-round24/workspace/.runtime/codex-users/61f8903b86177271dd36cf69806b1ba0",
+        "timestamp": "2026-09-06T02:26:16.573Z"
+      }
+    ]
+  },
+  "generation_snapshot": {
+    "local_commit": "3fdbdf559f396a5f07056304fa67f46755b007e2",
+    "remote_commit": "9593a0cd9ec44971cb4c3df7fa7aa77c01209949",
+    "snapshot_file_count": 183,
+    "all_snapshot_source_bytes_unchanged": true,
+    "production_identity_and_start_unchanged": true,
+    "method": "Isolated archived runtime with private network, readonly system CA and authentication; byte-exact original rollout and own SQLite resumed at the same original container workspace path; only owned containers removed."
+  },
+  "artifacts": [
+    {
+      "path": "astra_argo_trial.m",
+      "bytes": 22579,
+      "sha256": "aaed9d3606d52f43bdefbfe220a6a187e311a4c78109f1191ca3b2c2ad548df0"
+    },
+    {
+      "path": "astra-argo-round24-build.mjs",
+      "bytes": 38137,
+      "sha256": "54828522c5f4cb407f4f45f7b9a0df4664c145ffa077625feca460f6f5507906"
+    },
+    {
+      "path": "astra-argo-round24-figures.json",
+      "bytes": 12832,
+      "sha256": "d4de30b147bedfc08e99eefbc615c4319e801cac6e1a0a5a8ec0b5fa66f6c397"
+    },
+    {
+      "path": "astra-argo-round24-points.html",
+      "bytes": 1664512,
+      "sha256": "c7bd461ec48afeb15e2769a0540d1954c7cc213b9f009ec5e29114db69489bfb"
+    },
+    {
+      "path": "astra-argo-round24.html",
+      "bytes": 14193,
+      "sha256": "1ba3be4da1d0fe7a33386ab7e6a0c9a192c0a2c5607051cec4d81da7059b5722"
+    },
+    {
+      "path": "astra-argo-round24.md",
+      "bytes": 9819,
+      "sha256": "b2baec1748545efa399c2458a368c378de678be740679baabcedfafdf4c12099"
+    }
+  ],
+  "review": {
+    "status": "completed",
+    "artifacts_unchanged": true,
+    "original_rollout_prefix_preserved": true,
+    "report_id": "astra-argo-round24",
+    "report_complete": false,
+    "report_evidence_ok": false,
+    "report_violations": [
+      "report-illustrated-evidence-failed",
+      "report-point-interaction-missing",
+      "report-matlab-sources-missing",
+      "report-matlab-plot-quality-failed"
+    ],
+    "known_limitations": [
+      "Archived service source ownership prefix does not recognize the legal MATLAB function basename; fixed source directory is a later repository change, not applied to this trial.",
+      "Original manifest figures array is empty and no native image exists in the candidate.",
+      "Native DataTips do not expose the complete record provenance or QC fields.",
+      "The original manifest precedes later generated source/report files; this is a pending draft, not completed evidence."
+    ]
+  },
+  "local_evidence": {
+    "generation_activation": {
+      "path": ".runtime/matlab-capability-round24-r24c/activation.json",
+      "file": "activation.json",
+      "bytes": 3119,
+      "sha256": "0d25a385cde50ffad939de92828fb1192968183480998c6371a4a16a7cd80f75"
+    },
+    "original_rollout": {
+      "file": "own-thread-rollout.jsonl",
+      "bytes": 848664,
+      "sha256": "6dd19381a923ab54df99946f226b7f4cf034013b6ef433a9797893ab4bd157ea",
+      "path": ".runtime/matlab-capability-round24-r24c/own-thread-rollout.jsonl"
+    },
+    "review_activation": {
+      "path": ".runtime/matlab-capability-round24-r24d/activation.json",
+      "file": "activation.json",
+      "bytes": 11960,
+      "sha256": "4eecc0afd7ff3a17b48bfbfd2eae8fd23e72e84a3c3b369828261436d84b3634"
+    },
+    "resumed_rollout": {
+      "path": ".runtime/matlab-capability-round24-r24d/own-thread-rollout.jsonl",
+      "file": "own-thread-rollout.jsonl",
+      "bytes": 1345018,
+      "sha256": "e3c164e0fd9338e4aa50904a0d00bc414e91398c9b9f8412f523703c1df5d076"
+    },
+    "publication_scope": "Coordinator-observed hashes, not signatures; full private runtime records remain local."
+  },
+  "independent_static_check": {
+    "tool": "MISS_HIT mh_lint --brief --input-encoding utf-8 --matlab 2021a",
+    "status": "passed",
+    "files": 1
+  },
+  "observed_output_contract": {
+    "page_inches": [
+      8,
+      5
+    ],
+    "planned_pixels": [
+      2400,
+      1500
+    ],
+    "planned_dpi": 300,
+    "interpretation": "Source declaration only; native figure and all exports pending."
+  },
+  "matlab_execution_status": "not_run",
+  "visual_verified": false,
+  "native_interaction_verified": false,
+  "complete_report_verified": false,
+  "score": null
+}

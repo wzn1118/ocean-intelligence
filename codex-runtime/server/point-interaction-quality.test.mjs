@@ -112,6 +112,41 @@ test('strict mode audits scientific context and real MATLAB evidence', () => {
   assert.equal(octave.checkResults['matlab-evidence'].violations[0].rule, 'authoritative-runtime-not-matlab');
 });
 
+test('canonical HTML aliases preserve one-based source rows without certifying native execution', () => {
+  const original = validPoints();
+  const points = original.map(({ id, ...record }, index) => ({
+    ...record, observation_id: id, ObservationID: id, Time: record.time,
+    TemperatureUnit: record.unit, source_row: index + 1, source_file_row: index + 1,
+  }));
+  const html = scientificHtml().replace(JSON.stringify({ points: original }), JSON.stringify({ points }))
+    .replace('data-runtime-status="passed"', 'data-runtime-status="pending"')
+    .replace('data-execution-verified="true"', 'data-execution-verified="false"')
+    .replace('data-artifact-validation="passed"', 'data-artifact-validation="pending"')
+    .replace('data-visual-inspection="passed"', 'data-visual-inspection="pending"');
+  const quality = inspectPointInteractionQuality({ html, requireScientificEvidence: true, requireMatlabEvidence: true });
+  assert.equal(quality.pointCountOk, true);
+  assert.equal(quality.stablePointIdentityOk, true);
+  assert.equal(quality.tooltipFieldsOk, true);
+  assert.equal(quality.scientificContextOk, true);
+  assert.equal(quality.matlabEvidenceOk, false);
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.deepEqual(quality.checks.filter(check => !check.ok).map(check => check.id), ['matlab-evidence']);
+});
+
+test('PascalCase-only record identity and one-based DOM indexes do not satisfy the wire contract', () => {
+  const original = validPoints();
+  const points = original.map(({ id, ...record }) => ({ ...record, ObservationID: id }));
+  const pascalOnly = validHtml().replace(JSON.stringify({ points: original }), JSON.stringify({ points }));
+  const pascalQuality = inspectPointInteractionQuality({ html: pascalOnly });
+  assert.equal(pascalQuality.stablePointIdentityOk, false);
+  assert.ok(pascalQuality.checkResults['stable-point-identity'].violations.some(violation => violation.rule === 'observation-id-missing'));
+  const oneBased = validHtml().replace(/data-point-index="(\d+)"/gu, (_, index) => `data-point-index="${Number(index) + 1}"`);
+  const indexQuality = inspectPointInteractionQuality({ html: oneBased });
+  assert.equal(indexQuality.pointCountOk, true);
+  assert.equal(indexQuality.stablePointIdentityOk, false);
+  assert.ok(indexQuality.checkResults['stable-point-identity'].violations.some(violation => violation.rule === 'rendered-point-index-coverage'));
+});
+
 for (const [timeStart, timeEnd, timezone] of [
   ['2026-09-03T00:00:00', '2026-09-03T01:00:00Z', 'UTC'],
   ['2026-09-03', '2026-09-03', 'UTC'],

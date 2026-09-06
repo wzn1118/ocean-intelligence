@@ -21,6 +21,13 @@
 - 自定义 `datacursormode.UpdateFcn` 仅限传统 figure 的显式降级，必须检查 `event.Target`、`event.DataIndex`、句柄和索引范围；不得访问 `gca`、`gcf`、base workspace、网络或磁盘。
 - 回调必须同时检查 `DataIndex` 对 `XData`、`YData` 和每个必需元数据字段都有效；可选不确定度字段不完整、ID 缺失或事件已失效时返回固定的无害提示，不得抛出二次错误。
 
+## 离线 HTML 逐点记录
+
+- HTML 与 MATLAB table 使用不同机器字段约定。单一、无歧义的 `application/json` 点模型中，每条记录提供 `observation_id`、`temperature`、`unit`、`time`、`longitude`、`latitude`、`qc`；原 `ObservationID`、`Time`、`TemperatureUnit` 等字段可原样保留，但不能仅靠这些 PascalCase 名称满足 HTML 校验。其他物理量、单位、逐项 QC 和来源元数据也须保留，别名不改变原值或语义。
+- 每个实际点元素的 `data-observation-id` 与模型记录一致；`data-point-index` 是该 JSON 数组的零基索引。原始一基 `source_row`、`source_file_row` 独立保存，不能兼作点索引。过滤、排序后仍保留显式排列，重新核验点、原记录与数组索引的对应关系。
+- 点元素保留同条记录的 `data-temperature`、`data-unit`、`data-time`、`data-longitude`、`data-latitude`、`data-qc`，可键盘聚焦，实际绑定 `pointerenter` 与 `focus`，具有 `:hover`、`:focus-visible` 样式和真实详情输出。静态工具只能证明有限绑定与声明，不能证明 handler 展示内容正确。浏览器须实测桌面与手机的鼠标、键盘、触摸、密集重叠点、提示裁切、焦点与指针冲突。
+- `data-anomaly-status` 仅使用 `present`、`absent`、`unknown`、`not-evaluated`，未评估不能写成 `not_assessed`。缺失的原生执行、导出和视觉证据仍为 pending/unverified；HTML 字段及浏览器交互通过都不能给 MATLAB release、执行、图件和视觉字段补签。
+
 ## 科学语义
 
 - `Time` 必须是逐行对齐、无 `NaT`、带时区且严格递增的 `datetime`；声明 `TimeZone` 时必须与数据一致。时间轴固定为正向，只有坐标相容的面板才能按 x 轴联动；单个有效观测也是合法输入。

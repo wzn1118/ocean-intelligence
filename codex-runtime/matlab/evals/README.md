@@ -20,7 +20,37 @@ R2026a passed 12/12 external evaluator artifact checks; R2021a/R2024b each retai
 four `pdf_font_embedding` failures, including unembedded Courier. Primary-stage
 success and report construction do not clear these failures or grant a CI pass.
 
-### Model-Generated Trial
+### Argo Candidate Trial
+
+The round-24 bundle in `../tests/model-generated-round24/` preserves the actual
+22579-byte Astra source and 58061-byte original Argo archive. The generation
+turn was interrupted after producing six files; its status remains incomplete.
+A later read-only turn completed on the same real thread with all six files
+unchanged. Source, report, input and both prompts are byte-exact, with recorded
+runtime provenance. This is not upstream authentication or a native pass.
+
+The independent `astra-argo-native` stage executes that unchanged function,
+checks its returned records and actual Scatter data against a separate input
+reader, and inspects the same figure before and after export and manifest
+creation. Its `argo-ts-native-v1` evidence is not comparison-v3 and is not yet
+consumed by the complete ocean-report checker. The stage requests PNG/PDF/SVG
+for this standalone native trial; this does not change the report profile's
+PNG/PDF rule or manufacture a completed report manifest.
+
+This adds one current required stage: 21 per release, 63 across the matrix.
+Historical 20/20 and 60/60 results keep their original denominators and cannot
+certify the new stage. Existing fixture data, scoring and visual requirements
+are unchanged. Failures remain visible while subsequent stages still collect
+evidence. No JVM is required merely to enter the driver, since R2021a has
+actually run without one; unavailable full XML inspection remains explicit.
+
+Native execution of this candidate, artifact physics, full DataTip fields and
+visual acceptance remain pending until this source actually runs and its
+outputs are inspected. One platform with three discrete profiles and 1785
+layers does not provide a complete regional report, uncertainty estimates or
+continuous coverage. Pressure remains decibar, not depth in metres.
+
+### Model-Generated Comparison Trial
 
 The unchanged first model-generated `.m` in `../tests/model-generated-round22/`
 was executed for the first time in round-22 run 34002693563. On R2026a, the trial records

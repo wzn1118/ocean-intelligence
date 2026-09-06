@@ -139,6 +139,23 @@ test('conversation turns do not receive report-specific source or replay require
   assert.equal(rendered.directory, null);
 });
 
+test('interactive report guidance separates canonical HTML fields from native evidence', () => {
+  const interactionGuide = readFileSync(new URL('../matlab/INTERACTIONS.md', import.meta.url), 'utf8');
+  const { text } = renderPrompt();
+  for (const document of [text, repositorySkill, interactionGuide]) {
+    for (const term of ['application/json', 'observation_id', 'temperature', 'unit', 'time',
+      'longitude', 'latitude', 'qc', 'data-observation-id', 'data-point-index',
+      'source_row', 'source_file_row', 'pointerenter', 'focus', ':hover', ':focus-visible',
+      'data-anomaly-status', 'not-evaluated', 'not_assessed']) assert.ok(document.includes(term), term);
+  }
+  assert.match(text, /zero-based data-point-index into that exact JSON array/u);
+  assert.match(text, /keep one-based source rows in separate source_row\/source_file_row/u);
+  assert.match(text, /preserve original source fields and all other quantities\/QC/u);
+  assert.match(text, /not the HTML wire format/u);
+  assert.match(text, /static point inspector proves neither that a handler displays correct values/u);
+  assert.match(text, /browser check must never be used to invent MATLAB release/u);
+});
+
 test('skill and adjacent README agree on implemented source ownership and replay limits', () => {
   for (const document of [repositorySkill, repositoryReadme]) {
     for (const term of ['generated/<reportId>-matlab/', 'plot_report.m', 'plot_report', '<reportId>-*.m',
