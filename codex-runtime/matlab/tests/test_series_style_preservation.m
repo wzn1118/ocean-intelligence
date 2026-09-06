@@ -17,9 +17,22 @@ originalProxyMarker = string(legendProxy.Marker);
 assert(originalObservedMarker == originalProxyMarker, ...
     "Observation and legend proxy must initially use the same marker");
 theme = oi_ocean_theme();
+if isprop(axesHandle, "Subtitle")
+    subtitle(axesHandle, "Synthetic series style preservation", "Interpreter", "none");
+end
 for iteration = 1:2
+    axesHandle.FontSize = theme.FontSize + 2;
+    if isprop(axesHandle, "Subtitle")
+        axesHandle.Subtitle.FontSize = theme.FontSize + 4;
+    end
     oi_apply_axes(axesHandle, theme);
     drawnow;
+    if isprop(axesHandle, "Subtitle")
+        assert(axesHandle.Subtitle.FontSize == theme.FontSize ...
+            && string(axesHandle.Subtitle.FontUnits) == "points" ...
+            && string(axesHandle.Subtitle.String) == "Synthetic series style preservation", ...
+            "Axes styling must restore the subtitle theme size without changing its text");
+    end
     assert(string(observed.Marker) == originalObservedMarker ...
         && string(legendProxy.Marker) == originalProxyMarker, ...
         "Axes styling must preserve matching observation and legend markers");

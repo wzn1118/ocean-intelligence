@@ -70,7 +70,7 @@ dimension-order fields remain JSON arrays. Only a bound, matching declaration
 can be verified, and its uncertainty display is errorbar rather than metadata.
 Round 13 passed this v2 path on R2021a/R2024b/R2026a. Those earlier archived
 reports retain 3/4 native-proof coverage, with comparison `not_verified`.
-Rounds 18 and 19 have 4/4 bound declarations on all three releases: every entry under
+Rounds 18/19/20 have 4/4 bound declarations on all three releases: every entry under
 `report-evidence.json`'s `runtime_evidence.figures` has
 `plot_data_evidence.status="runtime_declaration_verified"`. Do not upgrade old
 packages with evidence from this later run.
@@ -97,12 +97,22 @@ synthetic records, all 11 scatter pairs, unplotted input values, complete masks,
 statistics, release and input hashes. Model QC and uncertainty stay
 `not_provided`: never fill them with zeros or copy observation values. Missing
 observation uncertainty does not remove otherwise accepted scatter pairs.
-Runs 33997547843 and 33999054663 produced and consumed v3 on R2021a/R2024b/R2026a.
+Runs 33997547843, 33999054663 and 34000171748 produced and consumed v3 on R2021a/R2024b/R2026a.
 Consumer mutation tests are distinct from `test_comparison_native_evidence`:
 round 18 never reached that suite; round 19 completed four positive cases and
 only 5/36 reader-negative cases before an invalid SizeData setter stopped it.
-The 4/4 declarations are not native mutation-test success, independent re-execution, or visual
-approval. Legacy packages without v3 remain compatible,
+Round 20 completed four positive cases and 36/36 reader-negative cases per release
+on R2021a/R2024b/R2026a. The actual `native-reader-test-results.json` files match
+all rejection records and the job-log terminal markers
+`COMPARISON_NATIVE_READER_TEST_NEGATIVES=36` and
+`COMPARISON_NATIVE_READER_TEST=passed_synthetic_native_mutations_only`.
+`scatter-nan-size` reached the reader and raised `run_matlab_gate:ComparisonProofHandles`;
+setter exceptions do not count as reader rejections. Final restored-baseline/hash
+assertions were reached, and `original_artifacts_unchanged=true` matches the six
+export hashes and input snapshot. `visual_verified=false` and
+`desktop_interaction_verified=false` remain. Do not upgrade the partial round-19
+package or infer suite completion from 4/4 binding alone. Neither result is
+independent re-execution or visual approval. Legacy packages without v3 remain compatible,
 with comparison unverified; malformed or inconsistent declarations fail.
 The fixtures remain synthetic, not measurements of real ocean conditions.
 
@@ -124,6 +134,14 @@ Observed direct-launch failures in run 33987455982 are retained in its sanitized
 Native page and vector-text probes preserve experimental files separately from
 promoted publication artifacts. An export call completing is not a finding that
 the experimental PDF has exact dimensions, embedded fonts, or correct layout.
+
+Round 20's two simple canvas diagnostics (0pt/3pt inset) captured
+`geometry_before_pdf`, `geometry_after_pdf`, and `geometry_after_png` on
+R2021a/R2024b in both primary and DISPLAY runs. `captured` means a snapshot exists,
+not unchanged geometry, successful restoration, or visual approval. The new
+four-fixture `test_native_pdf_fixture_canvas` diagnostic has not run in MATLAB.
+Neither it nor the supplementary simple-canvas cases counts toward the original
+three-candidate native PDF probe stage, score, or promoted report artifacts.
 
 The workflow also runs publication and native PDF probes on an isolated Xvfb
 display after the primary gates. The `display-comparison` directory
@@ -180,16 +198,18 @@ The existing strict SVG gate remains unchanged. The points-based text test also
 exposed a row/column broadcasting bug; normalizing both extents to four-element
 rows fixes the comparison without changing its 1e-6-pixel threshold.
 
-Round-19 run 33999054663 (remote commit `85ab9d20`) completed 19/20 primary stages on each of
-R2021a/R2024b/R2026a, 57/60 in total. `evaluator-runtime` passed on all three;
+Round-20 run 34000171748 (remote commit `31e74db52922031dfe1f15b7f385c38e620a9d7f`)
+completed all three releases: R2021a passed 19/20 primary stages and
+R2024b/R2026a each passed 20/20, 59/60 in total. `evaluator-runtime` passed on all three;
 each original `evaluator-result.json` has score 90 and status `runtime_pending`,
-not overall CI or visual approval. Corrected `SampleLabels`/`cellstr` metadata
-tests passed. The native adversarial suite completed four positive cases and
-5/36 reader-negative cases, then `Scatter.SizeData=0` failed at its setter with
-`MATLAB:hg:shaped_arrays:PositiveOrNanVectorDataPredicate`, before the reader call.
-Round 20 substitutes setter-valid `NaN` and guards cleanup of deleted handles;
-remaining cases and final restoration/hash assertions still need licensed CI.
-Do not count setter failures as reader rejections or declare the suite passed.
+not overall CI or visual approval. Overall CI still failed. The only primary-stage
+failure was R2021a `comparison-statistics-layout`, with
+`test_comparison_statistics_layout:NativeSubtitle`: the subtitle started at
+10 points, perturbing axes to 12 changed it to 12, and restyling restored axes to
+10 but left Subtitle at 12. The round-21 `oi_apply_axes` candidate explicitly
+applies `theme.FontSize` to Subtitle; it awaits new licensed CI without relaxing
+the failing font-size assertion. Passing the separate synthetic native mutation
+suite does not clear this layout failure or the independent postprocessing gates.
 
 Existing appdata `OI_ColorAccessibilityRole="uncertainty"` annotates only actual
 helper-created uncertainty Lines. Round 18 completed the independent
@@ -198,7 +218,7 @@ releases. This does not change the audit algorithm, data, dimension gates or
 visual gates. Hidden handles or role declarations must not exempt arbitrary
 data lines or establish visual approval.
 
-Round 19 passed 12/12 external evaluator artifact checks on R2026a.
+Round 20 passed 12/12 external evaluator artifact checks on R2026a.
 R2021a/R2024b each retained four `pdf_font_embedding` failures, including
 unembedded Courier; the generated reports preserve those failures. The separate
 R2024b DISPLAY diagnostic still rejected an unsupported SVG `font` element with

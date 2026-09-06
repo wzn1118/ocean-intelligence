@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { parseOceanEvidenceTime } from './ocean-evidence-time.mjs';
+import { parseOceanEvidenceDocument } from './ocean-report-html-parser.mjs';
+
+const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const NON_EVIDENCE_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
+const EVIDENCE_ELEMENTS = new Set(['html', 'body', 'main', 'section']);
 
 export const POINT_INTERACTION_CHECK_IDS = Object.freeze([
   'html-readable',
+  'evidence-markup',
   'point-count',
   'stable-point-identity',
   'point-interaction',
@@ -89,6 +95,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
   const options = normalizeOptions(htmlOrOptions);
   const htmlRead = readHtml(options);
   const html = htmlRead.html;
+  const evidenceMarkup = htmlRead.ok ? extractEvidenceAttributes(html) : { ok: false, attributes: {}, violations: [] };
   const pointElements = htmlRead.ok ? extractPointElements(html) : [];
   const dataModel = htmlRead.ok ? extractDataModel(html) : emptyDataModel();
   const externalResources = htmlRead.ok ? inspectExternalResources(html) : [];
@@ -100,6 +107,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     htmlPresent: htmlRead.present,
     htmlPath: htmlRead.path,
   });
+  const evidenceMarkupCheck = makeCheck('evidence-markup', evidenceMarkup.ok, evidenceMarkup.violations);
 
   const renderedPointCount = pointElements.length;
   const dataPointCount = dataModel.points.length;
@@ -133,7 +141,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     externalResources,
   });
 
-  const scientificAudit = inspectScientificContext(html);
+  const scientificAudit = inspectScientificContext(evidenceMarkup.attributes);
   const scientificContextRequired = options.requireScientificEvidence === true;
   const scientificCheck = makeCheck(
     'scientific-context',
@@ -142,7 +150,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     { context: scientificAudit.context, required: scientificContextRequired },
   );
 
-  const matlabAudit = inspectMatlabEvidence(html);
+  const matlabAudit = inspectMatlabEvidence(evidenceMarkup.attributes);
   const matlabEvidenceRequired = options.requireMatlabEvidence === true;
   const matlabCheck = makeCheck(
     'matlab-evidence',
@@ -153,6 +161,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
 
   const composed = composePointInteractionQuality([
     readableCheck,
+    evidenceMarkupCheck,
     pointCountCheck,
     identityCheck,
     interactionCheck,
@@ -168,6 +177,7 @@ export function inspectPointInteractionQuality(htmlOrOptions) {
     htmlPresent: htmlRead.present,
     htmlReadable: htmlRead.ok,
     htmlPath: htmlRead.path,
+    evidenceMarkupOk: evidenceMarkupCheck.ok,
     renderedPointCount,
     dataPointCount,
     pointCountOk: pointCountCheck.ok,
@@ -460,8 +470,7 @@ function inspectExternalResources(html) {
   return deduplicateViolations(violations);
 }
 
-function inspectScientificContext(html) {
-  const attributes = extractEvidenceAttributes(html);
+function inspectScientificContext(attributes) {
   const context = Object.fromEntries(REQUIRED_SCIENTIFIC_CONTEXT.map(([field, attribute]) => [field, normalizedValue(attributes[attribute])]));
   const violations = REQUIRED_SCIENTIFIC_CONTEXT.flatMap(([field, attribute]) => context[field] ? [] : [{
     rule: 'scientific-context-field-missing',
@@ -482,8 +491,7 @@ function inspectScientificContext(html) {
   return { ok: violations.length === 0, context, violations };
 }
 
-function inspectMatlabEvidence(html) {
-  const attributes = extractEvidenceAttributes(html);
+function inspectMatlabEvidence(attributes) {
   const evidence = {
     authoritativeRuntime: normalizedValue(attributes['data-authoritative-runtime']),
     matlabRelease: normalizedValue(attributes['data-matlab-release']),
@@ -503,8 +511,23 @@ function inspectMatlabEvidence(html) {
 }
 
 function extractEvidenceAttributes(html) {
-  const match = stripHtmlComments(html).match(/<(?:html|body|main|section)\b([^>]*\bdata-snapshot-id\b[^>]*)>/iu);
-  return match ? parseAttributes(match[1]) : {};
+  const { document, violations: issues } = parseOceanEvidenceDocument(html);
+  const violations = issues.map(({ code, ...location }) => ({
+    rule: code === 'parse_failed' ? 'html-parse-failed' : `html-${code}`, ...location,
+  }));
+  if (!document) return { ok: false, attributes: {}, violations };
+  const pending = [document];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (NON_EVIDENCE_ELEMENTS.has(node.tagName)) continue;
+    if (node.namespaceURI === HTML_NAMESPACE && EVIDENCE_ELEMENTS.has(node.tagName)
+      && node.attrs.some(({ name }) => name === 'data-snapshot-id')) {
+      return { ok: violations.length === 0, attributes: Object.fromEntries(node.attrs.map(({ name, value }) => [name, value])), violations };
+    }
+    const children = node.childNodes || [];
+    for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
+  }
+  return { ok: violations.length === 0, attributes: {}, violations };
 }
 
 function splitResourceReferences(value, attribute) {

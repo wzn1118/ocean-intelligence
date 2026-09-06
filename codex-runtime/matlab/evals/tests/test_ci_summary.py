@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "summarize_ci.py"
@@ -319,6 +320,89 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("不能从主阶段 passed 推断成功", report)
         self.assertIn("不读取逐候选文件，不独立核验文件哈希", report)
         self.assertNotIn("未读取 canvas-extent-experiment", report)
+
+    def test_fixture_canvas_boundary_is_explicit_and_new_reports_are_not_read(self) -> None:
+        """Unit-only unread declarations, not native fixture diagnostic evidence."""
+        self.complete_runtime()
+        sources = []
+        for release in ("R2021a", "R2024b"):
+            stages = self.stages(release)
+            stages["stages"].append({"id": "native-pdf-page-probe", "status": "passed"})
+            self.write_json(release, "ci-stage-status.json", stages)
+            self.evaluator(release)
+            self.display_diagnostics(release)
+            for context, prefix in (("primary", "native-pdf-page-probe"),
+                                    ("display", "display-comparison/native-pdf-page-probe")):
+                self.canvas_diagnostics(release, context)
+                pointer = "native-fixture-canvas/native-fixture-canvas.json"
+                self.write_json(release, prefix + "/native-pdf-page-probe.json", {
+                    "status": "completed_export_checks_only",
+                    "summary": {"candidate_count": 3, "exports_succeeded": 3},
+                    "fixture_canvas_report": pointer,
+                })
+                sources.append((release, prefix + "/" + pointer))
+        baseline = ci_summary.summarize(self.root)
+        baseline_markdown = ci_summary.markdown(baseline)
+        for text in ("尚未读取 native-fixture-canvas 的四个 fixture 诊断状态", "fixture_canvas_report",
+                     "native-fixture-canvas/native-fixture-canvas.json", "对应子 JSON 和 stderr",
+                     "预存指针不是完成证据", "missing、failed 或 partial",
+                     "不能由原三候选 passed 或 simple canvas completed_diagnostics_only 推断成功"):
+            self.assertIn(text, baseline["notice"])
+            self.assertIn(text, baseline_markdown)
+        original_open = Path.open
+
+        def reject_fixture_read(path: Path, *arguments: object, **keywords: object):
+            self.assertNotIn("native-fixture-canvas", path.parts, "summary must not read new fixture diagnostics")
+            return original_open(path, *arguments, **keywords)
+
+        payloads = (None, {"status": "failed", "error_identifier": "unit:UnreadFixtureFailure"},
+                    {"status": "running", "candidates": [{"status": "completed_diagnostic"}, {"status": "pending"}]},
+                    {"status": "incomplete"}, {"status": "completed_diagnostics_only"}, "{truncated")
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                for release, source in sources:
+                    path = self.root / ("matlab-full100-" + release) / source
+                    if payload is None:
+                        path.unlink(missing_ok=True)
+                    elif isinstance(payload, dict):
+                        self.write_json(release, source, payload)
+                    else:
+                        path.write_text(payload, encoding="utf-8")
+                before = self.fingerprint()
+                with patch.object(Path, "open", reject_fixture_read):
+                    summary = ci_summary.summarize(self.root)
+                    self.assertEqual(summary, baseline)
+                    self.assertEqual(ci_summary.markdown(summary), baseline_markdown)
+                self.assertEqual(self.fingerprint(), before)
+        self.assertEqual(baseline["stage_counts"]["total"], 24)
+        for result in baseline["releases"][:2]:
+            self.assertEqual(result["evaluator"]["reported_score"], 90)
+            self.assertEqual(result["evaluator"]["visual_status"], "pending")
+            for diagnostic in result["canvas_diagnostics"]:
+                self.assertEqual(diagnostic["status"], "completed_diagnostics_only")
+                self.assertEqual(diagnostic["reported_summary"]["candidate_count"], 2)
+
+    def test_fixture_canvas_r26_not_applicable_is_not_read_or_assigned(self) -> None:
+        self.complete_runtime()
+        for context in ("primary", "display"):
+            self.canvas_diagnostics("R2026a", context)
+        baseline = ci_summary.summarize(self.root)
+        for prefix in ("native-pdf-page-probe", "display-comparison/native-pdf-page-probe"):
+            self.write_json("R2026a", prefix + "/native-fixture-canvas/native-fixture-canvas.json", {
+                "schema_version": 1, "release": "R2026a", "status": "not_applicable",
+                "scope": "native fixture canvas diagnostic; not a production export strategy",
+                "counts_toward_stage": False, "candidates": [],
+                "skip_reason": "old_release_experiment_only; retain existing exact exportgraphics strategy",
+            })
+        summary = ci_summary.summarize(self.root)
+        self.assertEqual(summary, baseline)
+        self.assertIn("R2026a 的 not_applicable 仅表示旧版实验不适用，不是通过", summary["notice"])
+        self.assertIn("本汇总不读取或代填该状态", ci_summary.markdown(summary))
+        result = summary["releases"][2]
+        self.assertIsNone(result["evaluator"]["reported_score"])
+        self.assertEqual(result["evaluator"]["visual_status"], "pending")
+        self.assertEqual([item["status"] for item in result["canvas_diagnostics"]],
+                         ["completed_diagnostics_only"] * 2)
 
     def test_canvas_complete_primary_and_display_are_declarations_not_artifact_checks(self) -> None:
         self.complete_runtime()

@@ -2,31 +2,21 @@
 
 > **使用文档：** 面向业务用户、研究人员、开发者与运维人员的完整操作说明见 [《海洋智能分析平台全量使用手册》](docs/USER_MANUAL.md)。
 
-> 项目状态：截至 2026 年 8 月 29 日，`main` 默认入口已经是 Windows 本地回环生产版：配置 Copernicus 后双击启动，不要求域名、证书、Docker 或公网服务器。
+> 项目状态：截至 2026 年 8 月 29 日，系统已经具备多源数据接入、异常筛查、事件档案、Argo 剖面调查、每日简报、账户隔离、内置 Codex、Ocean MCP 2.0 和 Ubuntu 生产部署能力。
 
 这个项目做的事情很具体：**把散落在 Argo、NOAA、Copernicus Marine 等系统里的观测，整理成可以持续跟踪、逐条核对证据的海洋事件档案。**
 
 它不生产浮标，不替代 Argo 数据中心，也不是另一个通用地图或聊天框架。Argo 负责“测到海里发生了什么”，各类数据服务负责“把数据提供出来”，本项目负责“把不同来源放到同一个海域、时间和事件上下文中，说明哪些只是观测，哪些值得继续核查，以及结论依据是什么”。
 
-## 开始前先看：本地一键入口、体验群与必备账号
+### 内置 Codex 与 Ocean MCP 2.0
 
-**默认使用方式：** 配置 Copernicus Marine 账号后，双击仓库根目录的 `run_ocean_intelligence.bat`，浏览器使用 `http://127.0.0.1:8000/`。这条默认链路只监听本机回环地址，不需要把应用部署到公网。
+本项目不仅提供网页、图表和常规 REST API，还内置了一个面向海洋研究任务的 Codex 工作台，并通过 **Ocean MCP 2.0** 将产品数据、科学计算、事件证据和业务操作统一开放给 Codex。Codex 不需要抓取页面或猜测内部数据结构，而是可以通过标准化工具直接读取当前系统中的完整数据目录，包括区域事件、普通观测、异常候选、事件证据、SST 格点、Argo 浮标与剖面、来源状态、生命周期记录以及全部经纬度集合。
 
-**当前公网地址：** [https://ocean.hegelsalon.com/](https://ocean.hegelsalon.com/)
+Ocean MCP 当前包含 **86 个可发现工具**。它支持快照一致分页、带签名的稳定游标、增量更新与删除墓碑、最多 500 个坐标的异步批量分析、长任务提交与取消，以及 CSV、GeoJSON、NDJSON、Parquet 和 NetCDF 服务端导出。大规模坐标集合不需要逐点调用或连续把整批 JSON 塞入模型上下文；Codex 可以选择分页读取、批量任务或文件导出，并在每页获得数据产品、单位、处理级别、有效时间、获取时间、空间范围、质量控制、缺测数量和数据版本等来源元数据。
 
-这个地址是项目维护方提供的体验入口，不是本地使用的前置条件。普通用户不需要配置 Cloudflare、Caddy、域名、证书或公网服务器。
+多用户隔离由产品登录态和 Codex Runtime 联合完成。Runtime 会为每次 MCP 调用签发短期用户身份令牌，MCP 服务端验证令牌后确定数据所有者；模型不能提交或选择 `owner_id`。会话、记忆、分页快照、后台任务和审计记录均绑定当前用户与 Codex task，并持久化到 PostgreSQL。传输层支持 Streamable HTTP、SSE、JSON-RPC batch、请求取消、资源订阅和应用重启后的会话恢复，同时具备租户限流、并发控制、执行超时、响应体上限、外部来源熔断和敏感参数递归脱敏。
 
-### 知海使用体验群
-
-![知海使用体验群二维码](docs/assets/wechat-experience-group-qr.jpg)
-
-扫码后加入“知海使用体验群”。二维码来自群聊截图，图片上标注的有效期为 **2026 年 9 月 5 日前**；二维码失效后请以群主重新发布的二维码为准，不要把失效二维码当作永久邀请链接。
-
-### 必须准备 Copernicus Marine 账号
-
-本项目的实时海流、风场、波浪、历史点位、全球数据量和部分每日简报都直接读取 Copernicus Marine。**要把项目当作实时海洋数据系统使用，必须先注册 Copernicus Marine 账号，并在启动项目之前配置用户名和密码。**
-
-没有账号或凭据错误时，页面可能仍能打开，但这不代表实时数据可用；相关接口会返回凭据错误、上游错误或最近缓存。注册和配置步骤见[“Copernicus Marine：从零开始配置”](#copernicus-config)。
+因此，Ocean MCP 不是独立于产品之外的演示接口，而是本项目的统一机器访问层：网页中能够查看和分析的海洋数据，内置 Codex 也可以通过受控、可审计、可分页和可导出的方式获得。详细实现与运维说明见 [`docs/MCP_IMPLEMENTATION.md`](docs/MCP_IMPLEMENTATION.md) 和 [`docs/codex-mcp.md`](docs/codex-mcp.md)。
 
 ## 一、项目定位、比较与核心问题
 
@@ -474,14 +464,12 @@ GET /api/daily-briefing/dashboard
 
 环境要求：
 
-- Python 3.11 或更高版本；
+- Python 3.10 或更高版本；
 - Node.js 20 或更高版本；
 - npm；
-- 已注册并验证的 Copernicus Marine 账号；
-- 已设置 `COPERNICUSMARINE_USERNAME` 和 `COPERNICUSMARINE_PASSWORD`；
-- 已安装并可运行当前用户的 Codex CLI（Agent 工作台需要）。
+- 如需 Codex 工作台，需安装并可运行 Codex CLI。
 
-第一次启动前，先完成[“Copernicus Marine：从零开始配置”](#copernicus-config)。Windows 用户只需双击：
+双击：
 
 ```text
 run_ocean_intelligence.bat
@@ -493,26 +481,20 @@ run_ocean_intelligence.bat
 powershell -ExecutionPolicy Bypass -File .\start_ocean_intelligence.ps1
 ```
 
-启动脚本会检查依赖，按需安装 Python 和 npm 包，先执行一次前端生产构建，再启动：
+启动脚本会检查依赖，按需安装 Python 和 npm 包，并依次启动：
 
-- FastAPI 本地生产应用：`http://127.0.0.1:8000`；
-- Codex sidecar：仅绑定 `127.0.0.1:8011`，由 FastAPI 同源代理，不直接暴露给浏览器。
-
-默认链路只有一个用户入口 `8000`：FastAPI 同时托管 `frontend/dist`、REST API 和登录会话。脚本不会启动 Vite 开发服务器，不需要 `5173`，也不会监听 `0.0.0.0` 或其他公网地址。前端没有天地图 Token 时，`local-production` 构建会使用仓库内的自然资源部标准地图和离线边界数据；如果已经配置 `VITE_TIANDITU_TOKEN`，则会使用天地图服务。
-
-首次运行时脚本会在仓库根目录创建 `.venv`，并把 Python 依赖安装到这个隔离环境；前端有 `package-lock.json` 时使用 `npm ci`。每次启动都会重新执行生产构建并重启由当前仓库记录的本地实例，避免继续使用旧代码。只有后端健康、静态生产页面、Ocean MCP、Codex app-server 和 `ocean-intelligence` 工具目录全部就绪后，脚本才显示 `running`。
-
-首次打开页面时请注册一个本地研究账户并登录。这个账户只用于本机的会话、Agent 会话和加密配置隔离，不是 Copernicus 账号，也不会把 Copernicus 密码发送到浏览器。
+- FastAPI：`http://127.0.0.1:8000`；
+- Codex sidecar：`http://127.0.0.1:8011`；
+- Vite 前端：`http://127.0.0.1:5173`。
 
 常用地址：
 
 | 功能 | 地址 |
 | --- | --- |
-| 应用首页 | `http://127.0.0.1:8000/` |
+| 应用首页 | `http://127.0.0.1:5173/` |
+| API 文档 | `http://127.0.0.1:8000/docs` |
 | 健康检查 | `http://127.0.0.1:8000/api/health` |
-| Codex 状态（登录后） | `http://127.0.0.1:8000/api/codex-runtime/status` |
-
-本地生产模式默认关闭 FastAPI 的 `/docs`、`/redoc` 和 OpenAPI 文档，以免把调试面误当成产品入口；需要接口调试时请使用手动开发模式或代码测试。
+| Codex 状态 | `http://127.0.0.1:8011/api/codex-runtime/status` |
 
 停止服务：
 
@@ -541,6 +523,7 @@ Windows 激活虚拟环境时使用：
 另开终端启动 Codex sidecar；如果不使用 Codex 工作台，可以跳过：
 
 ```bash
+npm ci --prefix codex-runtime/server --ignore-scripts --no-audit --no-fund
 node codex-runtime/server/index.mjs
 ```
 
@@ -554,11 +537,10 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 ### 开发环境说明
 
-- 开发环境默认 `AUTH_REQUIRED=false`，便于本地调试；Windows 一键入口使用本地生产配置并固定 `AUTH_REQUIRED=true`；
+- 开发环境默认 `AUTH_REQUIRED=false`，便于本地调试；
 - 生产 Compose 固定设置 `AUTH_REQUIRED=true`；
-- Copernicus Marine 账号和项目变量是实时海流、风、浪、数据量统计及完整简报的必需配置；
-- 凭据缺失或上游故障时，部分页面可能仍显示缓存、内置证据或情景数据；必须根据数据模式和观测时次判断，不能把页面可见等同于实时数据可用；
-- 只有手动开发模式才使用 Vite 的 `5173` 代理；一键本地生产模式使用 FastAPI 同源页面和 `/api`，Codex 请求通过后端签名代理到 `8011`。
+- 未配置实时外部服务时，部分功能会使用缓存、内置证据或情景数据，并在数据模式中明确标记；
+- Vite 会把普通 `/api` 请求代理到 `8000`，Codex 相关请求代理到 `8011`。
 
 ## 八、环境变量配置
 
@@ -579,198 +561,7 @@ VITE_API_ROOT=
 
 生产构建必须配置 `VITE_TIANDITU_TOKEN`。建议在天地图控制台中把密钥限制到实际生产域名。
 
-<a id="copernicus-config"></a>
-
-### 2. Copernicus Marine：从零开始配置
-
-#### 2.1 这组账号为什么是必需的
-
-Copernicus Marine 是本项目的上游海洋数据服务。这里要求的是 Copernicus Marine 官方账号，不是本项目的网页登录账号。后端在服务器端使用该账号读取海流、风场、波浪、历史点位和全球数据量，并把数据来源、观测时次和延迟显示在页面上。
-
-| 功能 | 主要用途 | 没有 Copernicus 凭据时的结果 |
-| --- | --- | --- |
-| 海流 | 读取 utotal / vtotal 矢量场并绘制海流动画 | 海流场请求失败，不能把动画当作实时结果 |
-| 风场 | 读取小时级海面风数据 | 风速、风向和相关异常无法实时刷新 |
-| 波浪 | 读取有效波高、周期等波浪变量 | 波浪点位请求失败 |
-| 历史点位 | 查询事件坐标附近的历史海洋场 | 只能显示缓存或明确标记的替代数据 |
-| 全球数据量 | 统计当前产品的全球有效网格记录 | 全球数据量接口返回凭据错误 |
-| 每日简报 | 补充 Copernicus 产品状态和数据量 | 简报会标记来源缺失或降级 |
-
-所以，开发环境“能打开网页”不等于功能完整。只有账号验证成功、项目变量设置正确，并且运行机器能够访问 Copernicus 官方端点，才算配置完成。
-
-#### 2.2 注册账号
-
-1. 打开官方入口：[Copernicus Marine Data Store](https://data.marine.copernicus.eu/)。
-2. 点击页面上的 Register 或 Create account。注册本身免费；如果官网改版，以当前页面按钮为准。
-3. 填写姓名、邮箱、国家/地区和组织信息。没有单位的个人用户按页面提示选择个人、其他或相近选项，不要编造机构。
-4. 提交后打开注册邮箱，点击 Copernicus 发来的验证链接。也要检查垃圾邮件、广告邮件和企业邮箱隔离区。
-5. 验证完成后，按邮件中的链接设置密码。官方当前要求是：至少 12 个字符，并同时包含大写字母、小写字母、数字和特殊字符。
-6. 保存账号信息。Copernicus 通常会提供用户名；邮箱地址也可以作为登录名，所以不确定用户名时先尝试注册邮箱。
-7. 回到 Data Store 网页手动登录一次。能登录网页只说明账号有效，仍需完成下一步的 Toolbox 检查和项目变量配置。
-
-官方注册说明见：[How to sign up for Copernicus Marine Service](https://help.marine.copernicus.eu/en/articles/4220332-how-to-sign-up-for-copernicus-marine-service)。
-
-#### 2.3 用官方 Toolbox 先做一次凭据检查
-
-项目依赖 `copernicusmarine` Python 包，版本范围见 `backend/requirements.txt`。在仓库根目录创建与一键脚本相同的虚拟环境并安装依赖：
-
-~~~powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r .\backend\requirements.txt
-~~~
-
-Linux/macOS 对应命令是 `python -m venv .venv`、`source .venv/bin/activate` 和 `python -m pip install -r backend/requirements.txt`。
-
-Linux/macOS 在当前终端执行：
-
-~~~bash
-export COPERNICUSMARINE_SERVICE_USERNAME='你的 Copernicus 用户名或邮箱'
-export COPERNICUSMARINE_SERVICE_PASSWORD='你的 Copernicus 密码'
-copernicusmarine login --check-credentials-valid
-~~~
-
-Windows PowerShell 在当前终端执行：
-
-~~~powershell
-$env:COPERNICUSMARINE_SERVICE_USERNAME = "你的 Copernicus 用户名或邮箱"
-$env:COPERNICUSMARINE_SERVICE_PASSWORD = "你的 Copernicus 密码"
-copernicusmarine login --check-credentials-valid
-~~~
-
-如果系统提示找不到命令，请回到仓库根目录并在项目虚拟环境中执行：
-
-~~~powershell
-.\.venv\Scripts\copernicusmarine.exe login --check-credentials-valid
-~~~
-
-这一步使用的 SERVICE_USERNAME / SERVICE_PASSWORD 是官方 Toolbox 的变量名。**本项目后端读取的是下一小节中的项目变量，不能只配置官方变量。**官方凭据说明见：[Copernicus Marine Toolbox credentials configuration](https://help.marine.copernicus.eu/en/articles/8185007-copernicus-marine-toolbox-credentials-configuration)。
-
-#### 2.4 配置本项目真正读取的变量
-
-项目后端读取的最小配置是：
-
-~~~dotenv
-COPERNICUSMARINE_USERNAME=你的 Copernicus 用户名或邮箱
-COPERNICUSMARINE_PASSWORD=你的 Copernicus 密码
-~~~
-
-不要把真实密码提交到 Git，也不要写进 README、截图、Issue 或聊天记录。建议只保存在运行机器的环境变量、权限为 600 的生产环境文件或密码管理器中。
-
-**Windows 临时配置（第一次测试推荐）**
-
-在启动项目的同一个 PowerShell 窗口中执行：
-
-~~~powershell
-$env:COPERNICUSMARINE_USERNAME = "你的 Copernicus 用户名或邮箱"
-$env:COPERNICUSMARINE_PASSWORD = "你的 Copernicus 密码"
-powershell -ExecutionPolicy Bypass -File .\start_ocean_intelligence.ps1
-~~~
-
-关闭窗口后，$env: 设置会消失。要让新开的终端也能读取，可以写入当前 Windows 用户的环境变量，然后关闭并重新打开终端：
-
-~~~powershell
-[Environment]::SetEnvironmentVariable("COPERNICUSMARINE_USERNAME", "你的 Copernicus 用户名或邮箱", "User")
-[Environment]::SetEnvironmentVariable("COPERNICUSMARINE_PASSWORD", "你的 Copernicus 密码", "User")
-~~~
-
-项目的 Windows 启动脚本会读取这两个用户级变量并传给后端。共享电脑不建议保存用户级明文变量，应改用专用服务账号和操作系统的密钥管理方案。
-
-**Linux/macOS 临时配置**
-
-~~~bash
-export COPERNICUSMARINE_USERNAME='你的 Copernicus 用户名或邮箱'
-export COPERNICUSMARINE_PASSWORD='你的 Copernicus 密码'
-~~~
-
-若要持久化，请写入仅当前用户可读的密钥文件或服务管理器 Secret，而不是公开的 .env 文件：
-
-~~~bash
-chmod 600 ~/.config/ocean-intelligence/copernicus.env
-~~~
-
-文件内容仍使用上面的两行变量名；加载前确认文件路径不会被 Web 服务器暴露。
-
-**Docker/Ubuntu 生产配置**
-
-~~~bash
-cp deploy/production.env.example deploy/production.env
-chmod 600 deploy/production.env
-~~~
-
-编辑 deploy/production.env，填入真实值：
-
-~~~dotenv
-COPERNICUSMARINE_USERNAME=你的 Copernicus 用户名或邮箱
-COPERNICUSMARINE_PASSWORD=你的 Copernicus 密码
-~~~
-
-生产 Compose 会把这两个值注入 app 和 copernicus-indexer 容器；不要把它们写进 compose.prod.yaml。密码如果含有 #、空格或引号，按 Docker Compose dotenv 语法引用，并在部署前用 config --quiet 检查配置，不要用 echo 把密码打印到日志。
-
-#### 2.5 数据集和变量默认值
-
-通常不需要修改数据集 ID。只有 Copernicus 产品迁移、账号无权访问某产品或需要切换产品版本时才改：
-
-| 环境变量 | 默认值 | 含义 |
-| --- | --- | --- |
-| COPERNICUSMARINE_WAVE_DATASET_ID | cmems_mod_glo_wav_anfc_0.083deg_PT3H-i | 全球波浪分析预报 |
-| COPERNICUSMARINE_WIND_DATASET_ID | cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H | 全球小时级海面风场 |
-| COPERNICUSMARINE_CURRENT_DATASET_ID | cmems_mod_glo_phy_anfc_merged-uv_PT1H-i | 全球小时级海流分析预报 |
-| COPERNICUSMARINE_CURRENT_U_VARIABLE | utotal | 东向海流分量 |
-| COPERNICUSMARINE_CURRENT_V_VARIABLE | vtotal | 北向海流分量 |
-
-实时海流使用官方 time-chunked ARCO 数据块，避免每次请求加载完整时间轴。需要覆盖地址时再设置 COPERNICUSMARINE_CURRENT_ARCO_URL，不要把普通网页下载链接当作 ARCO 地址。
-
-#### 2.6 网络和防火墙要求
-
-运行机器必须能访问 Copernicus Marine 的认证和对象存储服务。官方说明列出的常见端点包括：
-
-- auth.marine.copernicus.eu：账号认证；
-- stac.marine.copernicus.eu：产品元数据；
-- s3.waw3-1.cloudferro.com、s3.waw4-1.cloudferro.com：ARCO/对象存储数据。
-
-一般只需要允许出站 HTTPS（TCP 443），不需要把这些地址暴露到公网，也不需要把 Copernicus 密码交给浏览器。企业代理或防火墙拦截时，请让运维人员配置 HTTPS 代理或白名单，然后重新执行账号验证。完整安装说明见：[Copernicus Marine Toolbox installation](https://help.marine.copernicus.eu/en/articles/7970514-copernicus-marine-toolbox-installation)。
-
-#### 2.7 配置完成后的验收
-
-按下面顺序检查，任何一步失败都先修复再继续：
-
-1. copernicusmarine login --check-credentials-valid 返回凭据有效；
-2. 后端启动日志中不再出现“Copernicus Marine 凭证未配置”；
-3. 浏览器打开项目后，来源状态中的 Copernicus 不应显示 degraded 或 missing_credentials；
-4. 本地一键生产版关闭 `/docs`。在浏览器的“数据来源”面板和地图点选流程中检查以下能力；需要逐个调试接口时再使用“方式二：手动启动”的开发模式：
-
-~~~text
-GET /api/copernicus/index/status
-GET /api/copernicus/global/daily-volume
-GET /api/copernicus/currents/field
-GET /api/copernicus/waves/point
-GET /api/copernicus/wind/point
-~~~
-
-5. 地图点选海域，确认海流、风和波浪卡片显示真实观测时次、数据源和延迟，而不是“缓存”“情景”或“未配置”；
-6. 本地运行检查：
-
-~~~powershell
-Invoke-RestMethod http://127.0.0.1:8000/api/health
-Get-NetTCPConnection -State Listen | Where-Object LocalPort -in 8000,8011,5173
-~~~
-
-健康接口应返回 `status=operational`；端口列表只能出现 `127.0.0.1:8000` 和 `127.0.0.1:8011`，不应出现 `0.0.0.0` 或 `5173`。
-
-#### 2.8 常见错误怎么判断
-
-| 现象 | 常见原因 | 处理方式 |
-| --- | --- | --- |
-| 凭证未配置 | 没设置项目变量，或只设置了官方 SERVICE_* 变量 | 同时设置 COPERNICUSMARINE_USERNAME/PASSWORD，重启后端 |
-| 401 / 403 | 用户名、密码错误，账号未验证或无产品权限 | 先登录 Data Store，再重新运行 Toolbox 检查 |
-| 连接超时、DNS 失败 | 防火墙、代理或 DNS 无法访问官方端点 | 放行出站 443，检查代理和服务器 DNS |
-| 数据集或变量不存在 | ID/变量拼写错误，或上游产品已迁移 | 恢复本节默认值，并查看 Copernicus 产品目录 |
-| 接口返回缓存 | 上游暂时不可用或请求仍在更新 | 看响应里的数据模式、观测时次和来源错误，不要把缓存称为实时 |
-| 页面能开但地图没有数据 | 前端启动了，后端没有拿到凭据 | 在启动前设置变量，完全停止并重新启动后端 |
-
-密码重置、账号停用或产品授权问题只能在 Copernicus 官方账户侧解决；项目本身无法替代官方账号管理。
-
-#### 2.9 最小变量速查
+### 2. Copernicus Marine
 
 ```dotenv
 COPERNICUSMARINE_USERNAME=
@@ -932,15 +723,11 @@ POST   /api/codex/mcp
 DELETE /api/codex/mcp
 ```
 
-完整请求参数和响应模型以代码中的 Pydantic 模型及测试为准；本地一键生产版不会开放 Swagger。需要交互式 Swagger 时，请按“方式二：手动启动”运行开发模式。
+完整请求参数和响应模型以运行后的 Swagger 文档 `http://127.0.0.1:8000/docs` 为准。
 
-## 十、可选的公网维护部署
-
-这一章只面向项目维护者。普通本地用户不需要执行，`main` 的默认一键链路也不会调用 Docker、Caddy、Cloudflare 或公网配置。
+## 十、生产部署
 
 当前生产方案面向 Ubuntu 22.04 单机。
-
-当前公网入口是 [https://ocean.hegelsalon.com/](https://ocean.hegelsalon.com/)，默认生产环境示例已经使用 `ocean.hegelsalon.com`。部署到自己的域名时，必须同时修改 `SITE_HOST`、`SITE_ADDRESS`、`SITE_ORIGIN` 和天地图密钥的域名白名单。
 
 ### 1. 准备配置
 
@@ -957,16 +744,7 @@ chmod 600 deploy/production.env
 - `ENCRYPTION_KEY`；
 - `DEPLOY_TRANSPORT`；
 - tunnel 模式下的 `TUNNEL_TOKEN`；
-- **必须填写** `COPERNICUSMARINE_USERNAME` 和 `COPERNICUSMARINE_PASSWORD`；
-- `OCEAN_CODEX_MCP_TOKEN`，可使用安全随机值。
-
-不要直接使用示例文件中的 `replace_with_...` 占位值。先做 Compose 配置检查：
-
-~~~bash
-docker compose --env-file deploy/production.env -f compose.prod.yaml config --quiet
-~~~
-
-命令没有报错后再部署。Copernicus 凭据缺失时，生产配置检查和部署脚本会直接失败，避免服务看似上线但实时海洋数据不可用。
+- 如启用实时 Copernicus Marine，则填写其账户信息。
 
 ### 2. 执行部署
 
@@ -1105,7 +883,7 @@ GET /api/performance
 
 项目内中国离线底图来源于自然资源部标准地图服务系统，界面标注审图号 `GS(2023)2767号` 并提供原图入口。公开发布、裁切、修改或生成新的地图成果前，应根据实际使用方式复核地图审核、审图号标注和数据服务授权要求。
 
-公网生产 Compose 固定使用天地图提供中国大陆和台湾省底图及简体中文注记，缺少 `VITE_TIANDITU_TOKEN` 时构建会失败。Windows 一键本地生产模式显式使用 `local-production` 构建：没有天地图 Token 时使用仓库内的自然资源部标准地图和离线边界数据，仍保留审图号和原图入口；这条本地回退不改变公网 Compose 的合规要求。
+生产环境固定使用天地图提供中国大陆和台湾省底图及简体中文注记。缺少 `VITE_TIANDITU_TOKEN` 时，生产构建会失败；开发环境的离线后备仅用于研发和诊断。
 
 ### 科学结论边界
 
@@ -1127,17 +905,11 @@ GET /api/sources?region=global_ocean
 GET /api/workspace/snapshot?region=global_ocean
 ```
 
-若来源状态为降级，系统可能正在返回最近可信缓存。先按[“Copernicus Marine：从零开始配置”](#copernicus-config)验证官方账号，再确认后端进程或容器中存在 `COPERNICUSMARINE_USERNAME/PASSWORD`，最后检查服务器能否访问官方认证和对象存储端点。
-
-### Copernicus 网页能登录，但项目仍提示“凭证未配置”
-
-最常见原因是只设置了官方 Toolbox 的 `COPERNICUSMARINE_SERVICE_USERNAME/PASSWORD`。本项目读取的是 `COPERNICUSMARINE_USERNAME/PASSWORD`。补齐项目变量后，必须完全停止并重新启动后端；只刷新浏览器不会重新加载服务端环境变量。
-
-不要在日志或 Issue 中粘贴真实密码。需要排查时只确认变量是否存在和字符长度，不要输出变量值。
+若来源状态为降级，系统可能正在返回最近可信缓存。确认服务器能够访问外部数据服务，并检查后端日志和相应账户配置。
 
 ### 地图没有真实海流动画
 
-依次检查 Copernicus Marine 账号验证、项目变量、数据集 ID、服务器网络和 ARCO 地址。接口 `/api/copernicus/currents/field` 必须返回包含实际观测时次的有效矢量场。粒子动画是对网格海流的可视化，不是现场流速仪直播，也不能在接口失败时用随机动画代替。
+检查 Copernicus Marine 用户名、密码、数据集 ID 和 ARCO 地址。接口 `/api/copernicus/currents/field` 必须能返回有效矢量场。
 
 ### Agent 工作台不可用
 
@@ -1209,12 +981,163 @@ GET /api/workspace/snapshot?region=global_ocean
 
 ## 十一、Codex 全量 MCP 入口
 
-本产品内置 MCP 入口为 `POST /api/codex/mcp`，由 `codex-runtime` 通过私有网络自动挂载。完整工具、资源、提示词、协议、鉴权、科学证据规则和验收矩阵见 `docs/codex-mcp.md`。
+本产品内置 MCP 入口为 `POST /api/codex/mcp`，由 `codex-runtime` 通过私有网络自动挂载。完整工具、资源、提示词、协议、鉴权、科学证据规则和验收矩阵见 `docs/codex-mcp.md`，MCP 2.0 的身份、快照、任务、导出、治理与部署实现见 `docs/MCP_IMPLEMENTATION.md`。
 
-生产环境必须设置高熵 `OCEAN_CODEX_MCP_TOKEN`；该 token 只作为 Bearer 凭证传输，不写入前端、不写入日志、不提交 Git。入口提供产品健康、区域指标、事件证据、海洋地理、Argo、Copernicus、物理诊断、日报、资源读取和受签名保护的记忆工具。
+生产环境使用服务间 Bearer 凭证保护 MCP 入口，同时由 Codex Runtime 为每次工具调用注入短期、用户绑定、task 绑定的身份令牌。模型看不到身份字段，也不能自行选择数据所有者。入口覆盖产品健康、区域指标、事件证据、海洋地理、Argo、Copernicus、NOAA、WOA、物理和统计诊断、日报、会话、记忆、后台任务、批量点位、导出及审计能力。
 
 ### MCP 全量数据访问
 
-当前内置 MCP 版本为 1.7.0。Codex 可通过 `ocean_data_catalog`、`ocean_data_schema`、`ocean_data_page`、`ocean_data_search`、`ocean_coordinate_nearest` 和 `ocean_data_aggregate` 获取、筛选和分析全部产品聚合数据；通过 `ocean_source_catalog` 与 `ocean_source_data_page` 遍历 NOAA、WOA 和 Argo 底层数组。大集合必须根据 `next_cursor` 分页读取，单页最大 1000 条。
+当前内置 MCP 版本为 **2.0.0**，共提供 **86 个工具**。Codex 可通过 `ocean_data_catalog`、`ocean_data_schema`、`ocean_data_page`、`ocean_data_search`、`ocean_coordinate_nearest` 和 `ocean_data_aggregate` 获取、筛选和分析全部产品聚合数据；通过 `ocean_source_catalog` 与 `ocean_source_data_page` 遍历 NOAA、WOA 和 Argo 底层数组。
+
+分页首次请求会生成带过期时间和数据版本的稳定快照，后续使用 `next_cursor_token` 继续读取，即使实时数据在两页之间刷新，也不会发生重复或遗漏。`ocean_data_changes` 可按快照、时间或修订版本读取新增、修改和删除墓碑。单页最多返回 1000 条，因此 817 个坐标可以一次读取；更大集合可以稳定跨页遍历。
+
+重数据操作通过 `ocean_job_submit`、`ocean_job_status`、`ocean_job_result_page` 和 `ocean_job_cancel` 执行。`ocean_batch_points_submit` 支持单任务最多 500 个坐标的海域解析、水深、最近 Argo、海洋知识、风浪等批量查询；超过 500 个坐标时可拆分为多个后台任务。`ocean_export_submit` 和 `ocean_export_result` 支持 CSV、GeoJSON、NDJSON、Parquet 与 NetCDF 导出及分块读取。
+
+每个工具均提供输入 Schema、输出 Schema，以及 `readOnlyHint`、`destructiveHint`、`idempotentHint` 和 `openWorldHint` 安全注解。非核心工具使用动态延迟加载，减少 Codex 初始上下文中的 Schema 体积。每次调用都会记录用户、Codex task、工具、脱敏参数摘要、数据版本、外部来源、返回数量、耗时、错误码和写操作标记。
+
+### MCP 2.0 完整工具清单
+
+以下清单直接对应后端当前注册的 86 个 MCP 工具。GitHub README 默认折叠详细列表，便于先阅读项目定位，需要时再展开查看全部机器能力。
+
+<details>
+<summary><strong>展开查看全部 86 个 Ocean MCP 工具</strong></summary>
+
+#### 海域与空间分析（5）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_list_regions` | 列出系统全部注册海域。 |
+| `ocean_resolve_marine_area` | 根据名称、文本或坐标识别海洋、海湾、海峡和水道。 |
+| `ocean_region_nine_zone_grid` | 将海域划分为西北、北、东北、西、中、东、西南、南、东南九区。 |
+| `ocean_nine_zone_point_inventory` | 统计九区内坐标、平台、变量、QC、密度和无效点。 |
+| `ocean_anomaly_point_linkage` | 按距离、时间、深度和来源独立性关联异常候选与现场观测。 |
+
+#### 产品、事件与报告（19）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_context_manifest` | 读取区域数据数量、变量、时间覆盖和来源状态。 |
+| `ocean_search_records` | 搜索普通观测和异常候选。 |
+| `ocean_get_event` | 读取单个事件的完整证据记录。 |
+| `ocean_source_health` | 读取数据来源可用性、延迟和更新时间。 |
+| `ocean_mainland_news` | 获取中国大陆媒体海洋新闻上下文。 |
+| `ocean_product_health` | 读取产品整体健康状态。 |
+| `ocean_product_metrics` | 读取区域产品指标和来源数据包。 |
+| `ocean_observation_summary` | 读取区域观测摘要。 |
+| `ocean_event_catalog` | 列出区域事件和观测记录。 |
+| `ocean_event_lifecycle` | 读取事件生命周期变化。 |
+| `ocean_daily_briefing` | 获取每日海洋简报。 |
+| `ocean_daily_dashboard` | 获取每日数据看板。 |
+| `ocean_workspace_snapshot` | 获取区域工作台完整首屏快照。 |
+| `ocean_event_report` | 生成证据可追溯的科学报告。 |
+| `ocean_event_explanation` | 生成受证据约束的通俗解释。 |
+| `ocean_event_literature` | 搜索事件相关论文和 DOI。 |
+| `ocean_refresh` | 同步刷新区域实时数据。 |
+| `ocean_refresh_job_submit` | 提交区域后台刷新任务。 |
+| `ocean_refresh_job_status` | 查询区域刷新任务状态。 |
+
+#### Argo 数据与剖面（7）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_get_argo_profile` | 读取指定浮标最新完整剖面、QC 和位置历史。 |
+| `ocean_argo_float_history` | 读取 Argo 平台近期完整剖面历史。 |
+| `ocean_argo_region` | 读取区域内活动浮标和紧凑剖面。 |
+| `ocean_argo_nearest` | 查找坐标附近最近的 Argo 浮标。 |
+| `ocean_argo_realtime_status` | 读取 Argo 实时采集器状态。 |
+| `ocean_event_argo` | 为事件匹配附近 Argo 并读取完整剖面。 |
+| `ocean_argo_explanation` | 读取 Argo 浮标快照中的自动解释。 |
+
+#### Copernicus Marine（15）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_copernicus_catalog_search` | 搜索完整 Copernicus Marine 数据目录。 |
+| `ocean_copernicus_dataset_describe` | 读取任意数据集的变量、单位、范围、版本和服务。 |
+| `ocean_copernicus_dataset_analyze` | 按变量、空间、时间和深度分析任意数据集。 |
+| `ocean_copernicus_wave_point` | 查询单点浪高、周期和方向。 |
+| `ocean_copernicus_wave_region` | 查询区域波浪快照。 |
+| `ocean_copernicus_wave_audit` | 审计波浪覆盖、掩膜、零值和有效时间。 |
+| `ocean_copernicus_wind_point` | 查询单点海面风。 |
+| `ocean_copernicus_wind_region` | 查询区域风场。 |
+| `ocean_copernicus_history` | 查询 Copernicus 点位历史序列。 |
+| `ocean_copernicus_audit` | 审计 Copernicus 数据质量和覆盖范围。 |
+| `ocean_current_field` | 生成可直接显示的表层海流矢量场。 |
+| `ocean_copernicus_event_page` | 分页读取全球 Copernicus 事件索引。 |
+| `ocean_copernicus_index_status` | 读取 Copernicus 海域索引状态。 |
+| `ocean_copernicus_global_daily_volume` | 统计全球格点日数据量。 |
+| `ocean_copernicus_indexed_events` | 按类型、海域和地理分类读取持久事件索引。 |
+
+#### 海洋背景与图谱（5）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_marine_context` | 根据坐标读取海域、人文和局地背景。 |
+| `ocean_marine_knowledge` | 读取坐标相关的海洋知识、历史和人文信息。 |
+| `ocean_bathymetry` | 查询单点水深和局地地形起伏。 |
+| `ocean_marine_atlas` | 搜索离线海洋图谱。 |
+| `ocean_atlas_entry` | 读取完整图谱条目、剖面和补充资料。 |
+
+#### 科学计算（3）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_detect_anomaly` | 运行产品异常筛查模型。 |
+| `ocean_physics_diagnostics` | 计算地转、Ekman、Sverdrup、层结、稳定性、波流作用和热收支等物理诊断。 |
+| `ocean_statistical_diagnostics` | 计算加权统计、稳健趋势、方向统计、滞后相关和异常候选。 |
+
+#### Codex Agent、会话与记忆（13）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_memory_search` | 搜索当前用户的 Agent 记忆。 |
+| `ocean_memory_store` | 保存当前用户的 Agent 记忆。 |
+| `ocean_agent_context` | 读取区域 Agent 上下文清单。 |
+| `ocean_agent_model_health` | 读取模型中继健康状态。 |
+| `ocean_agent_chat` | 基于区域数据、事件证据、会话和记忆回答问题。 |
+| `ocean_agent_sessions` | 列出当前用户的会话。 |
+| `ocean_agent_session_get` | 读取会话及消息。 |
+| `ocean_agent_session_create` | 创建会话。 |
+| `ocean_agent_session_update` | 重命名或归档会话。 |
+| `ocean_agent_session_delete` | 删除会话。 |
+| `ocean_memories` | 列出当前用户的记忆。 |
+| `ocean_memory_update` | 修改记忆内容、启用状态或置信度。 |
+| `ocean_memory_delete` | 删除记忆。 |
+
+#### 全量数据访问（9）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_data_catalog` | 列出区域全部可分页数据集和精确数量。 |
+| `ocean_data_page` | 通过快照和签名游标读取产品数据。 |
+| `ocean_source_catalog` | 列出 NOAA、WOA、Argo 等底层来源集合。 |
+| `ocean_source_data_page` | 快照分页读取底层来源数组。 |
+| `ocean_data_schema` | 读取字段、类型、坐标和时间能力。 |
+| `ocean_data_search` | 按文本、变量、时间和坐标搜索数据。 |
+| `ocean_data_changes` | 读取新增、修改和删除墓碑。 |
+| `ocean_coordinate_nearest` | 在任意坐标数据集中查询最近记录。 |
+| `ocean_data_aggregate` | 计算数量、缺测、最小值、均值、中位数和最大值。 |
+
+#### 后台任务、批量与导出（8）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_job_submit` | 将重型工具提交到持久后台任务队列。 |
+| `ocean_job_status` | 查询任务状态和取消状态。 |
+| `ocean_job_result_page` | 分页读取任务结果。 |
+| `ocean_job_cancel` | 取消排队中或运行中的任务。 |
+| `ocean_batch_points_submit` | 批量分析最多 500 个坐标。 |
+| `ocean_export_submit` | 提交 CSV、GeoJSON、NDJSON、Parquet 或 NetCDF 导出任务。 |
+| `ocean_export_result` | 分块读取导出文件。 |
+| `ocean_audit_page` | 读取当前用户的脱敏 MCP 审计记录。 |
+
+#### 运维与覆盖检查（2）
+
+| 工具 | 作用 |
+| --- | --- |
+| `ocean_performance` | 读取接口耗时和错误指标。 |
+| `ocean_mcp_coverage` | 读取产品 API 到 MCP 的覆盖矩阵及安全排除项。 |
+
+</details>
 
 账户密码、Cookie、API Key 明文、数据库凭证和部署 Secret 明确不通过 MCP 暴露。

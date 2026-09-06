@@ -76,7 +76,9 @@ PY
 fi
 
 require_file runtime-probe "$output_root/matlab-runtime-probe.json" || true
-require_file stage-status "$output_root/ci-stage-status.json" || true
+require_file stage-status-file "$output_root/ci-stage-status.json" || true
+run_check stage-status-content python3 "$repository_root/codex-runtime/matlab/evals/validate_stage_status.py" \
+  --stage-status "$output_root/ci-stage-status.json" --expected-release "$expected_release"
 
 if require_file evaluator-runtime-record "$output_root/evaluator-runtime/matlab-runtime.json"; then
   run_check runtime-release-binding python3 - \

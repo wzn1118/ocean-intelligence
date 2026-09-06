@@ -255,3 +255,16 @@
 - 新依赖以server独立package/lock纳入CI npm ci，镜像安装在源目录挂载之外并以NODE_PATH加载；测试实际从隔离目录加载同一模块，当前容器单独Node进程也确认合法输入通过、重复属性拒绝。不是重建镜像或刷新常驻服务的证明。Dockerfile用户原有CLI版本/安装改动继续单独保留；CI触发范围补齐时间/parser/package/专业绘图提示及镜像文件。
 - 十个原代理本轮已分批续派并交付：时间解析、报告时间/机器字段、原生属性回归、诊断汇总、canvas修复与审阅、reader原生负例审阅与cleanup、真实字符标题视觉、CI outcome审计、HTML机器字段审阅及回归、提示文档同步。部分有第二项接续，峰值并发六；不冒充十个桌面侧边栏会话同时活跃。主线程负责标准解析器、集成、依赖、CI和原件回收。
 - 推送前295项Python、全部已跟踪服务器Node、61个MATLAB文件R2021a语法、资产/技能/Family B/导出静态检查、8项生成器smoke及新增时间/解析器16项通过。文档同步、标准npm ci、workflow YAML/触发范围、29文件冻结复核通过；完整静态评分70/100、runtime_pending，新增原生修复仍待本轮licensed CI。最后评测README同步后另复核冻结和说明测试，不借历史90分称本轮已通过。
+
+## 第二十一批接续
+
+- 第二十批本地提交 `2965aec`，远端 `31e74db52922031dfe1f15b7f385c38e620a9d7f`，运行 [34000171748](https://github.com/wzn1118/ocean-intelligence/actions/runs/34000171748) 已结束。实际主阶段59/60：R2021a为19/20，R2024b/R2026a各20/20；原始评分均90/100，整体CI仍失败。原件 `/tmp/matlab-run-34000171748`，汇总 `/tmp/matlab-ci-summary-34000171748/summary.md`。新增restyle断言准确发现旧版Subtitle随axes字号改变后未还原；候选在共享oi_apply_axes中显式设置Subtitle主题字号，保留原数据和全部布局断言，待新MATLAB执行。
+- `native-mutation-review-round21.md`以三版真实日志、suite JSON、最终baseline及原件hash核实每版4正例和36/36原生reader负例。NaN SizeData真实进入reader并得到ComparisonProofHandles，而不是把setter异常算成功；旧cleanup警告未出现，flat-alpha渲染警告仍保留。三版共973个审查原件hash不变。4/4合成声明绑定、完整负例和视觉/桌面认证仍是不同证据，不给历史5/36套件补签。
+- `comparison-visual-review-round21.md`查看旧/新三版共36图件，并保留48个图件及manifest的hash。观测U线颜色由浅网格色改成TextColor确实改善可见性，但R21 xlabel仍被图例遮挡；旧两版PDF继续主标题裁切、图例标题越界，放大legend条目还增加局部溢出。R26所查两图没有对应缺陷，不因此签全部视觉通过。旧两版各四PDF未嵌入Courier，R26自动外检12/12，额外DISPLAY的R24 SVG字体白名单拒绝仍在。
+- 新增独立四fixture原生canvas诊断，仅适用R21/R24。builder从冻结JSON重建温度场、盐度剖面、比较及交互图，记录实际输入hash和synthetic来源。探针先保存参考PNG/旧print PDF，再将原图布局放入同尺寸无边框panel并以0pt真实背景扩展exportgraphics范围，导出后恢复并生成PNG；逐次记录API/实际对象、bytes/hash、六次原图和两次wrapper几何、完整数据/身份/paint、root状态/父对象/顺序还原。未知根对象拒绝，菜单工具栏明确排除；callback及完整几何/字体/精确页面仍未认证，不替换生产exporter或增加主阶段分母。复杂布局尚未在MATLAB执行，不能借旧简单canvas结果宣称有效。
+- `fixture-canvas-design-review-round21.md`保留初审发现。随后补齐layout/legend的命名Text对象、完整alpha/CLim/比例等状态、根对象清单、父对象及根几何还原断言。新探针独立子报告路径在原报告提前写入，后续异常留stderr，不重写原三候选报告。汇总显式声明只读旧简单canvas JSON，不读取新四fixture实验，须另看固定子路径；缺失、R26不适用或主阶段通过均不是新诊断成功。
+- `report-parser-boundary-review-round21.md`实际浏览器/公开入口复现declarative shadow root与现代select丰富子内容被旧解析器漏计，以及嵌套figcaption、逐字span空格膨胀、iframe/SVG元数据伪装说明。共享parse5入口现于真实HTML token解析时拒绝不支持的shadow/select结构，再遍历标准树；caption必须为直接HTML子元素，文本连续拼接、实体只解码一次并排除inert/非渲染元数据。交互顶层科学/MATLAB声明也复用该入口，任何重复属性使整个检查拒绝。未宣称所有逐点/tooltip/JS读取已迁移，也不认证CSS可见性或脚本执行。新增26例修复前失败、修复后通过；相关365项测试通过。
+- shell新增严格stage-status内容检查，精确校验当前20阶段schema、release、合法时间、计数、重复key/未知字段和全部passed；缺失文件与内容失败分别报告，仍继续回收其余证据。27项新测试通过，实际R24 20/20接受、R21 19/20准确拒绝；历史缺阶段包不冒充当前门禁，汇总的历史展示不受改变。
+- 十个原代理本轮已分批续派：原生mutation审阅、比较图实物视觉、canvas实物/方案审阅、四fixture builder、stage状态门禁、交互解析、浏览器边界审计、共享DOM修复、诊断汇总及真实结果文档同步。峰值并发六，不冒充十个用户侧边栏会话同时运行。主线程负责Subtitle修复、复杂canvas探针、跨模块复核、依赖说明及CI；根README只提交新增npm ci行，用户Astra/CLI和部署改动继续保留。
+- `canvas-native-review-round21.md`重新检查本批六份0pt PDF，旧两版四份均576x360pt、WenQuanYi嵌入和预期文字完整；36份字体/几何快照采集完成，但R21 PositionConstraint改变，R26背景TightInset增加15pt、页面仍578x362pt且PNG失败。44个包内原件未改；仅本次查看的六PDF有图面观察，3pt及PNG不补签视觉，复杂fixture亦未执行。
+- 推送前324项Python、全部已跟踪服务器Node、365项定向报告/交互测试、8项生成器smoke、资产/技能/Family B/导出静态检查通过。63个MATLAB文件按CI的UTF-8/R2021a参数语法检查通过，shell语法和31文件冻结复核通过。完整静态评分70/100、runtime_pending；新的原生修复及复杂canvas仍待本轮licensed CI，仓库/文档变化不等于常驻服务或既有线程提示已刷新。

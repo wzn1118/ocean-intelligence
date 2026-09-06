@@ -902,6 +902,71 @@ for (const [name, markup, accepted] of [
   });
 }
 
+for (const [name, markup, code] of [
+  ['open-shadow', '<div><template shadowrootmode=open><figure id=unmanifested></figure></template></div>', 'unsupported-shadow-dom'],
+  ['closed-shadow', '<div><template shadowrootmode=closed><figure id=unmanifested></figure></template></div>', 'unsupported-shadow-dom'],
+  ['select-figure', '<select><option><figure id=unmanifested></figure></option></select>', 'unsupported-select-content'],
+  ['select-claim', '<select><option><section data-claim-id=unmanifested>Unverified</section></option></select>', 'unsupported-select-content'],
+]) {
+  test(`R21 report rejects unsupported structure ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace('</body>', `${markup}</body>`));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, false);
+    assert.ok(result.htmlParsingViolations.some((violation) => violation.startsWith(`html.${code}:`)));
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
+for (const markup of [
+  '<select><option>One<option>Two<optgroup label=group><option>Three</optgroup><hr></select>',
+  '<select><template><div>Inert content</div></template><option>One</option></select>',
+  '<template><figure id=unmanifested><figcaption>Ordinary inert content.</figcaption></figure></template>',
+]) {
+  test(`R21 report preserves ordinary select and inert template ${markup}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace('</body>', `${markup}</body>`));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureCount, 1);
+  });
+}
+
+for (const [name, markup, accepted] of [
+  ['borrowed-before-short', '<div><figcaption>Observed temperature during the stated UTC window, with explicit limitations.</figcaption></div><figcaption>Short.</figcaption>', false],
+  ['borrowed-before-real', '<div><figcaption>Short.</figcaption></div><figcaption>Observed temperature during the stated UTC window, with explicit limitations.</figcaption>', true],
+  ['descendant-only', '<div><figcaption>Observed temperature during the stated UTC window, with explicit limitations.</figcaption></div>', false],
+  ['inline-character-padding', `<figcaption>${[...'Temperature increased.'].map((letter) => `<span>${letter}</span>`).join('')}</figcaption>`, false],
+  ['iframe-fallback', '<figcaption>Short.<iframe>Observed temperature during the stated UTC window, with explicit limitations.</iframe></figcaption>', false],
+  ['svg-title', '<figcaption>Short.<svg><title>Observed temperature during the stated UTC window, with explicit limitations.</title></svg></figcaption>', false],
+  ['svg-desc', '<figcaption>Short.<svg><desc>Observed temperature during the stated UTC window, with explicit limitations.</desc></svg></figcaption>', false],
+  ['svg-text', '<figcaption>Short.<svg><text>Observed temperature during the stated UTC window, with explicit limitations.</text></svg></figcaption>', true],
+  ['repaired-direct-caption', '<table><figcaption>Observed temperature during the stated UTC window, with explicit limitations.</figcaption></table>', true],
+]) {
+  test(`R21 report caption ownership and text ${name}`, (context) => {
+    const fixture = createSyntheticIdentityFixture(context);
+    const html = readFileSync(fixture.htmlPath, 'utf8');
+    writeFileSync(fixture.htmlPath, html.replace(/<figcaption>[\s\S]*?<\/figcaption>/u, () => markup));
+    writeFixtureManifest(fixture);
+    const result = inspectIllustratedReportEvidence(fixture);
+    assert.equal(result.ok, accepted, JSON.stringify(result));
+    assert.equal(result.htmlParsingOk, true);
+    assert.deepEqual(result.htmlParsingViolations, []);
+    assert.equal(result.figureLinksOk, accepted);
+    assert.deepEqual(result.figureViolations, accepted ? [] : ['figures[0].caption']);
+    assert.equal(result.artifactsOk, true);
+    assert.equal(result.manifestFreshnessOk, true);
+  });
+}
+
 for (const scope of ['requested_coverage', 'effective_coverage', 'figure']) {
   for (const [field, value, violation] of [
     ['start', '2026-02-30T00:00:00Z', 'start'],

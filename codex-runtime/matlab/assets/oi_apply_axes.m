@@ -85,6 +85,7 @@ style_named_text(axesHandle, "XLabel", theme.LabelSize, theme);
 style_named_text(axesHandle, "YLabel", theme.LabelSize, theme);
 style_named_text(axesHandle, "ZLabel", theme.LabelSize, theme);
 style_named_text(axesHandle, "Title", theme.TitleSize, theme);
+style_named_text(axesHandle, "Subtitle", theme.FontSize, theme);
 end
 
 function style_named_text(axesHandle, propertyName, fontSize, theme)

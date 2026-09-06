@@ -146,6 +146,190 @@ for (const [overrides, rule, field] of [
   });
 }
 
+function inspectSyntheticEvidence(html, required = true) {
+  return inspectPointInteractionQuality({ html, requireScientificEvidence: required, requireMatlabEvidence: required });
+}
+
+for (const tag of ['html', 'body', 'main', 'section']) {
+  test(`synthetic evidence accepts a real ${tag} declaration`, () => {
+    const original = scientificHtml();
+    const attributes = original.match(/<body ([^>]*)>/u)[1];
+    let html = original.replace(/<body [^>]*>/u, '<body>');
+    if (tag === 'html' || tag === 'body') html = html.replace(`<${tag}>`, `<${tag} ${attributes}>`);
+    else html = html.replace('<body>', `<body><${tag} ${attributes}></${tag}>`);
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.scientificContext.snapshotId, 'snapshot-20260905');
+    assert.equal(quality.matlabEvidence.authoritativeRuntime, 'MATLAB');
+  });
+}
+
+test('synthetic evidence decodes numeric and named entities once in both declaration consumers', () => {
+  const html = scientificHtml()
+    .replace('data-source="source-1"', 'data-source="A &amp; B &quot;C&quot; &#x3e; D"')
+    .replace('data-variable="sea_water_temperature"', 'data-variable="&amp;deg;C"')
+    .replace('data-unit="degree_Celsius"', 'data-unit="&deg;C"')
+    .replace('data-time-start="2026-09-03T00:00:00Z"', 'data-time-start="2026-09-03T00&#58;00&#x3a;00Z"')
+    .replace('data-timezone="UTC"', 'data-timezone="&#85;TC"')
+    .replace('data-authoritative-runtime="MATLAB"', 'data-authoritative-runtime="&#77;ATLAB"')
+    .replace('data-execution-verified="true"', 'data-execution-verified="tr&#117;e"')
+    .replace('data-runtime-status="passed"', 'data-runtime-status="p&#x61;ssed"');
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  assert.equal(quality.scientificContext.source, 'A & B "C" > D');
+  assert.equal(quality.scientificContext.variable, '&deg;C');
+  assert.equal(quality.scientificContext.unit, '\u00b0C');
+  assert.equal(quality.scientificContext.timeStart, '2026-09-03T00:00:00Z');
+  assert.equal(quality.scientificContext.timezone, 'UTC');
+  assert.equal(quality.matlabEvidence.authoritativeRuntime, 'MATLAB');
+  assert.equal(quality.matlabEvidence.executionVerified, 'true');
+  assert.equal(quality.matlabEvidence.runtimeStatus, 'passed');
+});
+
+test('synthetic evidence accepts single quotes, unquoted values and quoted tag boundaries', () => {
+  const html = scientificHtml()
+    .replace('data-snapshot-id="snapshot-20260905"', 'DATA-SNAPSHOT-ID=snapshot-20260905')
+    .replace('data-spatial-coverage="Test Sea 120-121E 30-31N"', "data-spatial-coverage='Test Sea > shelf, < coast'")
+    .replace('data-timezone="UTC"', 'data-timezone=UTC')
+    .replace('data-authoritative-runtime="MATLAB"', "DATA-AUTHORITATIVE-RUNTIME='MATLAB'")
+    .replace('data-runtime-status="passed"', 'data-runtime-status=passed');
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+  assert.equal(quality.scientificContext.spatialCoverage, 'Test Sea > shelf, < coast');
+  assert.equal(quality.matlabEvidence.runtimeStatus, 'passed');
+});
+
+test('synthetic evidence does not double-decode an invalid UTC timestamp', () => {
+  const timeStart = '2026-09-03T00&amp;#58;00:00Z';
+  const quality = inspectSyntheticEvidence(scientificHtml({ timeStart }));
+  assert.equal(quality.scientificContext.timeStart, '2026-09-03T00&#58;00:00Z');
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.ok(quality.checkResults['scientific-context'].violations.some(({ rule, field }) =>
+    rule === 'scientific-time-invalid' && field === 'timeStart'));
+});
+
+for (const [attribute, declarations, firstValue, resultName, field] of [
+  ['data-time-start', 'data-time-start="2026-02-30T00:00:00Z" data-time-start="2026-09-03T00:00:00Z"',
+    '2026-02-30T00:00:00Z', 'scientificContext', 'timeStart'],
+  ['data-timezone', 'DATA-TIMEZONE=UTC+08:00 data-timezone="UTC"', 'UTC+08:00', 'scientificContext', 'timezone'],
+  ['data-authoritative-runtime', 'data-authoritative-runtime=Octave DATA-AUTHORITATIVE-RUNTIME="MATLAB"',
+    'Octave', 'matlabEvidence', 'authoritativeRuntime'],
+  ['data-runtime-status', 'data-runtime-status="passed" data-runtime-status=failed', 'passed', 'matlabEvidence', 'runtimeStatus'],
+  ['data-execution-verified', 'data-execution-verified=false data-execution-verified=true', 'false', 'matlabEvidence', 'executionVerified'],
+  ['data-snapshot-id', 'data-snapshot-id="snapshot-20260905" data-snapshot-id="snapshot-20260905"',
+    'snapshot-20260905', 'scientificContext', 'snapshotId'],
+]) {
+  test(`synthetic evidence rejects duplicate ${attribute} in strict and optional modes`, () => {
+    const html = scientificHtml().replace(new RegExp(`${attribute}="[^"]*"`, 'u'), declarations);
+    for (const required of [true, false]) {
+      const quality = inspectSyntheticEvidence(html, required);
+      assert.equal(quality.pointInteractionQualityOk, false, JSON.stringify({ required, violations: quality.violations }));
+      assert.equal(quality.evidenceMarkupOk, false);
+      assert.equal(quality[resultName][field], firstValue);
+      const violations = quality.checkResults['evidence-markup'].violations;
+      assert.equal(violations.length, 1, JSON.stringify(violations));
+      assert.equal(violations[0].rule, 'html-duplicate-attribute');
+      assert.ok(Number.isInteger(violations[0].line) && violations[0].line > 0);
+      assert.ok(Number.isInteger(violations[0].column) && violations[0].column > 0);
+      assert.ok(quality.violations.some(({ check, rule }) => check === 'evidence-markup' && rule === 'html-duplicate-attribute'));
+    }
+  });
+}
+
+test('synthetic evidence rejects duplicate attributes even outside the selected declaration', () => {
+  const quality = inspectSyntheticEvidence(scientificHtml().replace('</body>', '<aside title="one" title="two"></aside></body>'));
+  assert.equal(quality.scientificContextOk, true);
+  assert.equal(quality.matlabEvidenceOk, true);
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.evidenceMarkupOk, false);
+  assert.equal(quality.checkResults['evidence-markup'].violations[0].rule, 'html-duplicate-attribute');
+});
+
+for (const [attribute, field, check, rule] of [
+  ['data-time-start', 'timeStart', 'scientific-context', 'scientific-context-field-missing'],
+  ['data-timezone', 'timezone', 'scientific-context', 'scientific-context-field-missing'],
+  ['data-authoritative-runtime', 'authoritativeRuntime', 'matlab-evidence', 'authoritative-runtime-not-matlab'],
+  ['data-visual-inspection', 'visualInspection', 'matlab-evidence', 'matlab-visual-inspection-not-passed'],
+]) {
+  test(`synthetic evidence preserves the missing ${attribute} diagnostic`, () => {
+    const html = scientificHtml().replace(new RegExp(` ${attribute}="[^"]*"`, 'u'), '');
+    const quality = inspectSyntheticEvidence(html);
+    assert.equal(quality.pointInteractionQualityOk, false);
+    assert.equal(quality.evidenceMarkupOk, true);
+    assert.equal(quality[check === 'scientific-context' ? 'scientificContext' : 'matlabEvidence'][field], '');
+    assert.ok(quality.checkResults[check].violations.some((violation) => violation.rule === rule
+      && (check !== 'scientific-context' || violation.field === field)), JSON.stringify(quality.violations));
+  });
+}
+
+for (const wrapper of ['script', 'style', 'template', 'noscript', 'comment', 'textarea']) {
+  test(`synthetic evidence never takes declarations from ${wrapper} content`, () => {
+    const attributes = scientificHtml().match(/<body ([^>]*)>/u)[1];
+    const decoy = `<section ${attributes}></section>`;
+    const inert = wrapper === 'comment' ? `<!-- ${decoy} -->` : `<${wrapper}>${decoy}</${wrapper}>`;
+    const missing = inspectSyntheticEvidence(validHtml().replace('<body>', `<body>${inert}`));
+    assert.equal(missing.pointInteractionQualityOk, false);
+    assert.equal(missing.scientificContext.snapshotId, '');
+    assert.equal(missing.matlabEvidence.authoritativeRuntime, '');
+    assert.ok(missing.checkResults['scientific-context'].violations.some(({ rule, field }) =>
+      rule === 'scientific-context-field-missing' && field === 'snapshotId'));
+    assert.ok(missing.checkResults['matlab-evidence'].violations.some(({ rule }) => rule === 'authoritative-runtime-not-matlab'));
+    const real = `<main ${attributes.replace('snapshot-20260905', 'actual-snapshot').replace('R2026a', 'R2024b')}></main>`;
+    const quality = inspectSyntheticEvidence(validHtml().replace('<body>', `<body>${inert}${real}`));
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.scientificContext.snapshotId, 'actual-snapshot');
+    assert.equal(quality.matlabEvidence.matlabRelease, 'R2024b');
+  });
+}
+
+test('synthetic evidence does not promote markup inside an attribute value to a declaration', () => {
+  const attributes = scientificHtml().match(/<body ([^>]*)>/u)[1];
+  const quality = inspectSyntheticEvidence(validHtml().replace('<body>', `<body><div title='<section ${attributes}></section>'></div>`));
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.scientificContext.snapshotId, '');
+  assert.equal(quality.matlabEvidence.authoritativeRuntime, '');
+});
+
+test('synthetic evidence keeps the first real declaration without borrowing fields from another', () => {
+  const attributes = scientificHtml().match(/<body ([^>]*)>/u)[1];
+  const html = validHtml().replace('<body>', `<body><section data-snapshot-id="incomplete"></section><section ${attributes}></section>`);
+  const quality = inspectSyntheticEvidence(html);
+  assert.equal(quality.pointInteractionQualityOk, false);
+  assert.equal(quality.scientificContext.snapshotId, 'incomplete');
+  assert.equal(quality.scientificContext.timeStart, '');
+  assert.equal(quality.matlabEvidence.authoritativeRuntime, '');
+});
+
+for (const [name, markup, rule] of [
+  ['open-shadow', '<div><template shadowrootmode=open><section data-snapshot-id=hidden></section></template></div>', 'html-unsupported-shadow-dom'],
+  ['closed-shadow', '<div><template shadowrootmode=closed><section data-snapshot-id=hidden></section></template></div>', 'html-unsupported-shadow-dom'],
+  ['rich-select', '<select><option><section data-snapshot-id=hidden></section></option></select>', 'html-unsupported-select-content'],
+]) {
+  test(`R21 point evidence rejects shared unsupported structure ${name}`, () => {
+    for (const required of [true, false]) {
+      const quality = inspectSyntheticEvidence(scientificHtml().replace('</body>', `${markup}</body>`), required);
+      assert.equal(quality.pointInteractionQualityOk, false, JSON.stringify(quality.violations));
+      assert.equal(quality.evidenceMarkupOk, false);
+      assert.equal(quality.scientificContextOk, true);
+      assert.equal(quality.matlabEvidenceOk, true);
+      assert.ok(quality.checkResults['evidence-markup'].violations.some((violation) => violation.rule === rule));
+    }
+  });
+}
+
+for (const markup of [
+  '<select><option>One<option>Two<optgroup label=group><option>Three</optgroup><hr></select>',
+  '<select><template><div>Ordinary inert content</div></template><option>One</option></select>',
+  '<template><section data-snapshot-id=hidden></section></template>',
+]) {
+  test(`R21 point evidence preserves shared supported structure ${markup}`, () => {
+    const quality = inspectSyntheticEvidence(scientificHtml().replace('</body>', `${markup}</body>`));
+    assert.equal(quality.pointInteractionQualityOk, true, JSON.stringify(quality.violations));
+    assert.equal(quality.evidenceMarkupOk, true);
+    assert.deepEqual(quality.checkResults['evidence-markup'].violations, []);
+  });
+}
+
 test('rejects duplicate, missing and mismatched stable observation identities', () => {
   const duplicatePoints = validPoints();
   duplicatePoints[1].id = 'P1';

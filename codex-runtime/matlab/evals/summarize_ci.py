@@ -40,6 +40,16 @@ CANVAS_NOTICE = (
     "不读取逐候选文件，不独立核验文件哈希、字体、页面尺寸或视觉效果。"
     "诊断失败不改变主状态、阶段分母、原始评分或视觉审核；缺失记 not_run。"
 )
+FIXTURE_CANVAS_NOTICE = (
+    "当前 Canvas 表仅覆盖 canvas-extent-experiment 的两个 simple canvas 候选，"
+    "尚未读取 native-fixture-canvas 的四个 fixture 诊断状态。"
+    "新诊断须另查 primary/display 各自原 native-pdf-page-probe.json 中预存的 fixture_canvas_report 固定指针"
+    "（native-fixture-canvas/native-fixture-canvas.json）、对应子 JSON 和 stderr；预存指针不是完成证据。"
+    "新诊断 missing、failed 或 partial，不能由原三候选 passed 或 simple canvas completed_diagnostics_only 推断成功；"
+    "新四 fixture 不计入旧两候选表、阶段分母、评分或视觉结论。"
+    "新诊断仅面向 R2021a/R2024b，R2026a 的 not_applicable 仅表示旧版实验不适用，不是通过；"
+    "本汇总不读取或代填该状态。"
+)
 NOTICE = (
     "CI 状态为本地证据推断，未提供 GitHub 状态、未查询远端，不重新验真。"
     "已知后处理失败优先于缺少视觉审核的 pending。运行阶段 passed 不代表 100 分或渲染/视觉通过；"
@@ -49,6 +59,7 @@ NOTICE = (
     "canvas-extent-experiment 另表转述 primary/display 固定路径的补充实验声明。"
     + CANVAS_NOTICE +
     "缺失、失败或不完整实验不能从主阶段 passed 推断成功。"
+    + FIXTURE_CANVAS_NOTICE
 )
 
 
@@ -792,7 +803,7 @@ def markdown(summary: dict) -> str:
             for item in result["display_diagnostics"]["issues"]:
                 lines.append("- 独立诊断 " + " / ".join(escaped(value) for value in (
                     result["release"], item["source"], item["identifier"])) + ": " + escaped(item["message"]))
-    lines.extend(["", "## Canvas 补充独立诊断", "", CANVAS_NOTICE,
+    lines.extend(["", "## Canvas 补充独立诊断", "", CANVAS_NOTICE, "", FIXTURE_CANVAS_NOTICE, "",
                   "JSON 未生成不代表未尝试；running 可能是最后保存的部分记录。"
                   "逐候选 candidate.json 和 stderr 不在本表读取范围内。", "",
                   "| 版本 | context | 诊断状态 / 原始声明 | 候选 / 原始状态 / setup | PDF 本地声明 | PNG 本地声明 | 几何采集本地声明 |",
