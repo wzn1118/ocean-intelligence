@@ -17,6 +17,8 @@ Before implementation, classify the task as `create`, `repair`, `refine`, `inspe
 
 ## Runtime Contract
 
+When the `matlab_execute`, `matlab_status`, and `matlab_artifacts` MCP tools are available, use the project execution service in `mcp/README.md` for actual licensed remote MATLAB execution. It accepts MATLAB code, not just a route request. Poll the original request and retrieve its bound receipt, logs, numeric results and figures; submission or workflow status alone is not execution verification. The repository may be public: never submit credentials or confidential inputs. This is a separate batch runner, not local MATLAB or a persistent desktop session. Do not replace a missing local executable with a claim that native execution is impossible before checking this configured service.
+
 Resolve and report:
 
 - Requested runtime and whether MATLAB-first was explicit or inferred.

@@ -1,0 +1,106 @@
+name: MATLAB Execute
+run-name: MATLAB Execute ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Canonical UUID identifying this execution request
+        required: true
+        type: string
+      release:
+        description: MATLAB release (additional toolboxes are not implied)
+        required: true
+        type: choice
+        default: R2026a
+        options: [R2021a, R2024b, R2026a]
+      code_base64:
+        description: Base64 UTF-8 MATLAB script, at most 32768 decoded bytes; never send secrets
+        required: true
+        type: string
+      code_sha256:
+        description: SHA-256 of the exact decoded script bytes
+        required: true
+        type: string
+      input_json_base64:
+        description: Optional base64 UTF-8 JSON, at most 16384 decoded bytes
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MATLAB_EXECUTION_ROOT: ${{ runner.temp }}/matlab-execution
+      MATLAB_ARTIFACT_ROOT: ${{ runner.temp }}/matlab-execution-artifact
+      MATLAB_OUTPUT_DIR: ${{ runner.temp }}/matlab-execution/outputs
+      MATLAB_PROJECT_ROOT: ${{ github.workspace }}
+      MATLAB_REQUEST_ID: ${{ inputs.request_id }}
+      MATLAB_CODE_SHA256: ${{ inputs.code_sha256 }}
+      MATLAB_REQUESTED_RELEASE: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate and prepare execution request
+        id: prepare
+        env:
+          MATLAB_CODE_BASE64: ${{ inputs.code_base64 }}
+          MATLAB_INPUT_JSON_BASE64: ${{ inputs.input_json_base64 }}
+        run: python3 codex-runtime/matlab/mcp/prepare_request.py prepare
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Test MCP protocol and request validation
+        run: |
+          npm ci --prefix codex-runtime/matlab/mcp
+          npm test --prefix codex-runtime/matlab/mcp
+          python3 -m unittest discover -s codex-runtime/matlab/mcp -p 'test_*.py' -v
+      - name: Install native display and publication dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb x11-utils fonts-wqy-zenhei fonts-noto-cjk fonts-dejavu-core poppler-utils
+          fc-cache -f
+      - name: Install licensed MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ env.MATLAB_REQUESTED_RELEASE }}
+          cache: true
+      - name: Start native display
+        shell: bash
+        run: |
+          test ! -e /tmp/.X97-lock
+          Xvfb :97 -screen 0 1600x1200x24 -dpi 96 -nolisten tcp > "$MATLAB_EXECUTION_ROOT/display.log" 2>&1 &
+          echo "DISPLAY=:97" >> "$GITHUB_ENV"
+          for attempt in {1..30}; do
+            if xdpyinfo -display :97 > /dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Execute MATLAB request
+        id: matlab
+        timeout-minutes: 5
+        uses: matlab-actions/run-command@v3
+        with:
+          startup-options: -display :97
+          command: addpath('codex-runtime/matlab/mcp');run_request(getenv('MATLAB_EXECUTION_ROOT'))
+      - name: Finalize execution receipt and archive
+        if: always() && steps.prepare.outputs.created == 'true'
+        env:
+          MATLAB_STEP_OUTCOME: ${{ steps.matlab.outcome }}
+        run: python3 codex-runtime/matlab/mcp/prepare_request.py finalize
+      - name: Upload execution receipt and outputs
+        if: always() && steps.prepare.outputs.created == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.prepare.outputs.artifact_name }}
+          path: ${{ env.MATLAB_ARTIFACT_ROOT }}
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 3
