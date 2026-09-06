@@ -152,19 +152,21 @@ export function createMatlabExecutor({
 
   function command(executable, args, { input, limit = 4 * 1024 * 1024, timeout = 30000, stage } = {}) {
     return new Promise((resolve, reject) => {
-      const rejectCommand = (error) => {
+      const rejectCommand = (error, stderr) => {
         let reason = 'process failure';
         if (error?.killed || error?.code === 'ETIMEDOUT') reason = 'timeout';
         else if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') reason = 'output size limit';
         else if (Number.isInteger(error?.code)) reason = `exit ${error.code}`;
         else if (error?.code === 'ENOENT') reason = 'executable unavailable';
+        const httpStatus = /\(HTTP ([1-5][0-9]{2})\)/.exec(Buffer.from(stderr || '').toString('utf8'));
+        if (httpStatus) reason += `, HTTP ${httpStatus[1]}`;
         const failure = new Error(`MATLAB_REMOTE_ERROR: ${stage}: ${reason}. No remote output was disclosed.`);
         failure.code = 'MATLAB_REMOTE_ERROR';
         reject(failure);
       };
       try {
         const child = execFile(executable, args, { encoding: 'buffer', shell: false, timeout, maxBuffer: limit },
-          (error, stdout) => error ? rejectCommand(error) : resolve(Buffer.from(stdout || '')));
+          (error, stdout, stderr) => error ? rejectCommand(error, stderr) : resolve(Buffer.from(stdout || '')));
         if (child?.stdin) {
           child.stdin.on('error', rejectCommand);
           child.stdin.end(input);

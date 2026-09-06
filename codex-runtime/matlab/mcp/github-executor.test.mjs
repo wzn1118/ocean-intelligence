@@ -71,7 +71,7 @@ async function fixture(context) {
         }
         callback(null, Buffer.isBuffer(response) ? response : Buffer.from(typeof response === 'string' ? response : JSON.stringify(response)), Buffer.alloc(0));
       } catch (error) {
-        callback(error, Buffer.from('PRIVATE-CODE'), Buffer.from('SECRET-CREDENTIAL'));
+        callback(error, Buffer.from('PRIVATE-CODE'), Buffer.from('SECRET-CREDENTIAL (HTTP 429)'));
       }
     });
     return { stdin };
@@ -432,6 +432,7 @@ test('metadata/process failures are bounded and diagnostic without leaking remot
     await assert.rejects(fixture_.executor.execute({ code: CODE }), (failure) => {
       assert.equal(failure.code, 'MATLAB_REMOTE_ERROR');
       assert.match(failure.message, /Resolve MATLAB workflow/);
+      assert.match(failure.message, /HTTP 429/);
       assert.doesNotMatch(failure.message, /PRIVATE|SECRET/);
       return true;
     });
@@ -454,6 +455,39 @@ test('corrupt and symlinked request bindings fail closed and remain unchanged', 
   await fs.writeFile(outside, '{}');
   await fs.symlink(outside, filename);
   await assert.rejects(fixture_.executor.status({ request_id: submitted.request_id }), { code: 'MATLAB_EVIDENCE_INVALID' });
+});
+
+test('download timeout removes only its own partial slot and never records verified evidence', async (context) => {
+  const fixture_ = await fixture(context);
+  const submitted = await fixture_.submit();
+  fixture_.bundle();
+  fixture_.state.override = (route) => {
+    if (route.endsWith('/zip')) throw Object.assign(new Error('PRIVATE-CODE'), { killed: true });
+  };
+  await assert.rejects(fixture_.executor.artifacts({ request_id: submitted.request_id }), (error) => {
+    assert.equal(error.code, 'MATLAB_REMOTE_ERROR');
+    assert.match(error.message, /Download bound artifact ZIP: timeout/);
+    assert.doesNotMatch(error.message, /PRIVATE|SECRET/);
+    return true;
+  });
+  assert.deepEqual(await fs.readdir(path.join(fixture_.stateDirectory, 'downloads')), []);
+  assert.equal((await fixture_.factory().status({ request_id: submitted.request_id })).native_verified, false);
+});
+
+test('run discovery checks later pages and rejects oversized or malformed API listings', async (context) => {
+  const fixture_ = await fixture(context);
+  const submitted = await fixture_.submit();
+  fixture_.state.override = (route) => {
+    if (!route.includes('/workflows/42/runs?')) return;
+    return { total_count: 2, workflow_runs: route.endsWith('page=1')
+      ? [{ ...fixture_.state.run, id: 900, display_title: 'Another request' }] : [fixture_.state.run] };
+  };
+  assert.equal((await fixture_.executor.status({ request_id: submitted.request_id })).run_id, 901);
+  for (const response of [{ total_count: 1001, workflow_runs: [] }, { total_count: 2, workflow_runs: [] }, null]) {
+    const another = await fixture_.executor.execute({ code: CODE });
+    fixture_.state.override = (route) => route.includes('/workflows/42/runs?') ? response : undefined;
+    await assert.rejects(fixture_.executor.status({ request_id: another.request_id }), { code: 'MATLAB_REMOTE_METADATA' });
+  }
 });
 
 test('parallel submissions serialize and never overwrite distinct bindings', async (context) => {
